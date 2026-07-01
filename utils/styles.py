@@ -17,10 +17,10 @@ def asset_url(name: str) -> str:
 # time. Fallback stacks keep the app legible before fonts load / if a file is
 # missing.
 _FALLBACK_FAMILIES = {
-    "display": '"Pirata One", "Times New Roman", serif',
-    "marker": '"Permanent Marker", "Comic Sans MS", cursive',
-    "type": '"Special Elite", "Courier New", monospace',
-    "body": '"Crimson Pro", Georgia, serif',
+    "display": '"Pirata One", "Times New Roman", "Segoe UI Symbol", serif',
+    "marker": '"Permanent Marker", "Comic Sans MS", "Segoe UI Symbol", cursive',
+    "type": '"Special Elite", "Courier New", "Segoe UI Symbol", monospace',
+    "body": '"Crimson Pro", Georgia, "Segoe UI Symbol", serif',
 }
 
 

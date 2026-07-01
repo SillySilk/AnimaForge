@@ -24,7 +24,7 @@ def test_settings_reached_via_gear_not_top_nav():
     targets = [idx for _, idx in w._nav_buttons]
     assert targets.count(1) == 1
     gear_btn, gear_idx = w._nav_buttons[-1]   # pinned last
-    assert gear_idx == 1 and "Settings" in gear_btn.text()
+    assert gear_idx == 1 and "Setup" in gear_btn.text()
     # No primary (non-gear) button points at Setup/Settings.
     assert all(idx != 1 for _, idx in w._nav_buttons[:-1])
     w._switch_tab(1)

@@ -23,11 +23,14 @@ _FONT_DIR = os.path.join(
 )
 
 # role -> (filename, expected family, fallback stack used if the file is missing)
+# "Segoe UI Symbol" is kept in every stack so Qt's per-glyph fallback can render
+# the UI's chevrons/arrows/anvil (‹ › → ⚒ ✓ ♻ ⚒) that the display faces lack.
+_SYM = '"Segoe UI Symbol"'
 _FONTS = {
-    "display": ("PirataOne-Regular.ttf", "Pirata One", '"Times New Roman", serif'),
-    "marker": ("PermanentMarker-Regular.ttf", "Permanent Marker", '"Comic Sans MS", cursive'),
-    "type": ("SpecialElite-Regular.ttf", "Special Elite", '"Courier New", monospace'),
-    "body": ("CrimsonPro-Variable.ttf", "Crimson Pro", "Georgia, serif"),
+    "display": ("PirataOne-Regular.ttf", "Pirata One", f'"Times New Roman", {_SYM}, serif'),
+    "marker": ("PermanentMarker-Regular.ttf", "Permanent Marker", f'"Comic Sans MS", {_SYM}, cursive'),
+    "type": ("SpecialElite-Regular.ttf", "Special Elite", f'"Courier New", {_SYM}, monospace'),
+    "body": ("CrimsonPro-Variable.ttf", "Crimson Pro", f'Georgia, {_SYM}, serif'),
 }
 
 # Populated by load_app_fonts(); role -> a ready-to-use QSS font-family stack.

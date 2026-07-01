@@ -250,7 +250,10 @@ class MainWindow(QMainWindow):
         content_layout.addWidget(header)
 
         # Global Load → Name → Caption → Train rail (advisory orientation + navigation).
+        # The forge redesign folds this orientation into the sidebar nav + per-screen
+        # header eyebrows, so the rail is kept (wiring intact) but hidden.
         self._rail = ProgressRail()
+        self._rail.setVisible(False)
         content_layout.addWidget(self._rail)
 
         self._stack = QStackedWidget()
