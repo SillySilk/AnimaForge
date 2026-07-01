@@ -1,4 +1,4 @@
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt, QSize, QSettings
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
@@ -25,12 +25,19 @@ from utils.styles import asset_url
 
 
 class NavButton(QPushButton):
+    """Forge-shell nav item: icon + typewriter label, 46px tall, collapsible.
+
+    Collapsing hides the label and centres the icon so the sidebar becomes a
+    76px icon-only rail.
+    """
+
     def __init__(self, text: str, parent=None):
         super().__init__(text, parent)
-        self.setObjectName("nav_button")
+        self.setObjectName("af_nav")
         self.setCheckable(False)
         self._selected = False
-        self.setFixedHeight(48)
+        self._label = text
+        self.setFixedHeight(46)
         self.setFlat(True)
         self.setCursor(Qt.PointingHandCursor)
 
@@ -40,6 +47,10 @@ class NavButton(QPushButton):
         self.style().unpolish(self)
         self.style().polish(self)
         self.update()
+
+    def set_collapsed(self, collapsed: bool):
+        self.setText("" if collapsed else self._label)
+        self.setToolTip(self._label.strip() if collapsed else "")
 
 
 class MainWindow(QMainWindow):
@@ -74,51 +85,73 @@ class MainWindow(QMainWindow):
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
 
-        # ---- Sidebar ----
+        # ---- Sidebar (forge shell — flame emblem, blackletter wordmark, nav,
+        #      decor block, pinned Setup + version; collapses to a 76px rail) ----
         sidebar = QWidget()
-        sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(216)
+        sidebar.setObjectName("af_sidebar")
+        sidebar.setFixedWidth(250)
+        self._sidebar = sidebar
         sidebar_layout = QVBoxLayout(sidebar)
         sidebar_layout.setContentsMargins(0, 0, 0, 0)
         sidebar_layout.setSpacing(0)
 
-        # App branding
+        # Collapse toggle — top-right of the sidebar (flips ‹ / ›).
+        collapse_row = QWidget()
+        cr = QHBoxLayout(collapse_row)
+        cr.setContentsMargins(0, 11, 11, 0)
+        cr.addStretch()
+        self._collapse_btn = QPushButton("‹")
+        self._collapse_btn.setObjectName("af_collapse_btn")
+        self._collapse_btn.setFixedSize(26, 26)
+        self._collapse_btn.setCursor(Qt.PointingHandCursor)
+        self._collapse_btn.clicked.connect(self._toggle_sidebar)
+        cr.addWidget(self._collapse_btn)
+        sidebar_layout.addWidget(collapse_row)
+
+        # Branding — emblem + blackletter wordmark + "Heretics Only" eyebrow.
         brand_widget = QWidget()
-        brand_widget.setObjectName("sidebar")
+        brand_widget.setObjectName("af_sidebar")
         brand_layout = QVBoxLayout(brand_widget)
-        brand_layout.setContentsMargins(0, 0, 0, 0)
-        brand_layout.setSpacing(0)
+        brand_layout.setContentsMargins(0, 6, 0, 12)
+        brand_layout.setSpacing(6)
 
-        emblem = QLabel()
-        _pm = QPixmap(asset_url("emblem.png"))
-        if not _pm.isNull():
-            emblem.setPixmap(_pm.scaledToHeight(64, Qt.SmoothTransformation))
-        emblem.setAlignment(Qt.AlignHCenter)
-        emblem.setStyleSheet("background-color: #08080a; padding-top: 14px;")
-        brand_layout.addWidget(emblem)
+        self._emblem = QLabel()
+        self._emblem_pm = QPixmap(asset_url("emblem.png"))
+        if not self._emblem_pm.isNull():
+            self._emblem.setPixmap(self._emblem_pm.scaledToHeight(72, Qt.SmoothTransformation))
+        self._emblem.setAlignment(Qt.AlignHCenter)
+        self._emblem.setStyleSheet("background-color: transparent;")
+        brand_layout.addWidget(self._emblem)
 
-        app_title = QLabel("ANIMA FORGE")
-        app_title.setObjectName("app_title")
-        app_title.setAlignment(Qt.AlignLeft)
-        brand_layout.addWidget(app_title)
+        self._wordmark = QLabel("AnimaForge")
+        self._wordmark.setObjectName("af_wordmark")
+        self._wordmark.setAlignment(Qt.AlignHCenter)
+        brand_layout.addWidget(self._wordmark)
 
-        app_subtitle = QLabel("LoRA Trainer · Auto-Captioning")
-        app_subtitle.setObjectName("app_subtitle")
-        app_subtitle.setAlignment(Qt.AlignLeft)
-        app_subtitle.setWordWrap(True)
-        brand_layout.addWidget(app_subtitle)
+        self._brand_eyebrow = QLabel("HERETICS ONLY")
+        self._brand_eyebrow.setObjectName("af_eyebrow")
+        self._brand_eyebrow.setAlignment(Qt.AlignHCenter)
+        brand_layout.addWidget(self._brand_eyebrow)
 
         sidebar_layout.addWidget(brand_widget)
 
-        # Divider
-        div = QFrame()
-        div.setFrameShape(QFrame.HLine)
-        div.setStyleSheet("color: #2a2a1e; margin: 0 8px;")
-        sidebar_layout.addWidget(div)
+        # Gold hairline rule.
+        self._brand_rule = QFrame()
+        self._brand_rule.setObjectName("af_rule")
+        self._brand_rule.setFixedHeight(2)
+        rule_wrap = QWidget()
+        rw = QHBoxLayout(rule_wrap)
+        rw.setContentsMargins(18, 6, 18, 12)
+        rw.addWidget(self._brand_rule)
+        sidebar_layout.addWidget(rule_wrap)
 
-        # Primary nav buttons. Setup is intentionally NOT here — it's a set-once concern,
-        # reached via the ⚙ Settings button pinned at the bottom (stack index 1).
+        # Primary nav. Setup is pinned at the bottom (set-once concern), stack index 1.
         self._nav_buttons = []  # list of (NavButton, stack_index)
+        nav_wrap = QWidget()
+        nav_wrap.setObjectName("af_sidebar")
+        nav_layout = QVBoxLayout(nav_wrap)
+        nav_layout.setContentsMargins(10, 0, 10, 0)
+        nav_layout.setSpacing(2)
         nav_items = [
             ("  Home", 0, "home"),
             ("  Dataset", 2, "dataset"),
@@ -131,30 +164,67 @@ class MainWindow(QMainWindow):
             _icon = QIcon(asset_url(f"nav/{icon_name}.png"))
             if not _icon.isNull():
                 btn.setIcon(_icon)
-                btn.setIconSize(QSize(22, 22))
+                btn.setIconSize(QSize(18, 18))
             btn.clicked.connect(lambda checked=False, i=index: self._switch_tab(i))
-            sidebar_layout.addWidget(btn)
+            nav_layout.addWidget(btn)
             self._nav_buttons.append((btn, index))
+        sidebar_layout.addWidget(nav_wrap)
+
+        # Decor block — marker scrawl + wax-seal emblem + members line.
+        self._decor = QWidget()
+        self._decor.setObjectName("af_sidebar")
+        decor_layout = QVBoxLayout(self._decor)
+        decor_layout.setContentsMargins(24, 22, 24, 8)
+        decor_layout.setSpacing(12)
+        quote = QLabel("“Forge it in fire.\nWalk away.”")
+        quote.setObjectName("af_decor_quote")
+        quote.setWordWrap(True)
+        decor_layout.addWidget(quote)
+        seal = QLabel()
+        if not self._emblem_pm.isNull():
+            seal.setPixmap(self._emblem_pm.scaledToHeight(46, Qt.SmoothTransformation))
+        seal.setAlignment(Qt.AlignHCenter)
+        seal.setStyleSheet("background-color: transparent;")
+        decor_layout.addWidget(seal)
+        members = QLabel("MEMBERS · EST. NOWHERE")
+        members.setObjectName("af_decor_meta")
+        members.setAlignment(Qt.AlignHCenter)
+        members.setWordWrap(True)
+        decor_layout.addWidget(members)
+        sidebar_layout.addWidget(self._decor)
 
         sidebar_layout.addStretch()
 
-        # ⚙ Settings (the demoted Setup tab) pinned at the bottom.
-        gear = NavButton("  ⚙ Settings")
+        # Pinned bottom — Setup nav + version stamp.
+        btm_wrap = QWidget()
+        btm_wrap.setObjectName("af_sidebar")
+        btm_layout = QVBoxLayout(btm_wrap)
+        btm_layout.setContentsMargins(10, 0, 10, 10)
+        btm_layout.setSpacing(2)
+        gear = NavButton("  Setup")
         _gear_icon = QIcon(asset_url("nav/setup.png"))
         if not _gear_icon.isNull():
             gear.setIcon(_gear_icon)
-            gear.setIconSize(QSize(22, 22))
+            gear.setIconSize(QSize(18, 18))
         gear.clicked.connect(lambda checked=False: self._switch_tab(1))
-        sidebar_layout.addWidget(gear)
+        btm_layout.addWidget(gear)
         self._nav_buttons.append((gear, 1))
 
-        # Version label at bottom of sidebar
-        ver_label = QLabel("v1.0.0")
-        ver_label.setAlignment(Qt.AlignCenter)
-        ver_label.setStyleSheet("color: #4a4a44; font-size: 10px; padding: 8px;")
-        sidebar_layout.addWidget(ver_label)
+        self._ver_label = QLabel("v1.0.0 · EST. NOWHERE")
+        self._ver_label.setObjectName("af_ver")
+        self._ver_label.setAlignment(Qt.AlignCenter)
+        btm_layout.addWidget(self._ver_label)
+        sidebar_layout.addWidget(btm_wrap)
 
         root_layout.addWidget(sidebar)
+
+        # Restore the persisted collapse state.
+        self._sidebar_collapsed = False
+        try:
+            self._sidebar_collapsed = QSettings().value(
+                "ui/sidebar_collapsed", False, type=bool)
+        except Exception:
+            self._sidebar_collapsed = False
 
         # ---- Content area (ember backdrop + header bar + stack) ----
         content = QWidget()
@@ -165,11 +235,17 @@ class MainWindow(QMainWindow):
 
         header = QWidget()
         header.setObjectName("app_header")
+        header.setFixedHeight(66)
         hb = QHBoxLayout(header)
-        hb.setContentsMargins(0, 0, 0, 0)
+        hb.setContentsMargins(34, 0, 34, 0)
+        hb.setSpacing(14)
         self._header_title = QLabel("Home")
-        self._header_title.setObjectName("header_title")
-        hb.addWidget(self._header_title)
+        self._header_title.setObjectName("af_screen_title")
+        hb.addWidget(self._header_title, 0, Qt.AlignVCenter)
+        self._header_eyebrow = QLabel("THE BENCH")
+        self._header_eyebrow.setObjectName("af_screen_eyebrow")
+        hb.addWidget(self._header_eyebrow, 0, Qt.AlignBottom)
+        self._header_eyebrow.setContentsMargins(0, 0, 0, 16)
         hb.addStretch()
         content_layout.addWidget(header)
 
@@ -203,6 +279,9 @@ class MainWindow(QMainWindow):
 
         # Select first tab
         self._switch_tab(0)
+
+        # Apply any persisted sidebar collapse state.
+        self._apply_sidebar_collapsed()
 
     # ------------------------------------------------------------------
     # Signal connections
@@ -273,13 +352,44 @@ class MainWindow(QMainWindow):
     # Slots
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Sidebar collapse
+    # ------------------------------------------------------------------
+
+    def _toggle_sidebar(self):
+        self._sidebar_collapsed = not self._sidebar_collapsed
+        self._apply_sidebar_collapsed()
+        try:
+            QSettings().setValue("ui/sidebar_collapsed", self._sidebar_collapsed)
+        except Exception:
+            pass
+
+    def _apply_sidebar_collapsed(self):
+        """Switch the sidebar between the 250px full panel and the 76px icon rail."""
+        collapsed = self._sidebar_collapsed
+        self._sidebar.setFixedWidth(76 if collapsed else 250)
+        self._collapse_btn.setText("›" if collapsed else "‹")
+        self._collapse_btn.setToolTip("Expand sidebar" if collapsed else "Collapse sidebar")
+        for widget in (self._wordmark, self._brand_eyebrow, self._brand_rule,
+                       self._decor, self._ver_label):
+            widget.setVisible(not collapsed)
+        # Shrink the emblem and hide nav labels in the collapsed rail.
+        if not self._emblem_pm.isNull():
+            self._emblem.setPixmap(self._emblem_pm.scaledToHeight(
+                42 if collapsed else 72, Qt.SmoothTransformation))
+        for btn, _ in self._nav_buttons:
+            btn.set_collapsed(collapsed)
+
     def _switch_tab(self, index: int):
         self._stack.setCurrentIndex(index)
         for btn, idx in self._nav_buttons:
             btn.set_selected(idx == index)
 
-        tab_names = ["Home", "Settings", "Dataset", "Characters", "Train", "Batch"]
+        tab_names = ["Home", "Setup", "Dataset", "Characters", "Train", "Batch"]
+        eyebrows = ["The Bench", "The Workshop", "The Cutting Room",
+                    "The Roster", "The Furnace", "The Line"]
         self._header_title.setText(tab_names[index])
+        self._header_eyebrow.setText(eyebrows[index].upper())
         self._status_bar.showMessage(f"{tab_names[index]} tab active")
         if index == 0:
             self._home_tab.refresh(self._collect_home_context())

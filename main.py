@@ -12,7 +12,8 @@ from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon
 from PySide6.QtCore import Qt
 
-from utils.styles import DARK_STYLESHEET
+from utils.styles import build_stylesheet
+from utils.fonts import load_app_fonts
 from ui.main_window import MainWindow
 
 
@@ -35,8 +36,10 @@ def main():
     if os.path.exists(_icon):
         app.setWindowIcon(QIcon(_icon))
 
-    # Apply dark stylesheet globally
-    app.setStyleSheet(DARK_STYLESHEET)
+    # Register the bundled forge fonts, then apply the dark stylesheet with the
+    # resolved families injected.
+    families = load_app_fonts()
+    app.setStyleSheet(build_stylesheet(families))
 
     window = MainWindow()
     window.show()
