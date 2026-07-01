@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.settings import AppSettings
+from ui.forge_modal import ForgeModal
 from utils.proc import apply_no_window
 
 # Shared QSettings ids (single source of truth in core.settings).
@@ -312,9 +313,31 @@ class SetupTab(QWidget):
         output_layout.addLayout(output_row)
         layout.addWidget(output_group)
 
+        # The Bench — optional service (stays visible, like LM Studio).
         layout.addWidget(self._build_forge_group())
-        layout.addWidget(self._build_advanced_group())
-        layout.addWidget(self._build_defaults_group())
+
+        # Fine Tuning — the heavy set-once config is popped into modals so the Workshop
+        # reads as a readiness checklist, not a wall of fields.
+        self._advanced_group = self._build_advanced_group()
+        self._defaults_group = self._build_defaults_group()
+        for grp in (self._advanced_group, self._defaults_group):
+            grp.setParent(self)
+            grp.setVisible(False)
+        fine_label = QLabel("Fine Tuning")
+        fine_label.setObjectName("af_screen_eyebrow")
+        layout.addWidget(fine_label)
+        fine_row = QHBoxLayout()
+        fine_row.setSpacing(10)
+        for text, opener in [("⚙  App Defaults", self._open_defaults_modal),
+                             ("⚙  Advanced Training", self._open_advanced_modal),
+                             ("📖  Setup Guide", self._show_install_dialog)]:
+            b = QPushButton(text)
+            b.setObjectName("af_btn_ghost")
+            b.setMinimumHeight(40)
+            b.setCursor(Qt.PointingHandCursor)
+            b.clicked.connect(opener)
+            fine_row.addWidget(b)
+        layout.addLayout(fine_row)
 
         # Buttons row
         btn_row = QHBoxLayout()
@@ -616,6 +639,29 @@ class SetupTab(QWidget):
         else:
             self._forge_status.setText("✘ Cannot reach Forge. Start it with --api enabled at this URL.")
             self._forge_status.setStyleSheet("font-size: 11px; color: #d9534f;")
+
+    # ---- Fine-Tuning modals (host the stashed config groups) ----
+    def _restash_setting(self, grp):
+        if grp is not None:
+            grp.setParent(self)
+            grp.setVisible(False)
+
+    def _open_setting_modal(self, grp, title, subtitle):
+        grp.setVisible(True)
+        modal = ForgeModal(self.window(), title=title, eyebrow="Fine Tuning",
+                           subtitle=subtitle, max_width=600)
+        modal.body.addWidget(grp)
+        modal.closed.connect(lambda g=grp: self._restash_setting(g))
+        modal.add_footer_button("Done", primary=True).clicked.connect(modal.close_modal)
+        modal.open()
+
+    def _open_defaults_modal(self):
+        self._open_setting_modal(self._defaults_group, "App Defaults",
+                                 "New runs start from these — dim, alpha, steps, caption order.")
+
+    def _open_advanced_modal(self):
+        self._open_setting_modal(self._advanced_group, "Advanced Training",
+                                 "Flow weighting, dropout, VRAM warnings — leave default unless you know.")
 
     def _build_forge_group(self) -> QGroupBox:
         g = QGroupBox("Forge / Stable Diffusion API (deliver + test-render)")
