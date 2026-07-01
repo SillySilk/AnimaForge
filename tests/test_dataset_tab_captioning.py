@@ -36,6 +36,18 @@ def test_empty_caption_preview_and_status():
     assert c._status == "done"
 
 
+def test_card_matches_search_and_segment():
+    done = ImageCard("/x/ivy_barnes_004.png", "/x/a.txt", "a girl in a park", 0, status="done")
+    bare = ImageCard("/x/ivy_barnes_009.png", "/x/b.txt", "", 0, status="bare")
+    # segmented filter
+    assert done.matches("", "captioned") and not bare.matches("", "captioned")
+    assert bare.matches("", "needs") and not done.matches("", "needs")
+    assert done.matches("", "all") and bare.matches("", "all")
+    # search across filename + caption
+    assert done.matches("park", "all") and not done.matches("beach", "all")
+    assert bare.matches("009", "all")
+
+
 def test_image_status_classification():
     from ui.dataset_tab import DatasetTab
     assert DatasetTab._image_status({"image_path": "/x/a.png", "caption": "hi"}) == "done"

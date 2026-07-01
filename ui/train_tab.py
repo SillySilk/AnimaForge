@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
     QGroupBox,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -750,25 +751,26 @@ class TrainTab(QWidget):
         self._dials = DialRow()
         right_layout.addWidget(self._dials)
 
-        # Live sample preview (filled from {output_dir}/sample during training)
-        preview_title = QLabel("Live Preview (sample images — newest first, scroll for older)")
+        # Live sample preview (filled from {output_dir}/sample during training).
+        # Per the handoff: a 4-wide grid bounded to ~2 visible rows, scroll for older sets.
+        preview_title = QLabel("Live Preview (newest first — two rows of four, scroll for older)")
         preview_title.setStyleSheet("font-size: 12px; font-weight: 600; color: #8a8a93;")
         right_layout.addWidget(preview_title)
         self._preview_container = QWidget()
-        self._preview_row = QHBoxLayout(self._preview_container)
-        self._preview_row.setContentsMargins(0, 0, 0, 0)
-        self._preview_row.setSpacing(6)
+        self._preview_grid = QGridLayout(self._preview_container)
+        self._preview_grid.setContentsMargins(0, 0, 0, 0)
+        self._preview_grid.setHorizontalSpacing(8)
+        self._preview_grid.setVerticalSpacing(8)
+        self._preview_grid.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         self._preview_hint = QLabel("Preview images appear here as training reaches each tick mark above.")
         self._preview_hint.setStyleSheet("font-size: 11px; color: #8a8a93; font-style: italic;")
-        self._preview_row.addWidget(self._preview_hint)
-        self._preview_row.addStretch()
-        # Horizontal scroll strip: ~6 thumbnails visible, scroll to reach earlier ones.
+        self._preview_grid.addWidget(self._preview_hint, 0, 0, 1, 4)
         self._preview_scroll = QScrollArea()
         self._preview_scroll.setWidgetResizable(True)
         self._preview_scroll.setWidget(self._preview_container)
-        self._preview_scroll.setFixedHeight(186)  # 150px thumb + horizontal scrollbar
-        self._preview_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self._preview_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._preview_scroll.setFixedHeight(366)  # two rows of ~168px thumbs + gap
+        self._preview_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._preview_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         right_layout.addWidget(self._preview_scroll)
 
         # Log output
@@ -1394,29 +1396,29 @@ class TrainTab(QWidget):
 
     def _render_preview(self, files):
         from PySide6.QtGui import QPixmap
-        # Clear current preview widgets
-        while self._preview_row.count():
-            item = self._preview_row.takeAt(0)
+        # Clear current preview widgets (keep the hint widget alive for reuse).
+        while self._preview_grid.count():
+            item = self._preview_grid.takeAt(0)
             w = item.widget()
-            if w is not None:
+            if w is not None and w is not self._preview_hint:
                 w.deleteLater()
         if not files:
-            self._preview_row.addWidget(self._preview_hint)
+            self._preview_grid.addWidget(self._preview_hint, 0, 0, 1, 4)
             self._preview_hint.show()
-            self._preview_row.addStretch()
             return
-        for path in files:
+        self._preview_hint.hide()
+        # 4 across, newest first; the scroll area shows ~2 rows and scrolls for older.
+        for i, path in enumerate(files):
             pm = QPixmap(path)
             if pm.isNull():
                 continue
-            scaled = pm.scaledToHeight(150, Qt.SmoothTransformation)
+            scaled = pm.scaledToHeight(168, Qt.SmoothTransformation)
             thumb = _ClickableThumb(path)
             thumb.setPixmap(scaled)
-            thumb.setFixedSize(scaled.size())  # keep size in the horizontal scroll strip
+            thumb.setFixedSize(scaled.size())
             thumb.setToolTip(path)
             thumb.clicked.connect(self._show_image)
-            self._preview_row.addWidget(thumb)
-        self._preview_row.addStretch()
+            self._preview_grid.addWidget(thumb, i // 4, i % 4)
 
     def _show_image(self, path: str):
         from PySide6.QtWidgets import QDialog, QScrollArea

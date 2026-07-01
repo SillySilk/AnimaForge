@@ -194,7 +194,20 @@ class ImageCard(QWidget):
         self._status_dot.setAlignment(Qt.AlignCenter)
         self._status_dot.setToolTip(self._STATUS_TIP.get(self._status, ""))
 
+    def matches(self, query: str, mode: str) -> bool:
+        """Filter predicate for the Dataset search + segmented (all/captioned/needs) control."""
+        if mode == "captioned" and self._status != "done":
+            return False
+        if mode == "needs" and self._status == "done":
+            return False
+        if query:
+            hay = (self.filename + " " + (self._caption_text or "")).lower()
+            if query.lower() not in hay:
+                return False
+        return True
+
     def _set_preview_text(self, caption: str):
+        self._caption_text = caption or ""
         text = (caption or "").strip()
         if text:
             self._caption_preview.setText(text)
@@ -407,6 +420,8 @@ class DatasetTab(QWidget):
         self._step4_status.setText(fmt(c["txt"]))
         # step 3 (refine) has no distinct artifact -> label reflects the Setup toggle
         self._refresh_refine_reflection()
+        if hasattr(self, "_status_summary"):
+            self._update_status_summary()
         self.caption_finished.emit()  # keep the global progress rail in sync
 
     def _maybe_prompt_name_characters(self):
@@ -460,33 +475,59 @@ class DatasetTab(QWidget):
         main_layout.setContentsMargins(16, 16, 16, 8)
         main_layout.setSpacing(10)
 
-        # ---- Top toolbar: load / clear / path / image count ----
+        # ---- Toolbar: set name · status summary · Clear Captions ----
+        # (Folder loading is a Home control; this is a preview tab.)
         toolbar = QHBoxLayout()
-        toolbar.setSpacing(10)
-        # Folder loading is a Home control (Browse) — this preview tab has no loader.
-        clear_all_btn = QPushButton("🧹 Clear All Captions")
+        toolbar.setSpacing(12)
+        self._set_name_label = QLabel("No set loaded")
+        self._set_name_label.setObjectName("af_screen_eyebrow")
+        toolbar.addWidget(self._set_name_label)
+        self._status_summary = QLabel("")
+        self._status_summary.setObjectName("label_field")
+        toolbar.addWidget(self._status_summary)
+        # kept for load_folder_path/_load_images plumbing (not shown in this layout)
+        self._path_label = QLabel("No folder loaded")
+        self._count_label = QLabel("Image count: 0")
+        toolbar.addStretch()
+        clear_all_btn = QPushButton("🧹 Clear Captions")
         clear_all_btn.setObjectName("btn_danger")
         clear_all_btn.setToolTip("Delete all .txt, .tags, and .nl caption files in this folder (images untouched)")
         clear_all_btn.clicked.connect(self._clear_all_captions)
         toolbar.addWidget(clear_all_btn)
-        # Validate names stays on the Dataset (preview) tab — it's the occasional
-        # "filenames aren't correct" fix, not a normal per-run control. The rest of the
-        # caption controls are relocated to the Home command center.
-        self._validate_names_btn = QPushButton("✓ Validate names")
+        main_layout.addLayout(toolbar)
+
+        # ---- Filter row: search · All/Captioned/Needs Work · Validate Names ----
+        filter_row = QHBoxLayout()
+        filter_row.setSpacing(10)
+        self._search_edit = QLineEdit()
+        self._search_edit.setObjectName("af_search")
+        self._search_edit.setPlaceholderText("Search captions & filenames…")
+        self._search_edit.setClearButtonEnabled(True)
+        self._search_edit.textChanged.connect(self._apply_filter)
+        filter_row.addWidget(self._search_edit, 1)
+
+        self._filter_mode = "all"
+        self._seg_buttons = {}
+        seg = QHBoxLayout()
+        seg.setSpacing(0)
+        for mode, text in [("all", "All"), ("captioned", "Captioned"), ("needs", "Needs Work")]:
+            b = QPushButton(text)
+            b.setObjectName("af_segment")
+            b.setCheckable(True)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setChecked(mode == "all")
+            b.clicked.connect(lambda _c=False, m=mode: self._set_filter_mode(m))
+            self._seg_buttons[mode] = b
+            seg.addWidget(b)
+        filter_row.addLayout(seg)
+
+        self._validate_names_btn = QPushButton("✓ Validate Names")
         self._validate_names_btn.setObjectName("btn_primary")
         self._validate_names_btn.setToolTip(
             "Check filenames against NAME_SERIAL_CATEGORY and auto-format them to convention")
         self._validate_names_btn.clicked.connect(self._open_name_validator)
-        toolbar.addWidget(self._validate_names_btn)
-        self._path_label = QLabel("No folder loaded")
-        self._path_label.setObjectName("label_field")
-        self._path_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self._path_label.setWordWrap(False)
-        toolbar.addWidget(self._path_label, 1)
-        self._count_label = QLabel("Image count: 0")
-        self._count_label.setObjectName("label_image_count")
-        toolbar.addWidget(self._count_label)
-        main_layout.addLayout(toolbar)
+        filter_row.addWidget(self._validate_names_btn)
+        main_layout.addLayout(filter_row)
 
         # ---- Identity: trigger word + quality prefix (baked in at Combine) ----
         # Trigger word + quality prefix are edited on the Home command center (single source
@@ -767,8 +808,40 @@ class DatasetTab(QWidget):
             self._cards.append(card)
             self._cards_by_name[name] = card
 
+        set_name = Path(self._folder_path).name if self._folder_path else ""
+        self._set_name_label.setText(
+            f"Set · {set_name} · {count} images" if set_name else "No set loaded")
+        self._update_status_summary()
+        self._apply_filter()
         self.dataset_loaded.emit(self._folder_path, count)
         self._refresh_step_status()
+
+    def _set_filter_mode(self, mode: str):
+        self._filter_mode = mode
+        for m, b in self._seg_buttons.items():
+            b.setChecked(m == mode)
+        self._apply_filter()
+
+    def _apply_filter(self):
+        """Re-flow the gallery to only the cards matching the search + segmented filter."""
+        query = self._search_edit.text().strip()
+        for c in self._cards:
+            self._gallery_layout.removeWidget(c)
+        idx = 0
+        for c in self._cards:
+            if c.matches(query, self._filter_mode):
+                self._gallery_layout.addWidget(c, idx // GRID_COLS, idx % GRID_COLS)
+                c.setVisible(True)
+                idx += 1
+            else:
+                c.setVisible(False)
+
+    def _update_status_summary(self):
+        counts = {"done": 0, "partial": 0, "bare": 0}
+        for c in self._cards:
+            counts[c._status] = counts.get(c._status, 0) + 1
+        self._status_summary.setText(
+            f"{counts['done']} Captioned · {counts['partial']} Partial · {counts['bare']} Bare")
 
     @staticmethod
     def _image_status(item: dict) -> str:

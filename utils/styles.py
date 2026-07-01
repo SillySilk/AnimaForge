@@ -153,6 +153,19 @@ QPushButton:disabled {{ background-color: #121110; color: #4a4a44; border: 1px s
 #image_caption_preview {{ color: #c6c6ce; font-size: 11px; }}
 #image_caption_preview[empty="true"] {{ color: #6a6a72; font-style: italic; }}
 
+/* Dataset filter row — search box + segmented All/Captioned/Needs Work. */
+#af_search {{
+    background: #100f0d; border: 1px solid #3a3a3f; border-radius: 6px;
+    padding: 7px 10px; color: #c6c6ce;
+}}
+#af_search:focus {{ border: 1px solid #d4af37; }}
+#af_segment {{
+    background: #100f0d; color: #8a8a93; border: 1px solid #3a3a1f;
+    padding: 7px 14px; font-size: 12px; font-weight: 600;
+}}
+#af_segment:hover {{ color: #e8e0c8; }}
+#af_segment:checked {{ background: #161208; color: #f4d160; border: 1px solid #8a5a12; }}
+
 #btn_start {{
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #f6c453, stop:1 #b8860b);
     color: #1a1206; border: 1px solid #f4d160; padding: 12px 24px; font-size: 14px;
