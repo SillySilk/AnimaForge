@@ -23,9 +23,11 @@ def _bundle_titles(tab):
     for i in range(tab._bundles_layout.count()):
         w = tab._bundles_layout.itemAt(i).widget()
         if isinstance(w, QFrame):
-            lbl = w.findChild(QLabel)   # first QLabel in the card is the bundle name
-            if lbl is not None:
-                titles.append(lbl.text())
+            # the name label carries af_display_gold (solo/ensemble) or ready_row_err (warn)
+            for lbl in w.findChildren(QLabel):
+                if lbl.objectName() in ("af_display_gold", "ready_row_err"):
+                    titles.append(lbl.text())
+                    break
     return titles
 
 

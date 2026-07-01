@@ -12,7 +12,7 @@ import io
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal, QSize
-from PySide6.QtGui import QIcon, QImage, QPixmap
+from PySide6.QtGui import QIcon, QImage, QPixmap, QPainter, QPainterPath, QPen, QColor
 from PySide6.QtWidgets import (
     QFrame, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QListView, QListWidget,
     QListWidgetItem, QMessageBox, QPushButton, QScrollArea, QVBoxLayout, QWidget,
@@ -45,6 +45,24 @@ def _thumb_pixmap(path: str, size: int = THUMB) -> QPixmap:
         pm = QPixmap(size, size)
         pm.fill(Qt.transparent)
         return pm
+
+
+def _circular_avatar(path: str, size: int = 56) -> QPixmap:
+    """A gold-ringed circular mugshot for a roster card header."""
+    src = _thumb_pixmap(path, size)
+    out = QPixmap(size, size)
+    out.fill(Qt.transparent)
+    p = QPainter(out)
+    p.setRenderHint(QPainter.Antialiasing, True)
+    clip = QPainterPath()
+    clip.addEllipse(1, 1, size - 2, size - 2)
+    p.setClipPath(clip)
+    p.drawPixmap(0, 0, src)
+    p.setClipping(False)
+    p.setPen(QPen(QColor("#d4af37"), 2))
+    p.drawEllipse(1, 1, size - 3, size - 3)
+    p.end()
+    return out
 
 
 class CharactersTab(QWidget):
@@ -181,6 +199,11 @@ class CharactersTab(QWidget):
 
         head = QHBoxLayout()
         head.setSpacing(10)
+        if not warn and image_paths:
+            avatar = QLabel()
+            avatar.setPixmap(_circular_avatar(image_paths[0], 56))
+            avatar.setFixedSize(56, 56)
+            head.addWidget(avatar)
         nm = QLabel(name)
         nm.setObjectName("af_display_gold" if not warn else "ready_row_err")
         head.addWidget(nm)
