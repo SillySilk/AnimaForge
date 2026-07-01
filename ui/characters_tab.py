@@ -104,26 +104,11 @@ class CharactersTab(QWidget):
         root.setContentsMargins(16, 16, 16, 12)
         root.setSpacing(10)
 
-        title = QLabel("Characters")
-        title.setObjectName("label_section")
+        title = QLabel("The Roster")
+        title.setObjectName("af_screen_title")
         root.addWidget(title)
 
-        anchor_row = QHBoxLayout()
-        anchor_row.addWidget(QLabel("Style/artist anchor:"))
-        self._style_anchor_edit = QLineEdit()
-        self._style_anchor_edit.setPlaceholderText("@mystyle (optional)")
-        self._style_anchor_edit.setFixedWidth(220)
-        self._style_anchor_edit.textChanged.connect(self._on_style_anchor_changed)
-        anchor_row.addWidget(self._style_anchor_edit)
-        anchor_row.addStretch()
-        root.addLayout(anchor_row)
-
-        caption = QLabel("These character names come from your filenames and are written into "
-                         "every caption automatically.")
-        caption.setObjectName("label_field")
-        caption.setWordWrap(True)
-        root.addWidget(caption)
-
+        # The cast bundles fill the screen (read-only, derived from filenames).
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QFrame.NoFrame)
@@ -134,6 +119,30 @@ class CharactersTab(QWidget):
         self._bundles_layout.setAlignment(Qt.AlignTop)
         self._scroll.setWidget(self._bundles_host)
         root.addWidget(self._scroll, 1)
+
+        # Provenance + style anchor pinned to the bottom (per the handoff).
+        caption = QLabel("Names are read from your filenames (NAME_SERIAL_CATEGORY) and written "
+                         "into every caption automatically. Rename on the Dataset tab to change them.")
+        caption.setObjectName("af_marker")
+        caption.setWordWrap(True)
+        root.addWidget(caption)
+
+        self._anchor_row = QWidget()
+        anchor_row = QHBoxLayout(self._anchor_row)
+        anchor_row.setContentsMargins(0, 0, 0, 0)
+        anchor_row.addWidget(QLabel("Style/artist anchor:"))
+        self._style_anchor_edit = QLineEdit()
+        self._style_anchor_edit.setPlaceholderText("@mystyle (optional)")
+        self._style_anchor_edit.setFixedWidth(220)
+        self._style_anchor_edit.textChanged.connect(self._on_style_anchor_changed)
+        anchor_row.addWidget(self._style_anchor_edit)
+        anchor_row.addStretch()
+        root.addWidget(self._anchor_row)
+        self._anchor_row.setVisible(False)  # only shown for Style runs (gated by MainWindow)
+
+    def set_anchor_gate(self, is_style: bool):
+        """Show the @style anchor only when the LoRA subject type is Style."""
+        self._anchor_row.setVisible(bool(is_style))
 
     def _set_anchor_text(self, text: str):
         self._style_anchor_edit.blockSignals(True)
@@ -162,20 +171,35 @@ class CharactersTab(QWidget):
                 w.setParent(None)
                 w.deleteLater()
 
-    def _make_bundle(self, title: str, image_paths, warn: bool = False,
-                     show_fix: bool = False) -> QGroupBox:
-        group = QGroupBox(title)
-        if warn:
-            group.setStyleSheet("QGroupBox { color: #d9534f; }")
-        v = QVBoxLayout(group)
+    def _make_bundle(self, name: str, count: int, image_paths, category: str = "Character",
+                     warn: bool = False, show_fix: bool = False) -> QFrame:
+        card = QFrame()
+        card.setObjectName("af_card")
+        v = QVBoxLayout(card)
+        v.setContentsMargins(16, 14, 16, 14)
+        v.setSpacing(10)
+
+        head = QHBoxLayout()
+        head.setSpacing(10)
+        nm = QLabel(name)
+        nm.setObjectName("af_display_gold" if not warn else "ready_row_err")
+        head.addWidget(nm)
+        if not warn:
+            tag = QLabel(category.upper())
+            tag.setObjectName("af_chip")
+            head.addWidget(tag)
+        head.addStretch()
+        cnt = QLabel(f"{count} image(s)")
+        cnt.setObjectName("af_eyebrow_mute")
+        head.addWidget(cnt)
         if show_fix:
-            bar = QHBoxLayout()
-            fix = QPushButton("Fix names")
+            fix = QPushButton("Fix Names")
             fix.setObjectName("btn_primary")
+            fix.setCursor(Qt.PointingHandCursor)
             fix.clicked.connect(self._open_validator)
-            bar.addWidget(fix)
-            bar.addStretch()
-            v.addLayout(bar)
+            head.addWidget(fix)
+        v.addLayout(head)
+
         grid = QListWidget()
         grid.setViewMode(QListView.IconMode)
         grid.setIconSize(QSize(THUMB, THUMB))
@@ -193,7 +217,7 @@ class CharactersTab(QWidget):
             item.setToolTip(Path(p).name)
             grid.addItem(item)
         v.addWidget(grid)
-        return group
+        return card
 
     def _render(self):
         self._clear_bundles()
@@ -206,15 +230,20 @@ class CharactersTab(QWidget):
         paths = {Path(d["image_path"]).name: d["image_path"] for d in data}
         b = naming.bundles_from_names(names)
 
+        # The Cast (solo) first, then Ensembles, then the Needs-naming warning at the bottom.
+        for grp in b["solo"]:
+            self._bundles_layout.addWidget(self._make_bundle(
+                grp["name"], len(grp["images"]),
+                [paths[n] for n in grp["images"] if n in paths], category="Character"))
+        for grp in b["combined"]:
+            self._bundles_layout.addWidget(self._make_bundle(
+                grp["name"], len(grp["images"]),
+                [paths[n] for n in grp["images"] if n in paths], category="Ensemble"))
         if b["needs_naming"]:
             self._bundles_layout.addWidget(self._make_bundle(
-                f"⚠  Needs naming — {len(b['needs_naming'])} file(s)",
+                "⚠  Needs naming", len(b["needs_naming"]),
                 [paths[n] for n in b["needs_naming"] if n in paths],
                 warn=True, show_fix=True))
-        for grp in b["solo"] + b["combined"]:
-            self._bundles_layout.addWidget(self._make_bundle(
-                f"{grp['name']} — {len(grp['images'])} image(s)",
-                [paths[n] for n in grp["images"] if n in paths]))
         if not (b["needs_naming"] or b["solo"] or b["combined"]):
             self._bundles_layout.addWidget(QLabel("No images in this folder yet."))
 

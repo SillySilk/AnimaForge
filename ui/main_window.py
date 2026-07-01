@@ -482,8 +482,10 @@ class MainWindow(QMainWindow):
         self._train_tab.set_subject_type(key)
 
     def _sync_home_anchor_visibility(self):
-        """Show Home's Style @anchor field only when the relocated Step Calculator is on Style."""
-        self._home_tab.set_style_anchor_visible(self._train_tab.is_style_subject())
+        """Show the Style @anchor (Home + Characters) only when the subject type is Style."""
+        is_style = self._train_tab.is_style_subject()
+        self._home_tab.set_style_anchor_visible(is_style)
+        self._characters_tab.set_anchor_gate(is_style)
 
     def _on_home_run(self):
         """Home Run → unattended pipeline: (detect names) → (caption) → train.
