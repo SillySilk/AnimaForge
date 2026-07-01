@@ -16,43 +16,30 @@ def _card():
     return ImageCard("/x/aria_03.png", "/x/aria_03.txt", LONG, 0)
 
 
-def _set_cursor(edit, pos):
-    cur = edit.textCursor()
-    cur.setPosition(pos)
-    edit.setTextCursor(cur)
-
-
-def test_refresh_unchanged_is_noop():
-    # Identical text must NOT re-set the box (setPlainText would slam the cursor to 0).
+def test_card_shows_readonly_caption_preview():
+    # The card is a clean preview tile now — a read-only 2-line caption preview, no inline
+    # editor (editing happens in the modal opened on click).
     c = _card()
-    edit = c._caption_edit
-    _set_cursor(edit, 10)
-    c.refresh_caption(LONG)
-    assert edit.textCursor().position() == 10
+    assert not hasattr(c, "_caption_edit")
+    assert c._caption_preview.text() == LONG
+    c.refresh_caption("a fresh caption")
+    assert c._caption_preview.text() == "a fresh caption"
 
 
-def test_refresh_changed_preserves_cursor():
-    # Changed text re-sets the box but keeps the caret where it was (layout-independent
-    # witness that scroll/cursor are preserved rather than reset to the top).
-    c = _card()
-    edit = c._caption_edit
-    _set_cursor(edit, 15)
-    c.refresh_caption(LONG + " extra")
-    assert edit.textCursor().position() == 15
+def test_empty_caption_preview_and_status():
+    c = ImageCard("/x/bare.png", "/x/bare.txt", "", 0, status="bare")
+    assert c._caption_preview.text() == "No caption yet"
+    assert c._caption_preview.property("empty") == "true"
+    assert c._status == "bare"
+    # editing a caption flips the status dot to done
+    c.refresh_caption("now captioned")
+    assert c._status == "done"
 
 
-def test_refresh_changed_preserves_scroll_when_scrollable():
-    # Bonus: when the box actually has a scroll range (needs layout), the position holds.
-    c = _card()
-    c.resize(220, 200)
-    c.show()  # offscreen — forces layout so the caption box gets a scroll range
-    _app.processEvents()
-    sb = c._caption_edit.verticalScrollBar()
-    if sb.maximum() > 0:  # only meaningful when the content overflows
-        sb.setValue(min(3, sb.maximum()))
-        want = sb.value()
-        c.refresh_caption(LONG + "\nextra line")
-        assert sb.value() == min(want, sb.maximum())
+def test_image_status_classification():
+    from ui.dataset_tab import DatasetTab
+    assert DatasetTab._image_status({"image_path": "/x/a.png", "caption": "hi"}) == "done"
+    assert DatasetTab._image_status({"image_path": "/x/none.png", "caption": ""}) == "bare"
 
 
 def test_filename_and_set_processing_property():

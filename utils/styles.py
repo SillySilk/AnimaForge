@@ -144,6 +144,15 @@ QPushButton:disabled {{ background-color: #121110; color: #4a4a44; border: 1px s
 #btn_step_compact:pressed {{ background: #8a5a12; }}
 #btn_step_compact:disabled {{ background: #2a2415; color: #6a5a30; border: 1px solid #3a3a1f; }}
 
+/* Dataset gallery card — cast pill (over the thumbnail) + 2-line caption preview. */
+#btn_cast_pill {{
+    background: rgba(12,11,10,0.82); color: #f4d160; border: 1px solid #3a3a1f;
+    border-radius: 9px; padding: 2px 8px; font-size: 10px; font-weight: 700;
+}}
+#btn_cast_pill:hover {{ border: 1px solid #d4af37; color: #ffe085; }}
+#image_caption_preview {{ color: #c6c6ce; font-size: 11px; }}
+#image_caption_preview[empty="true"] {{ color: #6a6a72; font-style: italic; }}
+
 #btn_start {{
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #f6c453, stop:1 #b8860b);
     color: #1a1206; border: 1px solid #f4d160; padding: 12px 24px; font-size: 14px;

@@ -102,11 +102,16 @@ class ImageCard(QWidget):
     cast_clicked = Signal(str)   # emits image_path when the Cast button is clicked
     opened = Signal(str)         # emits image_path when the thumbnail is clicked
 
-    def __init__(self, image_path: str, txt_path: str, caption: str, cast_count: int = 0, parent=None):
+    _STATUS_COLOR = {"done": "#8fa86b", "partial": "#ff7a18", "bare": "#6a6a72"}
+    _STATUS_TIP = {"done": "Captioned", "partial": "Partial — needs Combine", "bare": "No caption yet"}
+
+    def __init__(self, image_path: str, txt_path: str, caption: str, cast_count: int = 0,
+                 status: str = "bare", parent=None):
         super().__init__(parent)
         self.setObjectName("image_card")
         self._image_path = image_path
         self._txt_path = txt_path
+        self._status = status
         self._setup_ui(caption, cast_count)
 
     def mousePressEvent(self, event):
@@ -118,80 +123,91 @@ class ImageCard(QWidget):
 
     def _setup_ui(self, caption: str, cast_count: int = 0):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(4)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(6)
 
-        # Thumbnail with delete button overlay
-        thumb_container = QWidget()
-        thumb_layout = QVBoxLayout(thumb_container)
-        thumb_layout.setContentsMargins(0, 0, 0, 0)
-        thumb_layout.setSpacing(0)
-
+        # Thumbnail with a status dot (top-left) + cast pill (bottom-left) overlaid.
         self._thumb_label = QLabel()
         self._thumb_label.setObjectName("image_thumb")
         self._thumb_label.setFixedSize(THUMB_SIZE, THUMB_SIZE)
         self._thumb_label.setAlignment(Qt.AlignCenter)
         self._thumb_label.setScaledContents(False)
         self._thumb_label.setCursor(Qt.PointingHandCursor)
-        self._thumb_label.setToolTip("Click to open this image larger for editing")
+        self._thumb_label.setToolTip("Click to open the caption editor")
         self._load_thumbnail()
-        thumb_layout.addWidget(self._thumb_label, alignment=Qt.AlignHCenter)
 
-        # Delete button (small, positioned over thumbnail)
-        delete_btn = QPushButton("🗑")
-        delete_btn.setObjectName("btn_delete_image")
-        delete_btn.setFixedSize(28, 28)
-        delete_btn.setToolTip("Delete this image and caption")
-        delete_btn.clicked.connect(self._on_delete_clicked)
-        delete_btn.setStyleSheet(
-            "QPushButton { background-color: #d9534f; border: none; border-radius: 4px; color: white; font-size: 14px; }"
-            "QPushButton:hover { background-color: #e05050; }"
-            "QPushButton:pressed { background-color: #a03030; }"
-        )
+        self._status_dot = QLabel(self._thumb_label)
+        self._status_dot.setFixedSize(14, 14)
+        self._status_dot.move(7, 7)
+        self._apply_status_dot()
 
-        # Position delete button at top-right of thumb
-        button_container = QWidget()
-        button_layout = QHBoxLayout(button_container)
-        button_layout.setContentsMargins(0, 0, 0, 0)
-        button_layout.addStretch()
-        button_layout.addWidget(delete_btn)
-        button_layout.setSpacing(4)
-        thumb_layout.addWidget(button_container)
+        self._cast_btn = QPushButton(self._cast_label(cast_count), self._thumb_label)
+        self._cast_btn.setObjectName("btn_cast_pill")
+        self._cast_btn.setToolTip("Assign which characters appear in this image")
+        self._cast_btn.setCursor(Qt.PointingHandCursor)
+        self._cast_btn.adjustSize()
+        self._cast_btn.move(7, THUMB_SIZE - self._cast_btn.height() - 7)
+        self._cast_btn.clicked.connect(lambda: self.cast_clicked.emit(self._image_path))
+        layout.addWidget(self._thumb_label, alignment=Qt.AlignHCenter)
 
-        layout.addWidget(thumb_container, alignment=Qt.AlignHCenter)
-
-        # Filename
+        # Filename + always-visible trash (delete image + caption).
+        meta = QHBoxLayout()
+        meta.setContentsMargins(0, 0, 0, 0)
+        meta.setSpacing(4)
         filename = Path(self._image_path).name
         name_label = QLabel(filename)
         name_label.setObjectName("image_filename")
-        name_label.setAlignment(Qt.AlignCenter)
-        name_label.setMaximumWidth(THUMB_SIZE + 20)
-        name_label.setWordWrap(False)
         name_label.setToolTip(filename)
-        # Truncate with ellipsis
         fm = name_label.fontMetrics()
-        elided = fm.elidedText(filename, Qt.ElideMiddle, THUMB_SIZE + 20)
-        name_label.setText(elided)
-        layout.addWidget(name_label)
+        name_label.setText(fm.elidedText(filename, Qt.ElideMiddle, THUMB_SIZE - 30))
+        meta.addWidget(name_label, 1)
+        delete_btn = QPushButton("🗑")
+        delete_btn.setObjectName("btn_delete_image")
+        delete_btn.setFixedSize(24, 24)
+        delete_btn.setToolTip("Delete this image and caption")
+        delete_btn.setCursor(Qt.PointingHandCursor)
+        delete_btn.clicked.connect(self._on_delete_clicked)
+        delete_btn.setStyleSheet(
+            "QPushButton { background-color: transparent; border: none; color: #a05048; font-size: 13px; }"
+            "QPushButton:hover { color: #e05050; }"
+        )
+        meta.addWidget(delete_btn, 0)
+        layout.addLayout(meta)
 
-        # Caption editor
-        self._caption_edit = CaptionEdit(self._txt_path, self)
-        self._caption_edit.setPlainText(caption)
-        self._caption_edit.setFixedHeight(80)
-        self._caption_edit.setFixedWidth(THUMB_SIZE + 20)
-        self._caption_edit.setPlaceholderText("Caption…")
-        self._caption_edit.caption_changed.connect(self._on_caption_changed)
-        layout.addWidget(self._caption_edit)
+        # Read-only 2-line caption preview — editing happens in the editor modal (click).
+        self._caption_preview = QLabel()
+        self._caption_preview.setObjectName("image_caption_preview")
+        self._caption_preview.setWordWrap(True)
+        self._caption_preview.setFixedWidth(THUMB_SIZE)
+        self._caption_preview.setFixedHeight(34)
+        self._caption_preview.setCursor(Qt.PointingHandCursor)
+        self._set_preview_text(caption)
+        layout.addWidget(self._caption_preview)
 
-        # Cast picker (which characters appear in this image)
-        self._cast_btn = QPushButton(self._cast_label(cast_count))
-        self._cast_btn.setObjectName("btn_cast")
-        self._cast_btn.setToolTip("Assign which characters appear in this image")
-        self._cast_btn.setFixedWidth(THUMB_SIZE + 20)
-        self._cast_btn.clicked.connect(lambda: self.cast_clicked.emit(self._image_path))
-        layout.addWidget(self._cast_btn)
+        self.setFixedWidth(THUMB_SIZE + 20)
 
-        self.setFixedWidth(THUMB_SIZE + 32)
+    def _apply_status_dot(self):
+        color = self._STATUS_COLOR.get(self._status, "#6a6a72")
+        self._status_dot.setStyleSheet(
+            f"color:{color}; background:#0c0b0aee; border-radius:7px; font-size:12px;")
+        self._status_dot.setText("●")
+        self._status_dot.setAlignment(Qt.AlignCenter)
+        self._status_dot.setToolTip(self._STATUS_TIP.get(self._status, ""))
+
+    def _set_preview_text(self, caption: str):
+        text = (caption or "").strip()
+        if text:
+            self._caption_preview.setText(text)
+            self._caption_preview.setProperty("empty", "false")
+        else:
+            self._caption_preview.setText("No caption yet")
+            self._caption_preview.setProperty("empty", "true")
+        self._caption_preview.style().unpolish(self._caption_preview)
+        self._caption_preview.style().polish(self._caption_preview)
+
+    def set_status(self, status: str):
+        self._status = status
+        self._apply_status_dot()
 
     @staticmethod
     def _cast_label(n: int) -> str:
@@ -230,31 +246,15 @@ class ImageCard(QWidget):
                 "background-color: #0c0b0a; color: #4a4a44; font-size: 11px;"
             )
 
-    def _on_caption_changed(self, txt_path: str, text: str):
-        save_caption(txt_path, text)
-
     def _on_delete_clicked(self):
         """Emit signal to request deletion of this image."""
         self.image_deleted.emit(self._image_path)
 
     def refresh_caption(self, caption: str):
-        """Reload caption text without triggering save, without disturbing the box.
-
-        No-op when unchanged (so an unrelated box is never touched by the 2 s refresh
-        timer); preserves scroll + cursor when the text actually changes.
-        """
-        edit = self._caption_edit
-        if edit.toPlainText() == caption:
-            return
-        sb = edit.verticalScrollBar()
-        pos, cur = sb.value(), edit.textCursor().position()
-        edit.blockSignals(True)
-        edit.setPlainText(caption)
-        c = edit.textCursor()
-        c.setPosition(min(cur, len(caption)))
-        edit.setTextCursor(c)
-        edit.blockSignals(False)
-        sb.setValue(min(pos, sb.maximum()))
+        """Update the read-only preview after an edit in the modal (or the refresh timer)."""
+        self._set_preview_text(caption)
+        if (caption or "").strip():
+            self.set_status("done")
 
     def set_processing(self, on: bool):
         """Amber border while this image is the one being captioned."""
@@ -755,7 +755,8 @@ class DatasetTab(QWidget):
                 item["txt_path"],
                 item["caption"],
                 cast_count,
-                self._gallery_widget,
+                status=self._image_status(item),
+                parent=self._gallery_widget,
             )
             card.image_deleted.connect(self._on_image_delete_requested)
             card.cast_clicked.connect(self._open_cast_dialog)
@@ -768,6 +769,16 @@ class DatasetTab(QWidget):
 
         self.dataset_loaded.emit(self._folder_path, count)
         self._refresh_step_status()
+
+    @staticmethod
+    def _image_status(item: dict) -> str:
+        """done = has training .txt · partial = has .tags/.nl only · bare = nothing."""
+        if (item.get("caption") or "").strip():
+            return "done"
+        stem = Path(item["image_path"])
+        if stem.with_suffix(".tags").exists() or stem.with_suffix(".nl").exists():
+            return "partial"
+        return "bare"
 
     def _clear_gallery(self):
         for card in self._cards:
