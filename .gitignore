@@ -50,6 +50,7 @@ scripts/publish_release.py
 CLAUDE.md
 docs/
 marketing/
+design/
 _ss_setup.png
 _ss_train.png
 publish-release.bat

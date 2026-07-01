@@ -167,7 +167,10 @@ def test_chain_cancelled_resets():
 def test_dataset_tab_has_validate_names_button():
     t = DatasetTab()
     assert hasattr(t, "_validate_names_btn")
-    assert "Validate names" in t._validate_names_btn.text()
+    assert "Validate Names" in t._validate_names_btn.text()
+    # the segmented filter + search are present; captioning is NOT launched from here
+    assert set(t._seg_buttons) == {"all", "captioned", "needs"}
+    assert hasattr(t, "_search_edit")
 
 
 def test_validate_names_recombines_txt_with_name_first(tmp_path: Path):

@@ -24,7 +24,7 @@ def test_settings_reached_via_gear_not_top_nav():
     targets = [idx for _, idx in w._nav_buttons]
     assert targets.count(1) == 1
     gear_btn, gear_idx = w._nav_buttons[-1]   # pinned last
-    assert gear_idx == 1 and "Settings" in gear_btn.text()
+    assert gear_idx == 1 and "Setup" in gear_btn.text()
     # No primary (non-gear) button points at Setup/Settings.
     assert all(idx != 1 for _, idx in w._nav_buttons[:-1])
     w._switch_tab(1)
@@ -58,6 +58,34 @@ def test_home_run_split_wired():
     w = MainWindow()
     assert hasattr(w, "_on_home_caption") and hasattr(w, "_on_home_train")
     assert hasattr(w._train_tab, "add_current_to_batch")
+
+
+def test_subject_radios_drive_type_and_gear_modal():
+    w = MainWindow()
+    h = w._home_tab
+    assert set(h._type_radios) == {"character", "concept", "style"}
+    # picking a radio drives the subject type through to Train
+    h._type_radios["style"].setChecked(True)
+    assert w._train_tab.get_subject_type() == "style"
+    # the numeric Step Calculator is stashed and shown in the gear modal
+    panel = h._stepcalc_panel
+    assert panel.isHidden()
+    h._open_stepcalc_modal()
+    assert panel.isHidden() is False
+    h._restash(panel)
+    assert panel.isHidden() and panel.parent() is h
+
+
+def test_caption_options_modal_reparents_and_restashes_panel():
+    w = MainWindow()
+    home = w._home_tab
+    panel = home._caption_panel                 # stashed, hidden, on Home
+    assert panel is not None and panel.isHidden()
+    home._open_caption_modal()                   # move panel into the modal
+    assert panel.isHidden() is False             # shown inside the modal
+    home._restash(panel)                         # what modal.closed does
+    assert panel.isHidden() is True              # back on Home, alive
+    assert panel.parent() is home
 
 
 def test_trigger_and_prefix_single_source_on_home():

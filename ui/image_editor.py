@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 
 from core.dataset_manager import save_caption
 from core import characters as characters_mod
+from ui.collapsible import CollapsibleBox
 
 PREVIEW = 540
 
@@ -92,6 +93,21 @@ class ImageEditorDialog(QDialog):
         self._caption_edit.textChanged.connect(self._on_caption_changed)
         right.addWidget(self._caption_edit, 1)
 
+        # Read-only sidecar accordions (view the .tags / .nl the caption was built from).
+        self._tags_box = CollapsibleBox("Tags · .tags")
+        self._tags_view = QLabel("—")
+        self._tags_view.setWordWrap(True)
+        self._tags_view.setObjectName("label_field")
+        self._tags_box.content_layout().addWidget(self._tags_view)
+        right.addWidget(self._tags_box)
+
+        self._nl_box = CollapsibleBox("Description · .nl")
+        self._nl_view = QLabel("—")
+        self._nl_view.setWordWrap(True)
+        self._nl_view.setObjectName("label_field")
+        self._nl_box.content_layout().addWidget(self._nl_view)
+        right.addWidget(self._nl_box)
+
         cast_title = QLabel("CHARACTERS IN THIS IMAGE")
         cast_title.setObjectName("label_section")
         right.addWidget(cast_title)
@@ -158,7 +174,18 @@ class ImageEditorDialog(QDialog):
         self._caption_edit.blockSignals(True)
         self._caption_edit.setPlainText(c.get("caption", ""))
         self._caption_edit.blockSignals(False)
+        self._load_sidecars(c["image_path"])
         self._rebuild_cast()
+
+    def _load_sidecars(self, image_path: str):
+        stem = Path(image_path)
+        for ext, view in ((".tags", self._tags_view), (".nl", self._nl_view)):
+            side = stem.with_suffix(ext)
+            try:
+                text = side.read_text(encoding="utf-8", errors="ignore").strip() if side.exists() else ""
+            except OSError:
+                text = ""
+            view.setText(text or "— none —")
 
     # ---- caption ----
     def _on_caption_changed(self):

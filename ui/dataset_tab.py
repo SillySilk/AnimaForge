@@ -102,11 +102,16 @@ class ImageCard(QWidget):
     cast_clicked = Signal(str)   # emits image_path when the Cast button is clicked
     opened = Signal(str)         # emits image_path when the thumbnail is clicked
 
-    def __init__(self, image_path: str, txt_path: str, caption: str, cast_count: int = 0, parent=None):
+    _STATUS_COLOR = {"done": "#8fa86b", "partial": "#ff7a18", "bare": "#6a6a72"}
+    _STATUS_TIP = {"done": "Captioned", "partial": "Partial — needs Combine", "bare": "No caption yet"}
+
+    def __init__(self, image_path: str, txt_path: str, caption: str, cast_count: int = 0,
+                 status: str = "bare", parent=None):
         super().__init__(parent)
         self.setObjectName("image_card")
         self._image_path = image_path
         self._txt_path = txt_path
+        self._status = status
         self._setup_ui(caption, cast_count)
 
     def mousePressEvent(self, event):
@@ -118,80 +123,104 @@ class ImageCard(QWidget):
 
     def _setup_ui(self, caption: str, cast_count: int = 0):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(4)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(6)
 
-        # Thumbnail with delete button overlay
-        thumb_container = QWidget()
-        thumb_layout = QVBoxLayout(thumb_container)
-        thumb_layout.setContentsMargins(0, 0, 0, 0)
-        thumb_layout.setSpacing(0)
-
+        # Thumbnail with a status dot (top-left) + cast pill (bottom-left) overlaid.
         self._thumb_label = QLabel()
         self._thumb_label.setObjectName("image_thumb")
         self._thumb_label.setFixedSize(THUMB_SIZE, THUMB_SIZE)
         self._thumb_label.setAlignment(Qt.AlignCenter)
         self._thumb_label.setScaledContents(False)
         self._thumb_label.setCursor(Qt.PointingHandCursor)
-        self._thumb_label.setToolTip("Click to open this image larger for editing")
+        self._thumb_label.setToolTip("Click to open the caption editor")
         self._load_thumbnail()
-        thumb_layout.addWidget(self._thumb_label, alignment=Qt.AlignHCenter)
 
-        # Delete button (small, positioned over thumbnail)
-        delete_btn = QPushButton("🗑")
-        delete_btn.setObjectName("btn_delete_image")
-        delete_btn.setFixedSize(28, 28)
-        delete_btn.setToolTip("Delete this image and caption")
-        delete_btn.clicked.connect(self._on_delete_clicked)
-        delete_btn.setStyleSheet(
-            "QPushButton { background-color: #d9534f; border: none; border-radius: 4px; color: white; font-size: 14px; }"
-            "QPushButton:hover { background-color: #e05050; }"
-            "QPushButton:pressed { background-color: #a03030; }"
-        )
+        self._status_dot = QLabel(self._thumb_label)
+        self._status_dot.setFixedSize(14, 14)
+        self._status_dot.move(7, 7)
+        self._apply_status_dot()
 
-        # Position delete button at top-right of thumb
-        button_container = QWidget()
-        button_layout = QHBoxLayout(button_container)
-        button_layout.setContentsMargins(0, 0, 0, 0)
-        button_layout.addStretch()
-        button_layout.addWidget(delete_btn)
-        button_layout.setSpacing(4)
-        thumb_layout.addWidget(button_container)
+        self._cast_btn = QPushButton(self._cast_label(cast_count), self._thumb_label)
+        self._cast_btn.setObjectName("btn_cast_pill")
+        self._cast_btn.setToolTip("Assign which characters appear in this image")
+        self._cast_btn.setCursor(Qt.PointingHandCursor)
+        self._cast_btn.adjustSize()
+        self._cast_btn.move(7, THUMB_SIZE - self._cast_btn.height() - 7)
+        self._cast_btn.clicked.connect(lambda: self.cast_clicked.emit(self._image_path))
+        layout.addWidget(self._thumb_label, alignment=Qt.AlignHCenter)
 
-        layout.addWidget(thumb_container, alignment=Qt.AlignHCenter)
-
-        # Filename
+        # Filename + always-visible trash (delete image + caption).
+        meta = QHBoxLayout()
+        meta.setContentsMargins(0, 0, 0, 0)
+        meta.setSpacing(4)
         filename = Path(self._image_path).name
         name_label = QLabel(filename)
         name_label.setObjectName("image_filename")
-        name_label.setAlignment(Qt.AlignCenter)
-        name_label.setMaximumWidth(THUMB_SIZE + 20)
-        name_label.setWordWrap(False)
         name_label.setToolTip(filename)
-        # Truncate with ellipsis
         fm = name_label.fontMetrics()
-        elided = fm.elidedText(filename, Qt.ElideMiddle, THUMB_SIZE + 20)
-        name_label.setText(elided)
-        layout.addWidget(name_label)
+        name_label.setText(fm.elidedText(filename, Qt.ElideMiddle, THUMB_SIZE - 30))
+        meta.addWidget(name_label, 1)
+        delete_btn = QPushButton("🗑")
+        delete_btn.setObjectName("btn_delete_image")
+        delete_btn.setFixedSize(24, 24)
+        delete_btn.setToolTip("Delete this image and caption")
+        delete_btn.setCursor(Qt.PointingHandCursor)
+        delete_btn.clicked.connect(self._on_delete_clicked)
+        delete_btn.setStyleSheet(
+            "QPushButton { background-color: transparent; border: none; color: #a05048; font-size: 13px; }"
+            "QPushButton:hover { color: #e05050; }"
+        )
+        meta.addWidget(delete_btn, 0)
+        layout.addLayout(meta)
 
-        # Caption editor
-        self._caption_edit = CaptionEdit(self._txt_path, self)
-        self._caption_edit.setPlainText(caption)
-        self._caption_edit.setFixedHeight(80)
-        self._caption_edit.setFixedWidth(THUMB_SIZE + 20)
-        self._caption_edit.setPlaceholderText("Caption…")
-        self._caption_edit.caption_changed.connect(self._on_caption_changed)
-        layout.addWidget(self._caption_edit)
+        # Read-only 2-line caption preview — editing happens in the editor modal (click).
+        self._caption_preview = QLabel()
+        self._caption_preview.setObjectName("image_caption_preview")
+        self._caption_preview.setWordWrap(True)
+        self._caption_preview.setFixedWidth(THUMB_SIZE)
+        self._caption_preview.setFixedHeight(34)
+        self._caption_preview.setCursor(Qt.PointingHandCursor)
+        self._set_preview_text(caption)
+        layout.addWidget(self._caption_preview)
 
-        # Cast picker (which characters appear in this image)
-        self._cast_btn = QPushButton(self._cast_label(cast_count))
-        self._cast_btn.setObjectName("btn_cast")
-        self._cast_btn.setToolTip("Assign which characters appear in this image")
-        self._cast_btn.setFixedWidth(THUMB_SIZE + 20)
-        self._cast_btn.clicked.connect(lambda: self.cast_clicked.emit(self._image_path))
-        layout.addWidget(self._cast_btn)
+        self.setFixedWidth(THUMB_SIZE + 20)
 
-        self.setFixedWidth(THUMB_SIZE + 32)
+    def _apply_status_dot(self):
+        color = self._STATUS_COLOR.get(self._status, "#6a6a72")
+        self._status_dot.setStyleSheet(
+            f"color:{color}; background:#0c0b0aee; border-radius:7px; font-size:12px;")
+        self._status_dot.setText("●")
+        self._status_dot.setAlignment(Qt.AlignCenter)
+        self._status_dot.setToolTip(self._STATUS_TIP.get(self._status, ""))
+
+    def matches(self, query: str, mode: str) -> bool:
+        """Filter predicate for the Dataset search + segmented (all/captioned/needs) control."""
+        if mode == "captioned" and self._status != "done":
+            return False
+        if mode == "needs" and self._status == "done":
+            return False
+        if query:
+            hay = (self.filename + " " + (self._caption_text or "")).lower()
+            if query.lower() not in hay:
+                return False
+        return True
+
+    def _set_preview_text(self, caption: str):
+        self._caption_text = caption or ""
+        text = (caption or "").strip()
+        if text:
+            self._caption_preview.setText(text)
+            self._caption_preview.setProperty("empty", "false")
+        else:
+            self._caption_preview.setText("No caption yet")
+            self._caption_preview.setProperty("empty", "true")
+        self._caption_preview.style().unpolish(self._caption_preview)
+        self._caption_preview.style().polish(self._caption_preview)
+
+    def set_status(self, status: str):
+        self._status = status
+        self._apply_status_dot()
 
     @staticmethod
     def _cast_label(n: int) -> str:
@@ -230,31 +259,15 @@ class ImageCard(QWidget):
                 "background-color: #0c0b0a; color: #4a4a44; font-size: 11px;"
             )
 
-    def _on_caption_changed(self, txt_path: str, text: str):
-        save_caption(txt_path, text)
-
     def _on_delete_clicked(self):
         """Emit signal to request deletion of this image."""
         self.image_deleted.emit(self._image_path)
 
     def refresh_caption(self, caption: str):
-        """Reload caption text without triggering save, without disturbing the box.
-
-        No-op when unchanged (so an unrelated box is never touched by the 2 s refresh
-        timer); preserves scroll + cursor when the text actually changes.
-        """
-        edit = self._caption_edit
-        if edit.toPlainText() == caption:
-            return
-        sb = edit.verticalScrollBar()
-        pos, cur = sb.value(), edit.textCursor().position()
-        edit.blockSignals(True)
-        edit.setPlainText(caption)
-        c = edit.textCursor()
-        c.setPosition(min(cur, len(caption)))
-        edit.setTextCursor(c)
-        edit.blockSignals(False)
-        sb.setValue(min(pos, sb.maximum()))
+        """Update the read-only preview after an edit in the modal (or the refresh timer)."""
+        self._set_preview_text(caption)
+        if (caption or "").strip():
+            self.set_status("done")
 
     def set_processing(self, on: bool):
         """Amber border while this image is the one being captioned."""
@@ -348,6 +361,11 @@ class DatasetTab(QWidget):
         """Quality prefix is edited on Home; keep this tab's (hidden) copy in sync."""
         self._prefix_edit.setText(prefix or "")
 
+    def caption_counts(self) -> tuple:
+        """(captioned, total) — training-ready .txt count and image count, for Home's status."""
+        c = self._step_status_counts()
+        return c["txt"], c["total"]
+
     def caption_controls(self) -> QWidget:
         """The caption control panel (Process + individual steps + stop + live progress).
 
@@ -402,6 +420,8 @@ class DatasetTab(QWidget):
         self._step4_status.setText(fmt(c["txt"]))
         # step 3 (refine) has no distinct artifact -> label reflects the Setup toggle
         self._refresh_refine_reflection()
+        if hasattr(self, "_status_summary"):
+            self._update_status_summary()
         self.caption_finished.emit()  # keep the global progress rail in sync
 
     def _maybe_prompt_name_characters(self):
@@ -455,36 +475,59 @@ class DatasetTab(QWidget):
         main_layout.setContentsMargins(16, 16, 16, 8)
         main_layout.setSpacing(10)
 
-        # ---- Top toolbar: load / clear / path / image count ----
+        # ---- Toolbar: set name · status summary · Clear Captions ----
+        # (Folder loading is a Home control; this is a preview tab.)
         toolbar = QHBoxLayout()
-        toolbar.setSpacing(10)
-        load_btn = QPushButton("📁 Load Dataset Folder")
-        load_btn.setObjectName("btn_primary")
-        load_btn.clicked.connect(self._load_folder)
-        toolbar.addWidget(load_btn)
-        clear_all_btn = QPushButton("🧹 Clear All Captions")
+        toolbar.setSpacing(12)
+        self._set_name_label = QLabel("No set loaded")
+        self._set_name_label.setObjectName("af_screen_eyebrow")
+        toolbar.addWidget(self._set_name_label)
+        self._status_summary = QLabel("")
+        self._status_summary.setObjectName("label_field")
+        toolbar.addWidget(self._status_summary)
+        # kept for load_folder_path/_load_images plumbing (not shown in this layout)
+        self._path_label = QLabel("No folder loaded")
+        self._count_label = QLabel("Image count: 0")
+        toolbar.addStretch()
+        clear_all_btn = QPushButton("🧹 Clear Captions")
         clear_all_btn.setObjectName("btn_danger")
         clear_all_btn.setToolTip("Delete all .txt, .tags, and .nl caption files in this folder (images untouched)")
         clear_all_btn.clicked.connect(self._clear_all_captions)
         toolbar.addWidget(clear_all_btn)
-        # Validate names stays on the Dataset (preview) tab — it's the occasional
-        # "filenames aren't correct" fix, not a normal per-run control. The rest of the
-        # caption controls are relocated to the Home command center.
-        self._validate_names_btn = QPushButton("✓ Validate names")
+        main_layout.addLayout(toolbar)
+
+        # ---- Filter row: search · All/Captioned/Needs Work · Validate Names ----
+        filter_row = QHBoxLayout()
+        filter_row.setSpacing(10)
+        self._search_edit = QLineEdit()
+        self._search_edit.setObjectName("af_search")
+        self._search_edit.setPlaceholderText("Search captions & filenames…")
+        self._search_edit.setClearButtonEnabled(True)
+        self._search_edit.textChanged.connect(self._apply_filter)
+        filter_row.addWidget(self._search_edit, 1)
+
+        self._filter_mode = "all"
+        self._seg_buttons = {}
+        seg = QHBoxLayout()
+        seg.setSpacing(0)
+        for mode, text in [("all", "All"), ("captioned", "Captioned"), ("needs", "Needs Work")]:
+            b = QPushButton(text)
+            b.setObjectName("af_segment")
+            b.setCheckable(True)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setChecked(mode == "all")
+            b.clicked.connect(lambda _c=False, m=mode: self._set_filter_mode(m))
+            self._seg_buttons[mode] = b
+            seg.addWidget(b)
+        filter_row.addLayout(seg)
+
+        self._validate_names_btn = QPushButton("✓ Validate Names")
         self._validate_names_btn.setObjectName("btn_primary")
         self._validate_names_btn.setToolTip(
             "Check filenames against NAME_SERIAL_CATEGORY and auto-format them to convention")
         self._validate_names_btn.clicked.connect(self._open_name_validator)
-        toolbar.addWidget(self._validate_names_btn)
-        self._path_label = QLabel("No folder loaded")
-        self._path_label.setObjectName("label_field")
-        self._path_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self._path_label.setWordWrap(False)
-        toolbar.addWidget(self._path_label, 1)
-        self._count_label = QLabel("Image count: 0")
-        self._count_label.setObjectName("label_image_count")
-        toolbar.addWidget(self._count_label)
-        main_layout.addLayout(toolbar)
+        filter_row.addWidget(self._validate_names_btn)
+        main_layout.addLayout(filter_row)
 
         # ---- Identity: trigger word + quality prefix (baked in at Combine) ----
         # Trigger word + quality prefix are edited on the Home command center (single source
@@ -753,7 +796,8 @@ class DatasetTab(QWidget):
                 item["txt_path"],
                 item["caption"],
                 cast_count,
-                self._gallery_widget,
+                status=self._image_status(item),
+                parent=self._gallery_widget,
             )
             card.image_deleted.connect(self._on_image_delete_requested)
             card.cast_clicked.connect(self._open_cast_dialog)
@@ -764,8 +808,50 @@ class DatasetTab(QWidget):
             self._cards.append(card)
             self._cards_by_name[name] = card
 
+        set_name = Path(self._folder_path).name if self._folder_path else ""
+        self._set_name_label.setText(
+            f"Set · {set_name} · {count} images" if set_name else "No set loaded")
+        self._update_status_summary()
+        self._apply_filter()
         self.dataset_loaded.emit(self._folder_path, count)
         self._refresh_step_status()
+
+    def _set_filter_mode(self, mode: str):
+        self._filter_mode = mode
+        for m, b in self._seg_buttons.items():
+            b.setChecked(m == mode)
+        self._apply_filter()
+
+    def _apply_filter(self):
+        """Re-flow the gallery to only the cards matching the search + segmented filter."""
+        query = self._search_edit.text().strip()
+        for c in self._cards:
+            self._gallery_layout.removeWidget(c)
+        idx = 0
+        for c in self._cards:
+            if c.matches(query, self._filter_mode):
+                self._gallery_layout.addWidget(c, idx // GRID_COLS, idx % GRID_COLS)
+                c.setVisible(True)
+                idx += 1
+            else:
+                c.setVisible(False)
+
+    def _update_status_summary(self):
+        counts = {"done": 0, "partial": 0, "bare": 0}
+        for c in self._cards:
+            counts[c._status] = counts.get(c._status, 0) + 1
+        self._status_summary.setText(
+            f"{counts['done']} Captioned · {counts['partial']} Partial · {counts['bare']} Bare")
+
+    @staticmethod
+    def _image_status(item: dict) -> str:
+        """done = has training .txt · partial = has .tags/.nl only · bare = nothing."""
+        if (item.get("caption") or "").strip():
+            return "done"
+        stem = Path(item["image_path"])
+        if stem.with_suffix(".tags").exists() or stem.with_suffix(".nl").exists():
+            return "partial"
+        return "bare"
 
     def _clear_gallery(self):
         for card in self._cards:

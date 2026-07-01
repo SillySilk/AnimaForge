@@ -77,7 +77,7 @@ DEFAULTS = {
     # Sample images during training (on by default so progress previews "just happen")
     "sample_enable": True,
     "sample_prompts": "",
-    "sample_every_n_epochs": 1,
+    "sample_every_n_epochs": 10,
     "sample_count": 4,
     "sample_sampler": "euler_a",
     "sample_at_first": True,

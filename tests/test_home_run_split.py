@@ -12,10 +12,11 @@ _app = QApplication.instance() or QApplication([])
 
 def test_has_split_run_buttons_and_signals():
     t = HomeTab()
-    # Captioning and training controls are now the relocated Dataset/Train panels mounted
-    # into these slots — Home no longer owns its own caption/train/batch buttons.
-    assert hasattr(t, "_caption_mount") and hasattr(t, "mount_caption_controls")
-    assert hasattr(t, "_train_mount") and hasattr(t, "mount_train_controls")
+    # Caption/train panels are stashed and shown in the Options/Presets modals; the pillars
+    # carry the primary Run Captioning / Start Training buttons.
+    assert hasattr(t, "mount_caption_controls") and hasattr(t, "_open_caption_modal")
+    assert hasattr(t, "mount_train_controls") and hasattr(t, "_open_train_modal")
+    assert hasattr(t, "run_caption_requested") and hasattr(t, "start_train_requested")
 
 
 def test_autoset_type_from_filenames(tmp_path):

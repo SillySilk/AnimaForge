@@ -143,7 +143,7 @@ def test_sample_args_writes_file_with_trigger(tmp_path):
     assert lines[0] == "mychar, a girl on a bench"   # trigger prepended
     assert lines[1] == "mychar, a closeup"            # already had trigger, not doubled
     assert args["sample_prompts"].endswith("lr_sample.txt")
-    assert args["sample_every_n_epochs"] == 1
+    assert args["sample_every_n_epochs"] == 10   # default: a preview every 10 epochs
 
 
 def test_prepare_sample_args_prepends_trigger_and_style_anchor(tmp_path):

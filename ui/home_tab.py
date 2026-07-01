@@ -1,15 +1,15 @@
 import os
+import json
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal, QThread
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
-    QComboBox, QFileDialog, QFrame, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
-    QPushButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget,
+    QButtonGroup, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QInputDialog,
+    QLabel, QLineEdit, QPushButton, QRadioButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
-from utils.styles import asset_url
-from ui.run_progress import RunProgress
+from ui.forge_modal import ForgeModal
 
 
 class _LmsPing(QThread):
@@ -33,26 +33,41 @@ class _LmsPing(QThread):
 
 
 class HomeTab(QWidget):
+    """Home — "The Bench": the one-click cockpit.
+
+    Point at a folder, name it, then the two moves — Caption, then Train — with
+    everything else popped out (Ready checklist modal, Save/Load Project).
+
+    Home is the single source of truth for the run definition. The heavy
+    controls (caption panel, step calculator, train panel) are the *real*
+    widgets owned by the Dataset/Train tabs and mounted here by MainWindow, so
+    all engine wiring stays intact — this screen only reframes them in the forge
+    layout.
+    """
+
     navigate = Signal(int)
     autodetect_requested = Signal()
     recover_requested = Signal()
 
     # Quick Run cockpit intents — MainWindow translates these into the real tabs.
-    # Caption/train/batch are no longer Home signals: those controls are the relocated
-    # Dataset/Train panels, wired directly to their owning tab's engine.
     folder_chosen = Signal(str)
     name_changed = Signal(str)
     trigger_changed = Signal(str)  # the set's trigger word (single source; drives Dataset+Train)
     prefix_changed = Signal(str)   # quality prefix baked at Combine (single source; drives Dataset)
-    type_changed = Signal(str)    # "character" / "concept" / "style" (auto-detect → Train)
+    type_changed = Signal(str)     # "character" / "concept" / "style" (auto-detect → Train)
     anchor_changed = Signal(str)
-    run_requested = Signal()
+    run_requested = Signal()          # "Forge It" — the unattended caption→train pipeline
+    run_caption_requested = Signal()  # pillar "Run Captioning" button
+    start_train_requested = Signal()  # pillar "Start Training" button
 
     _GLYPH = {"ok": "✓", "idle": "–", "err": "✗"}
     _OBJ = {"ok": "ready_row_ok", "idle": "ready_row_idle", "err": "ready_row_err"}
     # Subject type keys, parallel to the cockpit combo entries.
     _TYPE_KEYS = ["character", "concept", "style"]
     _TYPE_LABELS = ["Character", "Object / Concept", "Style"]
+    # The six "core envt" rows surfaced in the header Ready pill / checklist modal.
+    _READY_CORE = ["sd-scripts", "DiT model", "Qwen3 encoder", "VAE",
+                   "PyTorch 2.5+", "LM Studio"]
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -60,6 +75,7 @@ class HomeTab(QWidget):
         self._recent_label = None
         self._recover_btn = None
         self._lms_thread = None
+        self._last_ctx = {}
         self._build_ui()
 
     # ---- pure logic (unit-tested) ----
@@ -104,12 +120,22 @@ class HomeTab(QWidget):
             return ""
         return base.replace(" ", "_")
 
+    @staticmethod
+    def validate_lora_name(raw: str):
+        """Inline name check → (ok, message). Rules per the design handoff."""
+        raw = (raw or "").strip()
+        if not raw:
+            return False, "Name is empty"
+        if any(c.isspace() for c in raw):
+            return False, "No spaces — use _ instead"
+        if any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-" for c in raw):
+            return False, "Letters, numbers, . _ - only"
+        if len(raw) > 64:
+            return False, "Too long (max 64)"
+        return True, "Good — safe to forge"
+
     # ---- construction ----
     def _build_ui(self):
-        # Wrap content in a scroll area (like the other tabs) so that when the
-        # window is shorter than the cockpit's natural height the content
-        # scrolls instead of compressing children past their minimums and
-        # overlapping (e.g. Run buttons landing on top of the Type/steps row).
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
 
@@ -121,197 +147,560 @@ class HomeTab(QWidget):
         content = QWidget()
         scroll.setWidget(content)
 
-        root = QVBoxLayout(content)
-        root.setContentsMargins(24, 20, 24, 20)
-        root.setSpacing(16)
+        # centred column, capped ~1120px per the mock
+        wrap = QHBoxLayout(content)
+        wrap.setContentsMargins(34, 22, 34, 40)
+        wrap.addStretch()
+        col_host = QWidget()
+        col_host.setMaximumWidth(1120)
+        wrap.addWidget(col_host, 1)
+        wrap.addStretch()
 
-        hero = QWidget()
-        hero.setObjectName("hero")
-        hero.setFixedHeight(150)
-        hl = QHBoxLayout(hero)
-        hl.setContentsMargins(20, 0, 20, 0)
-        emblem = QLabel()
-        pm = QPixmap(asset_url("emblem.png"))
-        if not pm.isNull():
-            emblem.setPixmap(pm.scaledToHeight(110, Qt.SmoothTransformation))
-        emblem.setStyleSheet("background: transparent;")
-        hl.addWidget(emblem)
-        title = QLabel("Anima Forge LoRA Trainer\nwith Auto-Captioning")
-        title.setObjectName("hero_title")
-        hl.addWidget(title)
-        hl.addStretch()
-        root.addWidget(hero)
+        root = QVBoxLayout(col_host)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(22)
 
-        body = QHBoxLayout()
-        body.setSpacing(16)
-
-        # readiness card
-        ready_card = QFrame()
-        ready_card.setObjectName("card")
-        rc = QVBoxLayout(ready_card)
-        rl = QLabel("FORGE READINESS")
-        rl.setObjectName("label_section")
-        rc.addWidget(rl)
+        # detached readiness labels (surfaced in the Ready modal; kept live for
+        # _set_row / the LM Studio ping regardless of whether the modal is open)
         for label, _ in self._readiness_rows({}):
             row = QLabel()
             row.setObjectName("ready_row_idle")
             self._ready_labels[label] = row
-            rc.addWidget(row)
-        rc.addStretch()
-        body.addWidget(ready_card, 1)
 
-        # ---- Quick Run cockpit (the heart of Home) ----
-        body.addWidget(self._build_quick_run_card(), 2)
-
-        # recent outputs card
-        rec_card = QFrame()
-        rec_card.setObjectName("card")
-        recl = QVBoxLayout(rec_card)
-        rh = QLabel("RECENT OUTPUTS")
-        rh.setObjectName("label_section")
-        recl.addWidget(rh)
-        self._recent_label = QLabel("No runs yet.")
-        self._recent_label.setWordWrap(True)
-        recl.addWidget(self._recent_label)
-        recl.addStretch()
-        body.addWidget(rec_card, 1)
-
-        root.addLayout(body)
+        root.addWidget(self._build_action_row())
+        root.addWidget(self._build_set_card())
+        root.addWidget(self._build_pillars())
+        root.addWidget(self._build_lever())
+        root.addWidget(self._build_footer())
         root.addStretch()
 
-    def _build_quick_run_card(self) -> QFrame:
+    # ---- action row (Save / Load / Ready pill) ----
+    def _build_action_row(self) -> QWidget:
+        row = QWidget()
+        h = QHBoxLayout(row)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(12)
+        h.addStretch()
+
+        save = QPushButton("  Save Project")
+        save.setObjectName("af_btn_ghost")
+        save.setMinimumHeight(36)
+        save.setCursor(Qt.PointingHandCursor)
+        save.clicked.connect(self._save_project)
+        h.addWidget(save)
+
+        load = QPushButton("  Load Project")
+        load.setObjectName("af_btn_ghost")
+        load.setMinimumHeight(36)
+        load.setCursor(Qt.PointingHandCursor)
+        load.clicked.connect(self._load_project)
+        h.addWidget(load)
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.VLine)
+        sep.setFixedHeight(22)
+        h.addWidget(sep)
+
+        self._ready_pill = QPushButton("READY · 0 / 6")
+        self._ready_pill.setObjectName("af_pill_ok")
+        self._ready_pill.setMinimumHeight(36)
+        self._ready_pill.setCursor(Qt.PointingHandCursor)
+        self._ready_pill.clicked.connect(self._open_ready_modal)
+        h.addWidget(self._ready_pill)
+
+        info = QPushButton("i")
+        info.setObjectName("af_icon_btn")
+        info.setFixedSize(36, 36)
+        info.setCursor(Qt.PointingHandCursor)
+        info.setToolTip("Ready checklist")
+        info.clicked.connect(self._open_ready_modal)
+        h.addWidget(info)
+        return row
+
+    # ---- The Set ----
+    def _build_set_card(self) -> QFrame:
         card = QFrame()
-        card.setObjectName("card")
-        ac = QVBoxLayout(card)
-        al = QLabel("QUICK RUN")
-        al.setObjectName("label_section")
-        ac.addWidget(al)
+        card.setObjectName("af_card")
+        c = QVBoxLayout(card)
+        c.setContentsMargins(20, 18, 20, 16)
+        c.setSpacing(10)
 
-        hint = QLabel("Point at a folder, name it, pick a type, and Run — captioning and naming "
-                      "happen automatically. Drop into the Train tab only to fine-tune.")
-        hint.setWordWrap(True)
-        hint.setStyleSheet("color: #8a8a93; font-size: 11px;")
-        ac.addWidget(hint)
+        # dataset folder header row
+        top = QHBoxLayout()
+        lbl = QLabel("DATASET FOLDER")
+        lbl.setObjectName("af_eyebrow_mute")
+        top.addWidget(lbl)
+        top.addStretch()
+        self._folder_status = QLabel("")
+        self._folder_status.setObjectName("af_eyebrow_mute")
+        self._folder_status.setStyleSheet("color:#8fa86b;")
+        top.addWidget(self._folder_status)
+        c.addLayout(top)
 
-        # Run progress — a prominent, isolated band at the top of the cockpit so its
-        # phase/counter labels never crowd (or overlap) the form fields below.
-        self._run_progress = RunProgress()
-        ac.addWidget(self._run_progress)
-        prog_sep = QFrame()
-        prog_sep.setFrameShape(QFrame.HLine)
-        prog_sep.setStyleSheet("color: #2a2a1e;")
-        ac.addWidget(prog_sep)
-
-        # Dataset folder
-        ac.addWidget(self._field_label("Dataset folder"))
         folder_row = QHBoxLayout()
+        folder_row.setSpacing(8)
         self._folder_edit = QLineEdit()
         self._folder_edit.setReadOnly(True)
+        self._folder_edit.setMinimumHeight(42)
         self._folder_edit.setPlaceholderText("Choose the folder with your LoRA images…")
-        browse = QPushButton("Browse…")
-        browse.setFixedWidth(84)
+        browse = QPushButton("Browse")
+        browse.setObjectName("af_btn_ghost")
+        browse.setMinimumHeight(42)
+        browse.setFixedWidth(96)
+        browse.setCursor(Qt.PointingHandCursor)
         browse.clicked.connect(self._browse_folder)
         folder_row.addWidget(self._folder_edit)
         folder_row.addWidget(browse)
-        ac.addLayout(folder_row)
+        c.addLayout(folder_row)
 
-        # LoRA name
-        ac.addWidget(self._field_label("LoRA name"))
+        # slim tagline (half-height hero)
+        tagline = QHBoxLayout()
+        tagline.setSpacing(12)
+        big = QLabel("Point it at a folder. Name it. Forge.")
+        big.setObjectName("af_display_gold4")
+        tagline.addWidget(big)
+        mk = QLabel("caption, then train.")
+        mk.setObjectName("af_marker")
+        mk.setStyleSheet("color:#a89c7e;")
+        tagline.addWidget(mk)
+        tagline.addStretch()
+        c.addSpacing(4)
+        c.addLayout(tagline)
+
+        rule = QFrame()
+        rule.setObjectName("af_rule")
+        rule.setFixedHeight(2)
+        c.addWidget(rule)
+
+        # name (+ Check) / trigger / prefix
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(16)
+        grid.setVerticalSpacing(6)
+        grid.addWidget(self._field_label("LORA NAME"), 0, 0)
+        grid.addWidget(self._field_label("TRIGGER WORD (OPTIONAL)"), 0, 1)
+        grid.addWidget(self._field_label("QUALITY PREFIX (OPTIONAL)"), 0, 2)
+
+        name_row = QWidget()
+        nr = QHBoxLayout(name_row)
+        nr.setContentsMargins(0, 0, 0, 0)
+        nr.setSpacing(8)
         self._name_edit = QLineEdit()
-        self._name_edit.setPlaceholderText("Set when you choose a folder — editable here")
-        self._name_edit.textEdited.connect(self.name_changed.emit)
-        ac.addWidget(self._name_edit)
+        self._name_edit.setMinimumHeight(42)
+        self._name_edit.setPlaceholderText("Set when you choose a folder")
+        self._name_edit.textEdited.connect(self._on_name_edited)
+        check = QPushButton("  Check")
+        check.setObjectName("af_btn_ghost")
+        check.setMinimumHeight(42)
+        check.setCursor(Qt.PointingHandCursor)
+        check.clicked.connect(self._validate_name)
+        nr.addWidget(self._name_edit)
+        nr.addWidget(check)
+        grid.addWidget(name_row, 1, 0)
 
-        # Trigger word — mirrors the Dataset tab's box so the set's trigger can be
-        # set here on the front page, where most processing is driven from.
-        ac.addWidget(self._field_label("Trigger word (optional)"))
         self._trigger_edit = QLineEdit()
-        self._trigger_edit.setPlaceholderText("e.g. mycharacter (optional)")
+        self._trigger_edit.setMinimumHeight(42)
+        self._trigger_edit.setPlaceholderText("e.g. mycharacter")
         self._trigger_edit.textEdited.connect(self.trigger_changed.emit)
-        ac.addWidget(self._trigger_edit)
+        grid.addWidget(self._trigger_edit, 1, 1)
 
-        # Quality prefix — baked into the final captions when you Combine.
-        ac.addWidget(self._field_label("Quality prefix (optional)"))
         self._prefix_edit = QLineEdit()
-        self._prefix_edit.setPlaceholderText("optional, e.g. masterpiece, best quality")
+        self._prefix_edit.setMinimumHeight(42)
+        self._prefix_edit.setPlaceholderText("e.g. masterpiece, best quality")
         self._prefix_edit.textEdited.connect(self.prefix_changed.emit)
-        ac.addWidget(self._prefix_edit)
+        grid.addWidget(self._prefix_edit, 1, 2)
 
-        # Step Calculator (subject type, target steps, uncap, readout) is relocated here from
-        # the Train tab so the front page is the single place to pick the type and tune steps.
-        # MainWindow mounts the real widget (TrainTab.step_calculator()) into this slot.
-        self._stepcalc_mount = QVBoxLayout()
-        self._stepcalc_mount.setContentsMargins(0, 0, 0, 0)
-        ac.addLayout(self._stepcalc_mount)
+        grid.setColumnStretch(0, 135)
+        grid.setColumnStretch(1, 100)
+        grid.setColumnStretch(2, 100)
+        c.addSpacing(4)
+        c.addLayout(grid)
+
+        # inline name-check status
+        self._name_msg = QLabel("")
+        self._name_msg.setObjectName("af_eyebrow_mute")
+        self._name_msg.setVisible(False)
+        c.addWidget(self._name_msg)
+
+        # Subject type as radios (easy to pick, hard to fat-finger) + a gear that opens the
+        # numeric Step Calculator (target steps, cap removal, readout) in a modal.
+        c.addSpacing(6)
+        sub_row = QHBoxLayout()
+        sub_row.setSpacing(10)
+        sub_lbl = QLabel("SUBJECT TYPE")
+        sub_lbl.setObjectName("af_eyebrow_mute")
+        sub_row.addWidget(sub_lbl)
+        self._type_group = QButtonGroup(self)
+        self._type_radios = {}
+        for key, label in zip(self._TYPE_KEYS, self._TYPE_LABELS):
+            rb = QRadioButton(label)
+            rb.setObjectName("af_radio")
+            rb.setCursor(Qt.PointingHandCursor)
+            rb.toggled.connect(lambda checked, k=key: checked and self.type_changed.emit(k))
+            self._type_group.addButton(rb)
+            self._type_radios[key] = rb
+            sub_row.addWidget(rb)
+        self._type_radios["character"].setChecked(True)
+        sub_row.addStretch()
+        gear = QPushButton("⚙")
+        gear.setObjectName("af_icon_btn")
+        gear.setFixedSize(34, 34)
+        gear.setCursor(Qt.PointingHandCursor)
+        gear.setToolTip("Target steps & advanced step settings")
+        gear.clicked.connect(self._open_stepcalc_modal)
+        sub_row.addWidget(gear)
+        c.addLayout(sub_row)
 
         # Style @anchor (only meaningful for Style runs)
-        self._anchor_label = self._field_label("Style @anchor (optional)")
-        ac.addWidget(self._anchor_label)
+        self._anchor_label = self._field_label("STYLE @ANCHOR (OPTIONAL)")
+        c.addWidget(self._anchor_label)
         self._anchor_edit = QLineEdit()
+        self._anchor_edit.setMinimumHeight(38)
         self._anchor_edit.setPlaceholderText("@mystyle")
         self._anchor_edit.textEdited.connect(self.anchor_changed.emit)
-        ac.addWidget(self._anchor_edit)
+        c.addWidget(self._anchor_edit)
         self._set_anchor_visible(False)
 
-        # Captioning controls are relocated here from the Dataset tab so the front page is
-        # the single place to drive captioning. MainWindow mounts the real panel
-        # (DatasetTab.caption_controls()) into this slot — captions the images only.
-        self._caption_mount = QVBoxLayout()
-        self._caption_mount.setContentsMargins(0, 0, 0, 0)
-        ac.addLayout(self._caption_mount)
+        return card
 
-        # Training controls (Sample Previews, Start/Stop, Add to Batch, Deliver/Test in
-        # Forge, Low VRAM, and the Advanced set-once block) are relocated here from the Train
-        # tab so the front page is the single place to drive a run. MainWindow mounts the real
-        # panel (TrainTab.control_panel()) into this slot.
-        self._train_mount = QVBoxLayout()
-        self._train_mount.setContentsMargins(0, 0, 0, 0)
-        ac.addLayout(self._train_mount)
+    # ---- two pillars ----
+    def _build_pillars(self) -> QWidget:
+        host = QWidget()
+        g = QGridLayout(host)
+        g.setContentsMargins(0, 0, 0, 0)
+        g.setHorizontalSpacing(0)
 
-        sep = QFrame()
-        sep.setFrameShape(QFrame.HLine)
-        sep.setStyleSheet("color: #2a2a1e;")
-        ac.addWidget(sep)
+        # CAPTION pillar
+        cap = QFrame()
+        cap.setObjectName("af_card")
+        cl = QVBoxLayout(cap)
+        cl.setContentsMargins(22, 0, 22, 22)
+        cl.setSpacing(0)
+        cl.addWidget(self._pillar_accent())
+        cl.addSpacing(18)
+        cl.addWidget(self._pillar_head("STEP 01", "Caption",
+                                       action_label="Options",
+                                       on_action=self._open_caption_modal))
+        marker = QLabel("Tag, describe & combine — training-ready text for every image.")
+        marker.setObjectName("af_marker")
+        marker.setWordWrap(True)
+        cl.addWidget(marker)
+        cl.addSpacing(14)
+        cl.addLayout(self._chip_row(["Auto-Tag", "Describe", "Combine"]))
+        cl.addSpacing(14)
+        # live status line (N / M captioned)
+        status_row = QHBoxLayout()
+        sl = QLabel("STATUS")
+        sl.setObjectName("af_eyebrow_mute")
+        status_row.addWidget(sl)
+        status_row.addStretch()
+        self._caption_status = QLabel("— not captioned")
+        self._caption_status.setObjectName("af_stat_value")
+        status_row.addWidget(self._caption_status)
+        cl.addLayout(status_row)
+        cl.addStretch()
+        # primary action; the mass of options lives in the Options modal
+        self._run_caption_btn = QPushButton("📝  Run Captioning")
+        self._run_caption_btn.setObjectName("btn_start")
+        self._run_caption_btn.setMinimumHeight(48)
+        self._run_caption_btn.setCursor(Qt.PointingHandCursor)
+        self._run_caption_btn.clicked.connect(self.run_caption_requested.emit)
+        cl.addWidget(self._run_caption_btn)
+        g.addWidget(cap, 0, 0)
 
-        # Secondary shortcuts
-        links = QHBoxLayout()
-        for text, idx in [("\U0001f5bc  Dataset", 2), ("\U0001f4e6  Batch", 5)]:
-            b = QPushButton(text)
-            b.setObjectName("quick_action")
-            b.setCursor(Qt.PointingHandCursor)
-            b.clicked.connect(lambda _c=False, i=idx: self._go(i))
-            links.addWidget(b)
-        ac.addLayout(links)
+        # connector
+        conn = QWidget()
+        conn.setFixedWidth(54)
+        cc = QVBoxLayout(conn)
+        cc.setContentsMargins(0, 0, 0, 0)
+        cc.addStretch()
+        ingot = QLabel("→")
+        ingot.setAlignment(Qt.AlignCenter)
+        ingot.setFixedSize(38, 38)
+        ingot.setStyleSheet(
+            "background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #f6c453, stop:1 #b8860b);"
+            "color:#1a1206; border-radius:19px; font-size:19px;")
+        cc.addWidget(ingot, 0, Qt.AlignHCenter)
+        then = QLabel("then")
+        then.setObjectName("af_marker_gold")
+        then.setAlignment(Qt.AlignCenter)
+        cc.addWidget(then)
+        cc.addStretch()
+        g.addWidget(conn, 0, 1)
 
-        detect = QPushButton("Auto-detect models")
-        detect.clicked.connect(self.autodetect_requested.emit)
-        ac.addWidget(detect)
+        # TRAIN pillar
+        tr = QFrame()
+        tr.setObjectName("af_card")
+        tl = QVBoxLayout(tr)
+        tl.setContentsMargins(22, 0, 22, 22)
+        tl.setSpacing(0)
+        tl.addWidget(self._pillar_accent())
+        tl.addSpacing(18)
+        tl.addWidget(self._pillar_head("STEP 02", "Train",
+                                       action_label="Presets",
+                                       on_action=self._open_train_modal))
+        marker2 = QLabel("Anima-tuned settings, already dialed in. Just pull the lever.")
+        marker2.setObjectName("af_marker")
+        marker2.setWordWrap(True)
+        tl.addWidget(marker2)
+        tl.addSpacing(14)
+        tl.addLayout(self._stat_tiles())
+        tl.addSpacing(10)
+        # compact network readout (dim · alpha · resolution)
+        self._network_line = QLabel("dim 16 · alpha 8 · 1024px")
+        self._network_line.setObjectName("af_eyebrow_mute")
+        tl.addWidget(self._network_line)
+        tl.addStretch()
+        # primary action; the mass of settings lives in the Presets modal
+        self._start_train_btn = QPushButton("🚀  Start Training")
+        self._start_train_btn.setObjectName("btn_start")
+        self._start_train_btn.setMinimumHeight(48)
+        self._start_train_btn.setCursor(Qt.PointingHandCursor)
+        self._start_train_btn.clicked.connect(self.start_train_requested.emit)
+        tl.addWidget(self._start_train_btn)
+        g.addWidget(tr, 0, 2)
 
+        g.setColumnStretch(0, 1)
+        g.setColumnStretch(2, 1)
+        return host
+
+    def _pillar_accent(self) -> QFrame:
+        acc = QFrame()
+        acc.setObjectName("af_pillar_accent")
+        acc.setFixedHeight(2)
+        return acc
+
+    def _pillar_head(self, step: str, title: str, action_label=None, on_action=None) -> QWidget:
+        head = QWidget()
+        h = QHBoxLayout(head)
+        h.setContentsMargins(0, 0, 0, 0)
+        col = QVBoxLayout()
+        col.setSpacing(2)
+        eb = QLabel(step)
+        eb.setObjectName("af_eyebrow_flame")
+        col.addWidget(eb)
+        t = QLabel(title)
+        t.setObjectName("af_display_gold")
+        col.addWidget(t)
+        h.addLayout(col)
+        h.addStretch()
+        if action_label and on_action is not None:
+            btn = QPushButton("⚙  " + action_label)
+            btn.setObjectName("af_btn_ghost")
+            btn.setMinimumHeight(32)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setToolTip(f"{action_label} — the full options open in a modal")
+            btn.clicked.connect(on_action)
+            h.addWidget(btn, 0, Qt.AlignTop)
+        return head
+
+    def _chip_row(self, labels) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        for i, text in enumerate(labels):
+            chip = QLabel(text.upper())
+            chip.setObjectName("af_chip")
+            chip.setAlignment(Qt.AlignCenter)
+            row.addWidget(chip, 1)
+            if i < len(labels) - 1:
+                arr = QLabel("→")
+                arr.setStyleSheet("color:#8a5a12;")
+                row.addWidget(arr)
+        return row
+
+    def _stat_tiles(self) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        self._tile_values = {}
+        for key, cap_text, val in [("steps", "TARGET STEPS", "—"),
+                                   ("optimizer", "OPTIMIZER", "Prodigy")]:
+            tile = QFrame()
+            tile.setObjectName("af_well")
+            tv = QVBoxLayout(tile)
+            tv.setContentsMargins(12, 9, 12, 9)
+            tv.setSpacing(2)
+            cl = QLabel(cap_text)
+            cl.setObjectName("af_eyebrow_mute")
+            tv.addWidget(cl)
+            vv = QLabel(val)
+            vv.setObjectName("af_stat_value")
+            tv.addWidget(vv)
+            self._tile_values[key] = vv
+            row.addWidget(tile, 1)
+        return row
+
+    # ---- live readouts (fed by MainWindow.refresh) ----
+    def set_caption_status(self, done: int, total: int):
+        if total:
+            self._caption_status.setText(f"{done} / {total} captioned")
+        else:
+            self._caption_status.setText("— not captioned")
+
+    def set_train_summary(self, steps=None, optimizer=None, dim=None, alpha=None, res=None):
+        if steps is not None:
+            self._tile_values["steps"].setText(str(steps))
+        if optimizer:
+            self._tile_values["optimizer"].setText(str(optimizer))
+        if dim is not None and alpha is not None and res is not None:
+            self._network_line.setText(f"dim {dim} · alpha {alpha} · {res}px")
+
+    # ---- The Lever ----
+    def _build_lever(self) -> QFrame:
+        band = QFrame()
+        band.setObjectName("af_lever")
+        h = QHBoxLayout(band)
+        h.setContentsMargins(22, 16, 22, 16)
+        h.setSpacing(20)
+        col = QVBoxLayout()
+        col.setSpacing(4)
+        eb = QLabel("UNATTENDED PIPELINE")
+        eb.setObjectName("af_eyebrow_flame")
+        eb.setStyleSheet("color:#f4d160; letter-spacing:3px;")
+        col.addWidget(eb)
+        mk = QLabel("Forge it — caption, then train. Walk away.")
+        mk.setObjectName("af_marker")
+        mk.setStyleSheet("color:#e9e0cc; font-size:18px;")
+        col.addWidget(mk)
+        h.addLayout(col)
+        h.addStretch()
+
+        forge = QPushButton("⚒  Forge It")
+        forge.setObjectName("af_btn_forge")
+        forge.setMinimumHeight(52)
+        forge.setMinimumWidth(200)
+        forge.setCursor(Qt.PointingHandCursor)
+        forge.clicked.connect(self.run_requested.emit)
+        h.addWidget(forge)
+        return band
+
+    # ---- footer (recover / auto-detect / recent) ----
+    def _build_footer(self) -> QWidget:
+        foot = QWidget()
+        v = QVBoxLayout(foot)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(10)
+
+        row = QHBoxLayout()
+        row.setSpacing(12)
         self._recover_btn = QPushButton("♻  Recover last run")
         self._recover_btn.setObjectName("btn_primary")
+        self._recover_btn.setCursor(Qt.PointingHandCursor)
         self._recover_btn.clicked.connect(self.recover_requested.emit)
         self._recover_btn.setVisible(False)
-        ac.addWidget(self._recover_btn)
+        row.addWidget(self._recover_btn)
+        row.addStretch()
+        detect = QPushButton("Auto-detect models")
+        detect.setObjectName("af_btn_ghost")
+        detect.setMinimumHeight(34)
+        detect.setCursor(Qt.PointingHandCursor)
+        detect.clicked.connect(self.autodetect_requested.emit)
+        row.addWidget(detect)
+        v.addLayout(row)
 
-        ac.addStretch()
-
-        # Configure Setup demoted to the very bottom — it's a set-once concern.
-        cfg = QPushButton("⚙  Configure Setup")
-        cfg.setObjectName("quick_action")
-        cfg.setCursor(Qt.PointingHandCursor)
-        cfg.clicked.connect(lambda: self._go(1))
-        ac.addWidget(cfg)
-        return card
+        self._recent_label = QLabel("No runs yet.")
+        self._recent_label.setObjectName("af_eyebrow_mute")
+        self._recent_label.setWordWrap(True)
+        v.addWidget(self._recent_label)
+        return foot
 
     @staticmethod
     def _field_label(text: str) -> QLabel:
         lab = QLabel(text)
-        lab.setStyleSheet("color: #9a9aa2; font-size: 11px; font-weight: 600; padding-top: 4px;")
+        lab.setObjectName("af_eyebrow_mute")
         return lab
 
     def _set_anchor_visible(self, visible: bool):
         self._anchor_label.setVisible(visible)
         self._anchor_edit.setVisible(visible)
+
+    # ---- name validation ----
+    def _on_name_edited(self, text: str):
+        self._name_msg.setVisible(False)
+        self.name_changed.emit(text)
+
+    def _validate_name(self):
+        ok, msg = self.validate_lora_name(self._name_edit.text())
+        self._name_msg.setText(("✓  " if ok else "⚠  ") + msg)
+        self._name_msg.setStyleSheet(
+            "color:#8fa86b;" if ok else "color:#ff9a5c;")
+        self._name_msg.setVisible(True)
+
+    # ---- Save / Load Project ----
+    def _save_project(self):
+        name = (self._name_edit.text() or "animaforge").strip() or "animaforge"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Project", f"{name}.forge.json",
+            "AnimaForge Project (*.forge.json *.json)")
+        if not path:
+            return
+        data = {
+            "folder": self._folder_edit.text(),
+            "loraName": self._name_edit.text(),
+            "triggerWord": self._trigger_edit.text(),
+            "qualityPrefix": self._prefix_edit.text(),
+        }
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+        except Exception:
+            pass
+
+    def _load_project(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Load Project", "",
+            "AnimaForge Project (*.forge.json *.json)")
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                d = json.load(f)
+        except Exception:
+            return
+        folder = d.get("folder") or ""
+        name = d.get("loraName") or ""
+        trigger = d.get("triggerWord") or ""
+        prefix = d.get("qualityPrefix") or ""
+        if name:
+            self._name_edit.setText(name)
+            self.name_changed.emit(name)
+        if trigger:
+            self._trigger_edit.setText(trigger)
+            self.trigger_changed.emit(trigger)
+        if prefix:
+            self._prefix_edit.setText(prefix)
+            self.prefix_changed.emit(prefix)
+        if folder:
+            self._folder_edit.setText(folder)
+            # loading the folder re-derives subject type + steps downstream
+            self.folder_chosen.emit(folder)
+            self._autoset_type(folder)
+
+    # ---- Ready checklist modal ----
+    def _open_ready_modal(self):
+        rows = self._readiness_rows(self._last_ctx or {})
+        ok = sum(1 for k, s in rows if k in self._READY_CORE and s == "ok")
+        modal = ForgeModal(
+            self.window(), title="Ready to Forge",
+            subtitle="What's lit, and what's still cold.", max_width=440)
+        for label, state in rows:
+            r = QLabel(f"{self._GLYPH.get(state, '–')}   {label}"
+                       + ("   (optional)" if label == "LM Studio" else ""))
+            r.setObjectName(self._OBJ.get(state, "ready_row_idle"))
+            modal.body.addWidget(r)
+        ctx = self._last_ctx or {}
+        note = QLabel(
+            f"{ctx.get('image_count', 0)} images · "
+            f"{ok} / {len(self._READY_CORE)} core requirements ready")
+        note.setObjectName("af_eyebrow_mute")
+        note.setContentsMargins(0, 12, 0, 0)
+        modal.body.addWidget(note)
+        done = modal.add_footer_button("Close", primary=True)
+        done.clicked.connect(modal.close_modal)
+        modal.open()
+
+    def _update_ready_pill(self, ctx):
+        rows = dict(self._readiness_rows(ctx))
+        ok = sum(1 for k in self._READY_CORE if rows.get(k) == "ok")
+        self._ready_pill.setText(f"READY · {ok} / {len(self._READY_CORE)}")
 
     # ---- cockpit slots ----
     def _browse_folder(self):
@@ -351,23 +740,88 @@ class HomeTab(QWidget):
             self.type_changed.emit(key)
 
     def mount_caption_controls(self, widget):
-        """Host the Dataset tab's caption control panel on Home (single source of truth)."""
-        self._caption_mount.addWidget(widget)
+        """Stash the Dataset tab's caption panel — shown in the Caption Options modal."""
+        self._caption_panel = widget
+        widget.setParent(self)
+        widget.setVisible(False)
 
     def mount_train_controls(self, widget):
-        """Host the Train tab's run controls (previews/actions/advanced) on Home."""
-        self._train_mount.addWidget(widget)
+        """Stash the Train tab's control panel — shown in the Train Presets modal."""
+        self._train_panel = widget
+        widget.setParent(self)
+        widget.setVisible(False)
+
+    # ---- Options / Presets modals (host the stashed real panels) ----
+    def _restash(self, panel):
+        """Reparent a panel back onto Home (hidden) before its modal is destroyed, so the
+        panel and its live state survive close/reopen."""
+        if panel is not None:
+            panel.setParent(self)
+            panel.setVisible(False)
+
+    def _open_caption_modal(self):
+        panel = getattr(self, "_caption_panel", None)
+        if panel is None:
+            return
+        modal = ForgeModal(
+            self.window(), title="Captioning", eyebrow="Step 01 · Options",
+            subtitle="Run the passes, or fire an individual step.", max_width=560)
+        panel.setVisible(True)
+        modal.body.addWidget(panel)
+        modal.closed.connect(lambda p=panel: self._restash(p))
+        modal.add_footer_button("Close", primary=True).clicked.connect(modal.close_modal)
+        modal.open()
+
+    def _open_train_modal(self):
+        panel = getattr(self, "_train_panel", None)
+        if panel is None:
+            return
+        modal = ForgeModal(
+            self.window(), title="Train Presets", eyebrow="Step 02 · Presets",
+            subtitle="Sample previews, optimizer & network, run options — all here.",
+            max_width=620)
+        panel.setVisible(True)
+        modal.body.addWidget(panel)
+        modal.closed.connect(lambda p=panel: self._restash(p))
+        modal.add_footer_button("Close", primary=True).clicked.connect(modal.close_modal)
+        modal.open()
 
     def mount_step_calculator(self, widget):
-        """Host the Train tab's Step Calculator (type + target steps) on Home."""
-        self._stepcalc_mount.addWidget(widget)
+        """Stash the Train tab's Step Calculator — shown in the gear modal (numeric settings)."""
+        self._stepcalc_panel = widget
+        widget.setParent(self)
+        widget.setVisible(False)
+
+    def _open_stepcalc_modal(self):
+        panel = getattr(self, "_stepcalc_panel", None)
+        if panel is None:
+            return
+        panel.setVisible(True)
+        modal = ForgeModal(
+            self.window(), title="Step Calculator", eyebrow="Fine Tuning",
+            subtitle="Target steps and the exposure cap — tuned to the subject type.",
+            max_width=520)
+        modal.body.addWidget(panel)
+        modal.closed.connect(lambda p=panel: self._restash(p))
+        modal.add_footer_button("Done", primary=True).clicked.connect(modal.close_modal)
+        modal.open()
+
+    def set_subject_radio(self, key: str):
+        """Reflect the current subject type on the radios (no signal echo)."""
+        rb = self._type_radios.get((key or "").lower())
+        if rb is not None and not rb.isChecked():
+            rb.blockSignals(True)
+            rb.setChecked(True)
+            rb.blockSignals(False)
 
     def set_style_anchor_visible(self, visible: bool):
         """Show the Style @anchor field only for Style runs (driven by Train's subject type)."""
         self._set_anchor_visible(bool(visible))
 
     def apply_run_progress(self, payload):
-        self._run_progress.apply(payload)
+        # The mounted Train control panel carries the live RunProgress; Home mirrors it there,
+        # so this remains a no-op-safe hook for MainWindow's existing wiring.
+        pass
 
     # ---- refresh + nav ----
     def _go(self, index):
@@ -387,6 +841,9 @@ class HomeTab(QWidget):
         folder = context.get("dataset_folder", "") or ""
         self._folder_edit.setText(folder)
 
+        count = context.get("image_count", 0) or 0
+        self._folder_status.setText(f"✓ {count} images" if (folder and count) else "")
+
         self._name_edit.blockSignals(True)
         self._name_edit.setText(context.get("lora_name", "") or "")
         self._name_edit.blockSignals(False)
@@ -399,9 +856,10 @@ class HomeTab(QWidget):
         self._prefix_edit.setText(context.get("quality_prefix", "") or "")
         self._prefix_edit.blockSignals(False)
 
-        # Subject type + target steps now live in the relocated Step Calculator (Train owns
-        # the widgets); here we only reflect the Style @anchor visibility from the context.
+        # Subject type drives the radios (numeric widgets live in the gear modal); reflect it
+        # here plus the Style @anchor visibility.
         key = (context.get("subject_type") or "character").lower()
+        self.set_subject_radio(key)
         self._set_anchor_visible(key == "style")
 
         self._anchor_edit.blockSignals(True)
@@ -410,6 +868,7 @@ class HomeTab(QWidget):
 
     def refresh(self, context):
         from core import sets
+        self._last_ctx = dict(context)
         for label, state in self._readiness_rows(context):
             self._set_row(label, state)
         # live LM Studio reachability (non-blocking background ping)
@@ -418,8 +877,17 @@ class HomeTab(QWidget):
             self._set_row("LM Studio", "idle", "  (checking…)")
             self._start_lms_ping(url)
         names = self._recent_outputs(context.get("output", ""))
-        self._recent_label.setText("\n".join(f"•  {n}" for n in names) if names else "No runs yet.")
+        self._recent_label.setText(
+            "Recent:  " + "   ·   ".join(names) if names else "No runs yet.")
         self._sync_cockpit(context)
+        self._update_ready_pill(context)
+        # live pillar readouts
+        done, total = context.get("caption_counts", (0, 0))
+        self.set_caption_status(done, total)
+        self.set_train_summary(
+            steps=context.get("target_steps"), optimizer="Prodigy",
+            dim=context.get("net_dim"), alpha=context.get("net_alpha"),
+            res=context.get("net_res"))
         try:
             self._recover_btn.setVisible(sets.interrupted_run() is not None)
         except Exception:

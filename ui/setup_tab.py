@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.settings import AppSettings
+from ui.forge_modal import ForgeModal
 from utils.proc import apply_no_window
 
 # Shared QSettings ids (single source of truth in core.settings).
@@ -150,7 +151,7 @@ class SetupTab(QWidget):
         self._sdscripts_edit.setPlaceholderText("e.g. .../AnimaForge/sd-scripts")
         self._sdscripts_status = self._make_status_dot()
         sd_browse = QPushButton("Browse…")
-        sd_browse.setFixedWidth(90)
+        sd_browse.setFixedWidth(108)
         sd_browse.clicked.connect(self._browse_sdscripts)
         sd_row.addWidget(self._sdscripts_edit)
         sd_row.addWidget(self._sdscripts_status)
@@ -198,7 +199,7 @@ class SetupTab(QWidget):
         self._scan_edit.setPlaceholderText("folder auto-detect scans for Anima models (e.g. your Forge models dir)")
         scan_row.addWidget(self._scan_edit)
         scan_browse = QPushButton("Browse…")
-        scan_browse.setFixedWidth(90)
+        scan_browse.setFixedWidth(108)
         scan_browse.clicked.connect(self._browse_scan)
         scan_row.addWidget(scan_browse)
         model_layout.addLayout(scan_row)
@@ -270,7 +271,7 @@ class SetupTab(QWidget):
         )
         model_row.addWidget(self._lms_model_edit)
         test_btn = QPushButton("Test connection")
-        test_btn.setFixedWidth(130)
+        test_btn.setFixedWidth(152)
         test_btn.clicked.connect(self._test_lmstudio)
         model_row.addWidget(test_btn)
         lms_layout.addLayout(model_row)
@@ -304,7 +305,7 @@ class SetupTab(QWidget):
         self._output_edit.setPlaceholderText("Select your LoRA output folder")
         self._output_status = self._make_status_dot()
         output_browse = QPushButton("Browse…")
-        output_browse.setFixedWidth(90)
+        output_browse.setFixedWidth(108)
         output_browse.clicked.connect(self._browse_output)
         output_row.addWidget(self._output_edit)
         output_row.addWidget(self._output_status)
@@ -312,9 +313,31 @@ class SetupTab(QWidget):
         output_layout.addLayout(output_row)
         layout.addWidget(output_group)
 
+        # The Bench — optional service (stays visible, like LM Studio).
         layout.addWidget(self._build_forge_group())
-        layout.addWidget(self._build_advanced_group())
-        layout.addWidget(self._build_defaults_group())
+
+        # Fine Tuning — the heavy set-once config is popped into modals so the Workshop
+        # reads as a readiness checklist, not a wall of fields.
+        self._advanced_group = self._build_advanced_group()
+        self._defaults_group = self._build_defaults_group()
+        for grp in (self._advanced_group, self._defaults_group):
+            grp.setParent(self)
+            grp.setVisible(False)
+        fine_label = QLabel("Fine Tuning")
+        fine_label.setObjectName("af_screen_eyebrow")
+        layout.addWidget(fine_label)
+        fine_row = QHBoxLayout()
+        fine_row.setSpacing(10)
+        for text, opener in [("⚙  App Defaults", self._open_defaults_modal),
+                             ("⚙  Advanced Training", self._open_advanced_modal),
+                             ("📖  Setup Guide", self._show_install_dialog)]:
+            b = QPushButton(text)
+            b.setObjectName("af_btn_ghost")
+            b.setMinimumHeight(40)
+            b.setCursor(Qt.PointingHandCursor)
+            b.clicked.connect(opener)
+            fine_row.addWidget(b)
+        layout.addLayout(fine_row)
 
         # Buttons row
         btn_row = QHBoxLayout()
@@ -356,7 +379,7 @@ class SetupTab(QWidget):
         edit.setPlaceholderText(placeholder)
         dot = self._make_status_dot()
         browse = QPushButton("Browse…")
-        browse.setFixedWidth(90)
+        browse.setFixedWidth(108)
         browse.clicked.connect(browse_slot)
         row.addWidget(edit)
         row.addWidget(dot)
@@ -617,6 +640,29 @@ class SetupTab(QWidget):
             self._forge_status.setText("✘ Cannot reach Forge. Start it with --api enabled at this URL.")
             self._forge_status.setStyleSheet("font-size: 11px; color: #d9534f;")
 
+    # ---- Fine-Tuning modals (host the stashed config groups) ----
+    def _restash_setting(self, grp):
+        if grp is not None:
+            grp.setParent(self)
+            grp.setVisible(False)
+
+    def _open_setting_modal(self, grp, title, subtitle):
+        grp.setVisible(True)
+        modal = ForgeModal(self.window(), title=title, eyebrow="Fine Tuning",
+                           subtitle=subtitle, max_width=600)
+        modal.body.addWidget(grp)
+        modal.closed.connect(lambda g=grp: self._restash_setting(g))
+        modal.add_footer_button("Done", primary=True).clicked.connect(modal.close_modal)
+        modal.open()
+
+    def _open_defaults_modal(self):
+        self._open_setting_modal(self._defaults_group, "App Defaults",
+                                 "New runs start from these — dim, alpha, steps, caption order.")
+
+    def _open_advanced_modal(self):
+        self._open_setting_modal(self._advanced_group, "Advanced Training",
+                                 "Flow weighting, dropout, VRAM warnings — leave default unless you know.")
+
     def _build_forge_group(self) -> QGroupBox:
         g = QGroupBox("Forge / Stable Diffusion API (deliver + test-render)")
         v = QVBoxLayout(g)
@@ -632,7 +678,7 @@ class SetupTab(QWidget):
         self._forge_url_edit.setPlaceholderText("http://127.0.0.1:7860")
         r1.addWidget(self._forge_url_edit)
         tb = QPushButton("Test connection")
-        tb.setFixedWidth(130)
+        tb.setFixedWidth(152)
         tb.clicked.connect(self._test_forge)
         r1.addWidget(tb)
         v.addLayout(r1)
@@ -642,7 +688,7 @@ class SetupTab(QWidget):
         self._forge_lora_edit.setPlaceholderText(".../Forge/models/Lora")
         r2.addWidget(self._forge_lora_edit)
         lb = QPushButton("Browse…")
-        lb.setFixedWidth(90)
+        lb.setFixedWidth(108)
         lb.clicked.connect(self._browse_forge_lora)
         r2.addWidget(lb)
         v.addLayout(r2)

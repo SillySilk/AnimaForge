@@ -18,9 +18,17 @@ def _make_images(folder: Path, names):
 
 
 def _bundle_titles(tab):
-    return [tab._bundles_layout.itemAt(i).widget().title()
-            for i in range(tab._bundles_layout.count())
-            if isinstance(tab._bundles_layout.itemAt(i).widget(), QGroupBox)]
+    from PySide6.QtWidgets import QFrame, QLabel
+    titles = []
+    for i in range(tab._bundles_layout.count()):
+        w = tab._bundles_layout.itemAt(i).widget()
+        if isinstance(w, QFrame):
+            # the name label carries af_display_gold (solo/ensemble) or ready_row_err (warn)
+            for lbl in w.findChildren(QLabel):
+                if lbl.objectName() in ("af_display_gold", "ready_row_err"):
+                    titles.append(lbl.text())
+                    break
+    return titles
 
 
 def test_set_dataset_renders_solo_and_combined_bundles(tmp_path: Path):
@@ -29,10 +37,10 @@ def test_set_dataset_renders_solo_and_combined_bundles(tmp_path: Path):
     tab = CharactersTab()
     tab.set_dataset(str(tmp_path))
     titles = _bundle_titles(tab)
-    assert any(t.startswith("Homer —") for t in titles)
-    assert any(t.startswith("Lisa —") for t in titles)
-    assert any(t.startswith("Homer + Marge —") for t in titles)
-    assert not any(t.startswith("Marge —") for t in titles)  # multi-subject only
+    assert "Homer" in titles
+    assert "Lisa" in titles
+    assert "Homer + Marge" in titles
+    assert "Marge" not in titles       # multi-subject only
 
 
 def test_set_dataset_persists_names_into_prompt_roster(tmp_path: Path):
