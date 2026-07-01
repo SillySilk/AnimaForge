@@ -1,0 +1,56 @@
+# ── Large downloaded models / weights (never commit) ───────────────
+joycaption_model/
+wd14_tagger_model/
+*.safetensors
+*.ckpt
+*.pt
+*.bin
+*.onnx
+
+# ── Embedded / downloaded Python interpreters ──────────────────────
+python3.10/
+python-runtime/
+
+# ── sd-scripts is fetched + pinned by install.bat (scripts/bootstrap.py) ──
+#    Not tracked here; the installer clones kohya-ss/sd-scripts at the pinned commit.
+sd-scripts/
+
+# ── Training outputs / runtime state ───────────────────────────────
+output/
+batch_queue.json
+
+# ── Python caches / venv ───────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# ── OS / editor cruft ──────────────────────────────────────────────
+Thumbs.db
+desktop.ini
+.DS_Store
+*.swp
+*.tmp
+*.log
+
+# Runtime training sets (user data / crash-recovery marker) — not source
+/sets/*.json
+
+# Release tooling — private/dev only, never shipped to the public storefront
+publish-release.bat
+scripts/publish_release.py
+
+# ── Maintainer-only (kept local; not part of the public app) ───────
+.claude/
+CLAUDE.md
+docs/
+marketing/
+_ss_setup.png
+_ss_train.png
+publish-release.bat
+scripts/publish_release.py

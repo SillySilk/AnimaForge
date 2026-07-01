@@ -1,0 +1,6 @@
+# AnimaForge GUI dependencies. The FULL stack (torch+cu121, the editable
+# sd-scripts library, onnxruntime-gpu) is installed by scripts/bootstrap.py
+# via install.bat — see the README. This file alone is NOT enough to run training.
+PySide6>=6.6.0
+Pillow>=10.0.0
+toml>=0.10.2
