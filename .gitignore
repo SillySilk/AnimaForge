@@ -52,5 +52,6 @@ docs/
 marketing/
 _ss_setup.png
 _ss_train.png
+ANIMAFORGE_TECHNICAL_OVERVIEW.md
 publish-release.bat
 scripts/publish_release.py
