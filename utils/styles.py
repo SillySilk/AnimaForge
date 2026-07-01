@@ -114,8 +114,8 @@ QWidget {{
    ============================================================ */
 QPushButton {{
     background-color: #161512; color: #e8e0c8; border: 1px solid #3a3a1f;
-    border-radius: 6px; padding: 8px 16px; font-family: {F_TYPE}; font-size: 12px;
-    letter-spacing: 1px; min-height: 22px;
+    border-radius: 6px; padding: 8px 14px; font-family: {F_TYPE}; font-size: 11px;
+    letter-spacing: 0; min-height: 22px;
 }}
 QPushButton:hover {{ background-color: #201d14; border: 1px solid #d4af37; color: #f4d160; }}
 QPushButton:pressed {{ background-color: #2a2415; border: 1px solid #f4d160; }}
