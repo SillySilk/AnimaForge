@@ -166,6 +166,13 @@ QPushButton:disabled {{ background-color: #121110; color: #4a4a44; border: 1px s
 #af_segment:hover {{ color: #e8e0c8; }}
 #af_segment:checked {{ background: #161208; color: #f4d160; border: 1px solid #8a5a12; }}
 
+/* Subject-type radios on Home's Set card. */
+#af_radio {{ color: #c6c6ce; font-size: 13px; spacing: 6px; padding: 3px 2px; }}
+#af_radio::indicator {{ width: 15px; height: 15px; border-radius: 8px; border: 2px solid #3a3a1f; background: #100f0d; }}
+#af_radio::indicator:checked {{ border: 2px solid #d4af37; background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fp:0.5, fy:0.5, stop:0 #f4d160, stop:0.5 #d4af37, stop:0.6 #100f0d); }}
+#af_radio:hover {{ color: #e8e0c8; }}
+#af_radio:checked {{ color: #f4d160; }}
+
 #btn_start {{
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #f6c453, stop:1 #b8860b);
     color: #1a1206; border: 1px solid #f4d160; padding: 12px 24px; font-size: 14px;

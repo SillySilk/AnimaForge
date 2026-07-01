@@ -485,6 +485,7 @@ class MainWindow(QMainWindow):
         """Show the Style @anchor (Home + Characters) only when the subject type is Style."""
         is_style = self._train_tab.is_style_subject()
         self._home_tab.set_style_anchor_visible(is_style)
+        self._home_tab.set_subject_radio(self._train_tab.get_subject_type())
         self._characters_tab.set_anchor_gate(is_style)
 
     def _on_home_run(self):

@@ -5,8 +5,8 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal, QThread
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
-    QFileDialog, QFrame, QGridLayout, QHBoxLayout, QInputDialog,
-    QLabel, QLineEdit, QPushButton, QScrollArea, QVBoxLayout, QWidget,
+    QButtonGroup, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QInputDialog,
+    QLabel, QLineEdit, QPushButton, QRadioButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
 from ui.forge_modal import ForgeModal
@@ -321,14 +321,34 @@ class HomeTab(QWidget):
         self._name_msg.setVisible(False)
         c.addWidget(self._name_msg)
 
-        # subject type + target steps (the real Step Calculator, mounted by MainWindow)
+        # Subject type as radios (easy to pick, hard to fat-finger) + a gear that opens the
+        # numeric Step Calculator (target steps, cap removal, readout) in a modal.
         c.addSpacing(6)
-        sub_lbl = QLabel("SUBJECT TYPE & TARGET STEPS")
+        sub_row = QHBoxLayout()
+        sub_row.setSpacing(10)
+        sub_lbl = QLabel("SUBJECT TYPE")
         sub_lbl.setObjectName("af_eyebrow_mute")
-        c.addWidget(sub_lbl)
-        self._stepcalc_mount = QVBoxLayout()
-        self._stepcalc_mount.setContentsMargins(0, 0, 0, 0)
-        c.addLayout(self._stepcalc_mount)
+        sub_row.addWidget(sub_lbl)
+        self._type_group = QButtonGroup(self)
+        self._type_radios = {}
+        for key, label in zip(self._TYPE_KEYS, self._TYPE_LABELS):
+            rb = QRadioButton(label)
+            rb.setObjectName("af_radio")
+            rb.setCursor(Qt.PointingHandCursor)
+            rb.toggled.connect(lambda checked, k=key: checked and self.type_changed.emit(k))
+            self._type_group.addButton(rb)
+            self._type_radios[key] = rb
+            sub_row.addWidget(rb)
+        self._type_radios["character"].setChecked(True)
+        sub_row.addStretch()
+        gear = QPushButton("⚙")
+        gear.setObjectName("af_icon_btn")
+        gear.setFixedSize(34, 34)
+        gear.setCursor(Qt.PointingHandCursor)
+        gear.setToolTip("Target steps & advanced step settings")
+        gear.clicked.connect(self._open_stepcalc_modal)
+        sub_row.addWidget(gear)
+        c.addLayout(sub_row)
 
         # Style @anchor (only meaningful for Style runs)
         self._anchor_label = self._field_label("STYLE @ANCHOR (OPTIONAL)")
@@ -767,8 +787,32 @@ class HomeTab(QWidget):
         modal.open()
 
     def mount_step_calculator(self, widget):
-        """Host the Train tab's Step Calculator (type + target steps) on Home."""
-        self._stepcalc_mount.addWidget(widget)
+        """Stash the Train tab's Step Calculator — shown in the gear modal (numeric settings)."""
+        self._stepcalc_panel = widget
+        widget.setParent(self)
+        widget.setVisible(False)
+
+    def _open_stepcalc_modal(self):
+        panel = getattr(self, "_stepcalc_panel", None)
+        if panel is None:
+            return
+        panel.setVisible(True)
+        modal = ForgeModal(
+            self.window(), title="Step Calculator", eyebrow="Fine Tuning",
+            subtitle="Target steps and the exposure cap — tuned to the subject type.",
+            max_width=520)
+        modal.body.addWidget(panel)
+        modal.closed.connect(lambda p=panel: self._restash(p))
+        modal.add_footer_button("Done", primary=True).clicked.connect(modal.close_modal)
+        modal.open()
+
+    def set_subject_radio(self, key: str):
+        """Reflect the current subject type on the radios (no signal echo)."""
+        rb = self._type_radios.get((key or "").lower())
+        if rb is not None and not rb.isChecked():
+            rb.blockSignals(True)
+            rb.setChecked(True)
+            rb.blockSignals(False)
 
     def set_style_anchor_visible(self, visible: bool):
         """Show the Style @anchor field only for Style runs (driven by Train's subject type)."""
@@ -812,9 +856,10 @@ class HomeTab(QWidget):
         self._prefix_edit.setText(context.get("quality_prefix", "") or "")
         self._prefix_edit.blockSignals(False)
 
-        # Subject type + target steps live in the relocated Step Calculator (Train owns the
-        # widgets); here we only reflect the Style @anchor visibility from the context.
+        # Subject type drives the radios (numeric widgets live in the gear modal); reflect it
+        # here plus the Style @anchor visibility.
         key = (context.get("subject_type") or "character").lower()
+        self.set_subject_radio(key)
         self._set_anchor_visible(key == "style")
 
         self._anchor_edit.blockSignals(True)

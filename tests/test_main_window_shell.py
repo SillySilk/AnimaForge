@@ -60,6 +60,22 @@ def test_home_run_split_wired():
     assert hasattr(w._train_tab, "add_current_to_batch")
 
 
+def test_subject_radios_drive_type_and_gear_modal():
+    w = MainWindow()
+    h = w._home_tab
+    assert set(h._type_radios) == {"character", "concept", "style"}
+    # picking a radio drives the subject type through to Train
+    h._type_radios["style"].setChecked(True)
+    assert w._train_tab.get_subject_type() == "style"
+    # the numeric Step Calculator is stashed and shown in the gear modal
+    panel = h._stepcalc_panel
+    assert panel.isHidden()
+    h._open_stepcalc_modal()
+    assert panel.isHidden() is False
+    h._restash(panel)
+    assert panel.isHidden() and panel.parent() is h
+
+
 def test_caption_options_modal_reparents_and_restashes_panel():
     w = MainWindow()
     home = w._home_tab
