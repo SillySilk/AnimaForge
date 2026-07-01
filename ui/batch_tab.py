@@ -40,7 +40,6 @@ class BatchTab(QWidget):
         self._runner.log_line.connect(self._on_log)
         self._build_ui()
         self._refresh_table()
-        self._refresh_set_combo()
 
     # ------------------------------------------------------------------
     # Public
@@ -52,32 +51,6 @@ class BatchTab(QWidget):
         self._refresh_table()
         self._log.append(f"[Batch] Queued '{run_definition.lora_name}' "
                          f"({run_definition.image_count} images, {run_definition.target_steps} steps).")
-
-    def showEvent(self, event):
-        """Keep the saved-set picker current whenever the Batch tab is shown."""
-        super().showEvent(event)
-        self._refresh_set_combo()
-
-    def _refresh_set_combo(self):
-        from core import sets
-        self._set_combo.blockSignals(True)
-        self._set_combo.clear()
-        self._set_combo.addItems(sets.list_sets())
-        self._set_combo.blockSignals(False)
-
-    def _add_saved_set(self):
-        from core import sets
-        name = self._set_combo.currentText().strip()
-        if not name:
-            QMessageBox.information(
-                self, "Add Set",
-                "No saved sets yet. Save one from the Train tab's 'Saved Sets' first.")
-            return
-        rd = sets.load_set(name)
-        if rd is None:
-            QMessageBox.warning(self, "Add Set", f"Could not load set '{name}'.")
-            return
-        self.add_run(rd)
 
     # ------------------------------------------------------------------
     # UI
@@ -92,24 +65,12 @@ class BatchTab(QWidget):
         title.setStyleSheet("font-size: 16px; font-weight: 700; color: #d4af37;")
         layout.addWidget(title)
 
-        hint = QLabel("Queue runs from the Train tab ('Add to Batch') or add a saved set below, "
-                      "then Start — they process one after another, unattended. The queue is "
-                      "saved and survives a restart.")
+        hint = QLabel("Queue runs from the front page ('Add to Batch' on Home), then Start — "
+                      "they process one after another, unattended. The queue is saved and "
+                      "survives a restart.")
         hint.setObjectName("label_field")
         hint.setWordWrap(True)
         layout.addWidget(hint)
-
-        # Add a saved set straight to the queue (no round-trip through the Train tab).
-        add_set_row = QHBoxLayout()
-        add_set_row.addWidget(QLabel("Add saved set:"))
-        self._set_combo = QComboBox()
-        self._set_combo.setMinimumWidth(180)
-        add_set_row.addWidget(self._set_combo, 1)
-        self._add_set_btn = QPushButton("➕ Add to Queue")
-        self._add_set_btn.clicked.connect(self._add_saved_set)
-        add_set_row.addWidget(self._add_set_btn)
-        add_set_row.addStretch()
-        layout.addLayout(add_set_row)
 
         self._table = QTableWidget(0, 4)
         self._table.setHorizontalHeaderLabels(["LoRA Name", "Dataset", "Steps", "Status"])
