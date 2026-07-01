@@ -463,10 +463,7 @@ class DatasetTab(QWidget):
         # ---- Top toolbar: load / clear / path / image count ----
         toolbar = QHBoxLayout()
         toolbar.setSpacing(10)
-        load_btn = QPushButton("📁 Load Dataset Folder")
-        load_btn.setObjectName("btn_primary")
-        load_btn.clicked.connect(self._load_folder)
-        toolbar.addWidget(load_btn)
+        # Folder loading is a Home control (Browse) — this preview tab has no loader.
         clear_all_btn = QPushButton("🧹 Clear All Captions")
         clear_all_btn.setObjectName("btn_danger")
         clear_all_btn.setToolTip("Delete all .txt, .tags, and .nl caption files in this folder (images untouched)")

@@ -33,7 +33,9 @@ from core.step_calculator import (
     SOFT_CAP_STEPS,
 )
 from core.trainer import TrainingProcess
+from core.train_metrics import parse_tqdm
 from ui.collapsible import CollapsibleBox
+from ui.gauge import DialRow
 from ui.run_progress import RunProgress
 
 import re as _re
@@ -743,6 +745,10 @@ class TrainTab(QWidget):
         # Tick marks showing where preview images will render
         self._tickbar = TickBar()
         right_layout.addWidget(self._tickbar)
+
+        # Analog dials — Epoch / Loss / Speed / ETA, live from the training log
+        self._dials = DialRow()
+        right_layout.addWidget(self._dials)
 
         # Live sample preview (filled from {output_dir}/sample during training)
         preview_title = QLabel("Live Preview (sample images — newest first, scroll for older)")
@@ -1604,10 +1610,28 @@ class TrainTab(QWidget):
             self._log_edit.append(shown)
             sb = self._log_edit.verticalScrollBar()
             sb.setValue(sb.maximum())
+        self._update_dials(line)
         if not self._stepping:
             phase = phase_for_line(line)
             if phase:
                 self._rp(kind="phase", label=phase)
+
+    def _update_dials(self, line: str):
+        """Drive the Epoch/Loss/Speed/ETA dials from a training log line."""
+        m = self._EPOCH_INC.search(line) if hasattr(self, "_EPOCH_INC") else None
+        if m is None:
+            m = _re.search(r"current_epoch:\s*(\d+)", line)
+        if m:
+            total_epochs = int(self._training_params.get("epochs", 0)) if \
+                getattr(self, "_training_params", None) else 0
+            self._dials.set_epoch(int(m.group(1)) + 1, total_epochs)
+        metrics = parse_tqdm(line)
+        if "loss" in metrics:
+            self._dials.set_loss(metrics["loss"])
+        if "it_s" in metrics:
+            self._dials.set_speed(metrics["it_s"])
+        if "eta" in metrics:
+            self._dials.set_eta(metrics["eta"], metrics.get("elapsed", 0))
 
     @Slot(int)
     def _on_progress_updated(self, step: int):
