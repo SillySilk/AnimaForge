@@ -98,30 +98,53 @@ class TickBar(QWidget):
         self._positions = []   # step numbers where samples are generated
         self._total = 0
         self._current = 0
-        self.setFixedHeight(12)
-        self.setToolTip("Preview images render at these points during training.")
+        self._spe = 0.0        # steps per epoch (to label the next tick with its epoch)
+        self.setFixedHeight(30)
+        self.setToolTip("Preview images render at these points during training. "
+                        "The red mark is the next upcoming set.")
 
-    def set_schedule(self, positions, total: int):
+    def set_schedule(self, positions, total: int, steps_per_epoch: float = 0.0):
         self._positions = sorted(p for p in positions if 0 <= p <= max(total, 1))
         self._total = max(int(total), 1)
+        self._spe = float(steps_per_epoch or 0.0)
         self.update()
 
     def set_progress(self, step: int):
         self._current = step
         self.update()
 
+    def _epoch_for(self, pos: int) -> int:
+        return round(pos / self._spe) if self._spe else 0
+
     def paintEvent(self, event):
         if not self._positions or self._total <= 0:
             return
         painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
         w = self.width()
-        h = self.height()
+        upcoming = [p for p in self._positions if p > self._current]
+        nxt = min(upcoming) if upcoming else None
+        # passed / future ticks (thin)
         for pos in self._positions:
-            x = int(w * (pos / self._total))
-            x = max(1, min(w - 1, x))
-            passed = pos <= self._current
-            painter.setPen(QColor("#d4af37") if passed else QColor("#3a3a1f"))
-            painter.drawLine(x, 2, x, h - 1)
+            if pos == nxt:
+                continue
+            x = max(1, min(w - 1, int(w * (pos / self._total))))
+            painter.setPen(QColor("#d4af37") if pos <= self._current else QColor("#3a3a1f"))
+            painter.drawLine(x, 2, x, 13)
+        # the next upcoming set — a taller red/flame mark with a tiny label underneath
+        if nxt is not None:
+            x = max(1, min(w - 1, int(w * (nxt / self._total))))
+            painter.setPen(QColor("#ff7a18"))
+            painter.drawLine(x, 0, x, 15)
+            painter.setPen(QColor("#ff9a5c"))
+            f = painter.font()
+            f.setPixelSize(9)
+            painter.setFont(f)
+            ep = self._epoch_for(nxt)
+            label = f"next preview · epoch {ep}" if ep else "next preview"
+            tw = painter.fontMetrics().horizontalAdvance(label)
+            lx = min(max(0, x - tw // 2), max(0, w - tw))
+            painter.drawText(lx, 27, label)
         painter.end()
 
 
@@ -526,13 +549,12 @@ class TrainTab(QWidget):
 
         sample_btn_row = QHBoxLayout()
         sample_btn_row.addWidget(QLabel("Preview images:"))
+        # Hard-gated at 4 — the preview grid is a fixed 4-wide row per epoch (two rows shown).
         self._preview_count_spin = QSpinBox()
-        self._preview_count_spin.setRange(1, 8)
+        self._preview_count_spin.setRange(4, 4)
         self._preview_count_spin.setValue(4)
-        self._preview_count_spin.setToolTip(
-            "How many sample preview images to generate per set (1–8). Each prompt line "
-            "becomes one preview image rendered during training."
-        )
+        self._preview_count_spin.setEnabled(False)
+        self._preview_count_spin.setToolTip("Fixed at 4 — one row of four preview images per epoch.")
         self._preview_count_spin.valueChanged.connect(self._update_gen_button_label)
         sample_btn_row.addWidget(self._preview_count_spin)
         self._gen_prompts_btn = QPushButton("🎲 Grab 4 random captions")
@@ -1182,7 +1204,9 @@ class TrainTab(QWidget):
 
     def _update_sample_schedule(self):
         positions, total = self._sample_positions()
-        self._tickbar.set_schedule(positions, total)
+        p = self._training_params
+        spe = (p.get("total_steps", 0) / p["epochs"]) if p.get("epochs") else 0.0
+        self._tickbar.set_schedule(positions, total, spe)
 
     def _refresh_resume_option(self):
         from core.state_utils import find_saved_state
@@ -1396,6 +1420,7 @@ class TrainTab(QWidget):
 
     def _render_preview(self, files):
         from PySide6.QtGui import QPixmap
+        self._preview_files = files
         # Clear current preview widgets (keep the hint widget alive for reuse).
         while self._preview_grid.count():
             item = self._preview_grid.takeAt(0)
@@ -1407,18 +1432,29 @@ class TrainTab(QWidget):
             self._preview_hint.show()
             return
         self._preview_hint.hide()
-        # 4 across, newest first; the scroll area shows ~2 rows and scrolls for older.
+        # Size the four columns to the viewport so a row of 4 fits exactly — never overflowing
+        # off the right. Newest first (top-left); the scroll shows exactly two rows (current
+        # epoch + the one before) and older sets require scrolling (no peek of the 3rd row).
+        gap, cols = 8, 4
+        vw = self._preview_scroll.viewport().width()
+        col_w = max(80, (vw - (cols - 1) * gap - 4) // cols)
         for i, path in enumerate(files):
             pm = QPixmap(path)
             if pm.isNull():
                 continue
-            scaled = pm.scaledToHeight(168, Qt.SmoothTransformation)
+            scaled = pm.scaled(col_w, col_w, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             thumb = _ClickableThumb(path)
             thumb.setPixmap(scaled)
             thumb.setFixedSize(scaled.size())
             thumb.setToolTip(path)
             thumb.clicked.connect(self._show_image)
-            self._preview_grid.addWidget(thumb, i // 4, i % 4)
+            self._preview_grid.addWidget(thumb, i // cols, i % cols)
+        self._preview_scroll.setFixedHeight(2 * col_w + gap + 4)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if getattr(self, "_preview_files", None):
+            self._render_preview(self._preview_files)
 
     def _show_image(self, path: str):
         from PySide6.QtWidgets import QDialog, QScrollArea
@@ -1626,7 +1662,10 @@ class TrainTab(QWidget):
         if m:
             total_epochs = int(self._training_params.get("epochs", 0)) if \
                 getattr(self, "_training_params", None) else 0
-            self._dials.set_epoch(int(m.group(1)) + 1, total_epochs)
+            # sd-scripts logs current_epoch 0-based at the START of each epoch. The dial shows
+            # the COMPLETED epoch (whose samples we're viewing): 0 while epoch 1 trains, and it
+            # advances to N only once epoch N has finished. Never used to auto-stop.
+            self._dials.set_epoch(int(m.group(1)), total_epochs)
         metrics = parse_tqdm(line)
         if "loss" in metrics:
             self._dials.set_loss(metrics["loss"])
