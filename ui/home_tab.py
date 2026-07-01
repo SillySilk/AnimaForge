@@ -56,7 +56,9 @@ class HomeTab(QWidget):
     prefix_changed = Signal(str)   # quality prefix baked at Combine (single source; drives Dataset)
     type_changed = Signal(str)     # "character" / "concept" / "style" (auto-detect → Train)
     anchor_changed = Signal(str)
-    run_requested = Signal()       # "Forge It" — the unattended caption→train pipeline
+    run_requested = Signal()          # "Forge It" — the unattended caption→train pipeline
+    run_caption_requested = Signal()  # pillar "Run Captioning" button
+    start_train_requested = Signal()  # pillar "Start Training" button
 
     _GLYPH = {"ok": "✓", "idle": "–", "err": "✗"}
     _OBJ = {"ok": "ready_row_ok", "idle": "ready_row_idle", "err": "ready_row_err"}
@@ -356,19 +358,33 @@ class HomeTab(QWidget):
         cl.addWidget(self._pillar_accent())
         cl.addSpacing(18)
         cl.addWidget(self._pillar_head("STEP 01", "Caption",
-                                       icon=None))
+                                       action_label="Options",
+                                       on_action=self._open_caption_modal))
         marker = QLabel("Tag, describe & combine — training-ready text for every image.")
         marker.setObjectName("af_marker")
         marker.setWordWrap(True)
         cl.addWidget(marker)
         cl.addSpacing(14)
         cl.addLayout(self._chip_row(["Auto-Tag", "Describe", "Combine"]))
-        cl.addSpacing(10)
-        # real caption controls (Process + steps + progress), mounted by MainWindow
-        self._caption_mount = QVBoxLayout()
-        self._caption_mount.setContentsMargins(0, 0, 0, 0)
-        cl.addLayout(self._caption_mount)
+        cl.addSpacing(14)
+        # live status line (N / M captioned)
+        status_row = QHBoxLayout()
+        sl = QLabel("STATUS")
+        sl.setObjectName("af_eyebrow_mute")
+        status_row.addWidget(sl)
+        status_row.addStretch()
+        self._caption_status = QLabel("— not captioned")
+        self._caption_status.setObjectName("af_stat_value")
+        status_row.addWidget(self._caption_status)
+        cl.addLayout(status_row)
         cl.addStretch()
+        # primary action; the mass of options lives in the Options modal
+        self._run_caption_btn = QPushButton("📝  Run Captioning")
+        self._run_caption_btn.setObjectName("btn_start")
+        self._run_caption_btn.setMinimumHeight(48)
+        self._run_caption_btn.setCursor(Qt.PointingHandCursor)
+        self._run_caption_btn.clicked.connect(self.run_caption_requested.emit)
+        cl.addWidget(self._run_caption_btn)
         g.addWidget(cap, 0, 0)
 
         # connector
@@ -399,7 +415,9 @@ class HomeTab(QWidget):
         tl.setSpacing(0)
         tl.addWidget(self._pillar_accent())
         tl.addSpacing(18)
-        tl.addWidget(self._pillar_head("STEP 02", "Train"))
+        tl.addWidget(self._pillar_head("STEP 02", "Train",
+                                       action_label="Presets",
+                                       on_action=self._open_train_modal))
         marker2 = QLabel("Anima-tuned settings, already dialed in. Just pull the lever.")
         marker2.setObjectName("af_marker")
         marker2.setWordWrap(True)
@@ -407,11 +425,18 @@ class HomeTab(QWidget):
         tl.addSpacing(14)
         tl.addLayout(self._stat_tiles())
         tl.addSpacing(10)
-        # real train controls (previews / start / actions / advanced), mounted by MainWindow
-        self._train_mount = QVBoxLayout()
-        self._train_mount.setContentsMargins(0, 0, 0, 0)
-        tl.addLayout(self._train_mount)
+        # compact network readout (dim · alpha · resolution)
+        self._network_line = QLabel("dim 16 · alpha 8 · 1024px")
+        self._network_line.setObjectName("af_eyebrow_mute")
+        tl.addWidget(self._network_line)
         tl.addStretch()
+        # primary action; the mass of settings lives in the Presets modal
+        self._start_train_btn = QPushButton("🚀  Start Training")
+        self._start_train_btn.setObjectName("btn_start")
+        self._start_train_btn.setMinimumHeight(48)
+        self._start_train_btn.setCursor(Qt.PointingHandCursor)
+        self._start_train_btn.clicked.connect(self.start_train_requested.emit)
+        tl.addWidget(self._start_train_btn)
         g.addWidget(tr, 0, 2)
 
         g.setColumnStretch(0, 1)
@@ -424,7 +449,7 @@ class HomeTab(QWidget):
         acc.setFixedHeight(2)
         return acc
 
-    def _pillar_head(self, step: str, title: str, icon=None) -> QWidget:
+    def _pillar_head(self, step: str, title: str, action_label=None, on_action=None) -> QWidget:
         head = QWidget()
         h = QHBoxLayout(head)
         h.setContentsMargins(0, 0, 0, 0)
@@ -438,6 +463,14 @@ class HomeTab(QWidget):
         col.addWidget(t)
         h.addLayout(col)
         h.addStretch()
+        if action_label and on_action is not None:
+            btn = QPushButton("⚙  " + action_label)
+            btn.setObjectName("af_btn_ghost")
+            btn.setMinimumHeight(32)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setToolTip(f"{action_label} — the full options open in a modal")
+            btn.clicked.connect(on_action)
+            h.addWidget(btn, 0, Qt.AlignTop)
         return head
 
     def _chip_row(self, labels) -> QHBoxLayout:
@@ -457,7 +490,9 @@ class HomeTab(QWidget):
     def _stat_tiles(self) -> QHBoxLayout:
         row = QHBoxLayout()
         row.setSpacing(8)
-        for cap_text, val in [("OPTIMIZER", "Prodigy"), ("PRECISION", "bf16")]:
+        self._tile_values = {}
+        for key, cap_text, val in [("steps", "TARGET STEPS", "—"),
+                                   ("optimizer", "OPTIMIZER", "Prodigy")]:
             tile = QFrame()
             tile.setObjectName("af_well")
             tv = QVBoxLayout(tile)
@@ -469,8 +504,24 @@ class HomeTab(QWidget):
             vv = QLabel(val)
             vv.setObjectName("af_stat_value")
             tv.addWidget(vv)
+            self._tile_values[key] = vv
             row.addWidget(tile, 1)
         return row
+
+    # ---- live readouts (fed by MainWindow.refresh) ----
+    def set_caption_status(self, done: int, total: int):
+        if total:
+            self._caption_status.setText(f"{done} / {total} captioned")
+        else:
+            self._caption_status.setText("— not captioned")
+
+    def set_train_summary(self, steps=None, optimizer=None, dim=None, alpha=None, res=None):
+        if steps is not None:
+            self._tile_values["steps"].setText(str(steps))
+        if optimizer:
+            self._tile_values["optimizer"].setText(str(optimizer))
+        if dim is not None and alpha is not None and res is not None:
+            self._network_line.setText(f"dim {dim} · alpha {alpha} · {res}px")
 
     # ---- The Lever ----
     def _build_lever(self) -> QFrame:
@@ -669,12 +720,51 @@ class HomeTab(QWidget):
             self.type_changed.emit(key)
 
     def mount_caption_controls(self, widget):
-        """Host the Dataset tab's caption control panel on Home (single source of truth)."""
-        self._caption_mount.addWidget(widget)
+        """Stash the Dataset tab's caption panel — shown in the Caption Options modal."""
+        self._caption_panel = widget
+        widget.setParent(self)
+        widget.setVisible(False)
 
     def mount_train_controls(self, widget):
-        """Host the Train tab's run controls (previews/actions/advanced) on Home."""
-        self._train_mount.addWidget(widget)
+        """Stash the Train tab's control panel — shown in the Train Presets modal."""
+        self._train_panel = widget
+        widget.setParent(self)
+        widget.setVisible(False)
+
+    # ---- Options / Presets modals (host the stashed real panels) ----
+    def _restash(self, panel):
+        """Reparent a panel back onto Home (hidden) before its modal is destroyed, so the
+        panel and its live state survive close/reopen."""
+        if panel is not None:
+            panel.setParent(self)
+            panel.setVisible(False)
+
+    def _open_caption_modal(self):
+        panel = getattr(self, "_caption_panel", None)
+        if panel is None:
+            return
+        modal = ForgeModal(
+            self.window(), title="Captioning", eyebrow="Step 01 · Options",
+            subtitle="Run the passes, or fire an individual step.", max_width=560)
+        panel.setVisible(True)
+        modal.body.addWidget(panel)
+        modal.closed.connect(lambda p=panel: self._restash(p))
+        modal.add_footer_button("Close", primary=True).clicked.connect(modal.close_modal)
+        modal.open()
+
+    def _open_train_modal(self):
+        panel = getattr(self, "_train_panel", None)
+        if panel is None:
+            return
+        modal = ForgeModal(
+            self.window(), title="Train Presets", eyebrow="Step 02 · Presets",
+            subtitle="Sample previews, optimizer & network, run options — all here.",
+            max_width=620)
+        panel.setVisible(True)
+        modal.body.addWidget(panel)
+        modal.closed.connect(lambda p=panel: self._restash(p))
+        modal.add_footer_button("Close", primary=True).clicked.connect(modal.close_modal)
+        modal.open()
 
     def mount_step_calculator(self, widget):
         """Host the Train tab's Step Calculator (type + target steps) on Home."""
@@ -746,6 +836,13 @@ class HomeTab(QWidget):
             "Recent:  " + "   ·   ".join(names) if names else "No runs yet.")
         self._sync_cockpit(context)
         self._update_ready_pill(context)
+        # live pillar readouts
+        done, total = context.get("caption_counts", (0, 0))
+        self.set_caption_status(done, total)
+        self.set_train_summary(
+            steps=context.get("target_steps"), optimizer="Prodigy",
+            dim=context.get("net_dim"), alpha=context.get("net_alpha"),
+            res=context.get("net_res"))
         try:
             self._recover_btn.setVisible(sets.interrupted_run() is not None)
         except Exception:

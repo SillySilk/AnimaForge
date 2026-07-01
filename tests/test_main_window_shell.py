@@ -60,6 +60,18 @@ def test_home_run_split_wired():
     assert hasattr(w._train_tab, "add_current_to_batch")
 
 
+def test_caption_options_modal_reparents_and_restashes_panel():
+    w = MainWindow()
+    home = w._home_tab
+    panel = home._caption_panel                 # stashed, hidden, on Home
+    assert panel is not None and panel.isHidden()
+    home._open_caption_modal()                   # move panel into the modal
+    assert panel.isHidden() is False             # shown inside the modal
+    home._restash(panel)                         # what modal.closed does
+    assert panel.isHidden() is True              # back on Home, alive
+    assert panel.parent() is home
+
+
 def test_trigger_and_prefix_single_source_on_home():
     w = MainWindow()
     # The Dataset tab's trigger + quality-prefix row is hidden — Home is the single source.

@@ -348,6 +348,11 @@ class DatasetTab(QWidget):
         """Quality prefix is edited on Home; keep this tab's (hidden) copy in sync."""
         self._prefix_edit.setText(prefix or "")
 
+    def caption_counts(self) -> tuple:
+        """(captioned, total) — training-ready .txt count and image count, for Home's status."""
+        c = self._step_status_counts()
+        return c["txt"], c["total"]
+
     def caption_controls(self) -> QWidget:
         """The caption control panel (Process + individual steps + stop + live progress).
 

@@ -336,6 +336,10 @@ class MainWindow(QMainWindow):
         self._home_tab.type_changed.connect(self._on_home_type_changed)
         self._home_tab.anchor_changed.connect(self._characters_tab.set_style_anchor)
         self._home_tab.run_requested.connect(self._on_home_run)
+        # Pillar primary buttons drive the real engines (options live in the modals).
+        self._home_tab.run_caption_requested.connect(self._dataset_tab._process_clicked)
+        self._home_tab.start_train_requested.connect(
+            lambda: self._train_tab._start_training(confirm=True))
         # The Step Calculator lives on Home now; its subject combo drives the Style @anchor
         # field's visibility (only meaningful for Style runs).
         self._train_tab.subject_type_changed.connect(self._sync_home_anchor_visibility)
@@ -454,6 +458,11 @@ class MainWindow(QMainWindow):
             "subject_type": self._train_tab.get_subject_type(),
             "target_steps": self._train_tab.get_target_steps(),
             "style_anchor": self._train_tab._dataset_style_anchor(),
+            # live pillar readouts (Home condenses these into the two step cards)
+            "caption_counts": self._dataset_tab.caption_counts(),
+            "net_dim": self._train_tab._dim_spin.value(),
+            "net_alpha": self._train_tab._alpha_spin.value(),
+            "net_res": 1024,
         }
 
     def _on_home_folder_chosen(self, folder: str):
