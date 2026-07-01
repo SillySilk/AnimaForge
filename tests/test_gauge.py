@@ -15,14 +15,16 @@ def test_dialrow_constructs_with_four_gauges():
     assert all(g is not None for g in (d.epoch, d.loss, d.speed, d.eta))
 
 
-def test_loss_zone_colours():
+def test_loss_is_informational_with_trend_no_zones():
+    # Loss dial is informational only (no green/amber/red 'danger' zones) — value + trend.
     d = DialRow()
-    d.set_loss(0.05)
-    assert d.loss._fill is DialRow._GREEN and d.loss._note == "healthy"
-    d.set_loss(0.13)
-    assert d.loss._fill is DialRow._AMBER and d.loss._note == "watch"
-    d.set_loss(0.20)
-    assert d.loss._fill is DialRow._RED and d.loss._note == "high"
+    d.set_loss(0.120)
+    assert d.loss._value_text == "0.120"
+    d.set_loss(0.100)
+    assert d.loss._note == "falling"
+    d.set_loss(0.130)
+    assert d.loss._note == "rising"
+    assert not hasattr(DialRow, "_GREEN")   # zones removed
 
 
 def test_epoch_and_speed_fractions():

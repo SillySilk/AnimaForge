@@ -16,12 +16,15 @@ import math
 # therefore more total steps at the SAME per-image exposure. So there is deliberately
 # no roster-size step bump — a thin cast is fixed by adding images (see
 # images_per_character_warning), never by over-exposing the few images you have.
+# Trimmed ~15% below the earlier targets (2026-07): Anima overfits relatively easily, so we
+# aim for the earliest-strong result with a little buffer. The user always stops by eye at the
+# best epoch and there is never any auto-stop, so undershooting slightly is the safe direction.
 EXPOSURE_TARGETS = {
-    "character": 66,   # identities need the most exposure to lock in
-    "concept": 40,     # objects / concepts converge faster on Anima
-    "style": 30,       # style is the most forgiving / fastest to take
+    "character": 56,   # identities need the most exposure to lock in
+    "concept": 34,     # objects / concepts converge faster on Anima
+    "style": 26,       # style is the most forgiving / fastest to take
 }
-DEFAULT_EXPOSURES = 66
+DEFAULT_EXPOSURES = 56
 
 # Anima's effective training batch (train_batch_size; gradient accumulation in
 # low-VRAM mode keeps this effective value constant, so 4 is always correct here).
@@ -31,7 +34,7 @@ BATCH_SIZE = 4
 # from being starved; the soft cap keeps a huge cast from running overnight by default.
 # A power-user "uncap" toggle drops the cap (the floor still applies).
 FLOOR_STEPS = 800       # ~45 min on a 4060 Ti — a real run even for a small set
-SOFT_CAP_STEPS = 3500   # ~3.5 hr — default ceiling; removable via the uncap toggle
+SOFT_CAP_STEPS = 3000   # default ceiling; removable via the uncap toggle
 
 # Back-compatible default total-step target, used only before a dataset is loaded.
 TARGET_STEPS = 500

@@ -93,15 +93,12 @@ class Gauge(QWidget):
 class DialRow(QFrame):
     """Row of the four training dials. Update via the typed setters below."""
 
-    # Loss zone thresholds on a 0–0.25 face (per the handoff).
-    _GREEN = QColor("#8fa86b")
-    _AMBER = QColor("#b9962f")
-    _RED = QColor("#a8311e")
     _LOSS_FACE = 0.25
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("af_card")
+        self._last_loss = None
         row = QHBoxLayout(self)
         row.setContentsMargins(16, 12, 16, 12)
         row.setSpacing(10)
@@ -117,14 +114,20 @@ class DialRow(QFrame):
         self.epoch.set(f"{current} / {total}" if total else f"{current}", frac)
 
     def set_loss(self, loss: float):
+        # Informational only — no green/amber/red 'danger' zones. For a flow-matching model
+        # like Anima the absolute loss is a weak, noisy overfitting signal; the user judges by
+        # the sample previews and stops by eye. We show the value + a simple trend arrow.
         frac = min(1.0, loss / self._LOSS_FACE)
-        if loss < 0.10:
-            fill, note = self._GREEN, "healthy"
-        elif loss < 0.17:
-            fill, note = self._AMBER, "watch"
-        else:
-            fill, note = self._RED, "high"
-        self.loss.set(f"{loss:.3f}", frac, fill=fill, note=note)
+        trend = ""
+        if self._last_loss is not None:
+            if loss < self._last_loss - 1e-4:
+                trend = "falling"
+            elif loss > self._last_loss + 1e-4:
+                trend = "rising"
+            else:
+                trend = "flat"
+        self._last_loss = loss
+        self.loss.set(f"{loss:.3f}", frac, note=trend)
 
     def set_speed(self, it_s: float, ceiling: float = 4.0):
         self.speed.set(f"{it_s:.2f} it/s", min(1.0, it_s / ceiling))

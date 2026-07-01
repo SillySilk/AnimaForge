@@ -18,9 +18,9 @@ from core.step_calculator import (
 
 # ── recalibrated per-type exposures ──────────────────────────────────────────
 def test_per_type_exposure_values():
-    assert target_exposures("character") == 66
-    assert target_exposures("concept") == 40
-    assert target_exposures("style") == 30
+    assert target_exposures("character") == 56
+    assert target_exposures("concept") == 34
+    assert target_exposures("style") == 26
 
 
 def test_type_ordering_character_highest_style_lowest():
@@ -32,10 +32,10 @@ def test_type_ordering_character_highest_style_lowest():
     assert FLOOR_STEPS < s and c < SOFT_CAP_STEPS
 
 
-# ── the user's anchor: 152 character images → ~2,500 ─────────────────────────
-def test_character_152_lands_near_2500():
-    # 66 * 152 / 4 = 2508, comfortably inside [800, 3500].
-    assert suggest_target_steps("character", 152) == 2508
+# ── 152 character images lands inside the band ───────────────────────────────
+def test_character_152_lands_inside_band():
+    # 56 * 152 / 4 = 2128, comfortably inside [800, 3000].
+    assert suggest_target_steps("character", 152) == 2128
 
 
 # ── floor ────────────────────────────────────────────────────────────────────
@@ -51,13 +51,13 @@ def test_style_tiny_set_is_floored():
 
 # ── soft cap ──────────────────────────────────────────────────────────────────
 def test_large_set_is_capped():
-    # 66 * 500 / 4 = 8250 -> capped to 3500.
+    # 56 * 500 / 4 = 7000 -> capped to 3000.
     assert suggest_target_steps("character", 500) == SOFT_CAP_STEPS
 
 
 def test_uncapped_removes_the_cap():
     # With the cap removed the raw formula stands (floor still applies, but n/a here).
-    assert suggest_target_steps("character", 500, uncapped=True) == 8250
+    assert suggest_target_steps("character", 500, uncapped=True) == 7000
 
 
 def test_uncapped_still_respects_floor():
@@ -67,14 +67,14 @@ def test_uncapped_still_respects_floor():
 
 # ── is_capped helper drives the UI hint ──────────────────────────────────────
 def test_is_capped_true_only_when_formula_exceeds_cap():
-    assert is_capped("character", 500) is True      # raw 8250 > 3500
-    assert is_capped("character", 152) is False     # raw 2508 < 3500
-    assert is_capped("character", 30) is False       # raw 495 (floored, not capped)
+    assert is_capped("character", 500) is True      # raw 7000 > 3000
+    assert is_capped("character", 152) is False     # raw 2128 < 3000
+    assert is_capped("character", 30) is False       # raw 420 (floored, not capped)
 
 
 # ── linear scaling holds inside the band ─────────────────────────────────────
 def test_scales_with_image_count_inside_band():
-    # 100 and 200 imgs both land in (floor, cap): 1650 and 3300.
+    # 100 and 200 imgs both land in (floor, cap): 1400 and 2800.
     assert suggest_target_steps("character", 200) == 2 * suggest_target_steps("character", 100)
 
 
@@ -103,7 +103,7 @@ def test_calculate_params_reports_consistent_exposures():
 
 
 def test_exposures_for_steps_inverts_the_identity():
-    assert round(exposures_for_steps(152, 2508)) == 66
+    assert round(exposures_for_steps(152, 2128)) == 56
 
 
 # ── thin-roster warning (unchanged) ──────────────────────────────────────────
