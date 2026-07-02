@@ -204,6 +204,12 @@ def make_nav_icon(path: Path, kind: str) -> Path:
         for i in range(3):
             y = 12 + i * 9
             d.rectangle([10, y, 38, y + 6], outline=c, width=2)
+    elif kind == "presets":
+        # three vertical slider rails with offset knobs (preset mixer glyph)
+        for x, ky in ((13, 18), (24, 32), (35, 24)):
+            d.line([(x, 10), (x, 38)], fill=c, width=3)
+            d.ellipse([x - 5, ky - 5, x + 5, ky + 5], fill=c)
+            d.ellipse([x - 2, ky - 2, x + 2, ky + 2], fill=(10, 10, 11, 255))
     elif kind == "characters":
         # two head + shoulder silhouettes
         d.ellipse([11, 10, 23, 22], outline=c, width=3)
@@ -225,7 +231,7 @@ def generate_all(assets_dir: Path) -> list[Path]:
     out.append(make_hero(assets_dir / "hero_forge.png"))
     out.append(make_embers(assets_dir / "bg_embers.png"))
     out.append(make_panel_metal(assets_dir / "panel_metal.png"))
-    for kind in ("home", "setup", "dataset", "characters", "train", "batch"):
+    for kind in ("home", "setup", "dataset", "characters", "train", "batch", "presets"):
         out.append(make_nav_icon(assets_dir / "nav" / f"{kind}.png", kind))
     return out
 

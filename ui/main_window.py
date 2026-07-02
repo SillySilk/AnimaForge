@@ -168,6 +168,17 @@ class MainWindow(QMainWindow):
             btn.clicked.connect(lambda checked=False, i=index: self._switch_tab(i))
             nav_layout.addWidget(btn)
             self._nav_buttons.append((btn, index))
+
+        # Presets — not a screen: jumps Home and opens the Train Presets modal
+        # (optimizer preset, sample previews, run options). Second way into the same
+        # Home-owned panel, so the single-source-of-truth rule holds.
+        presets_btn = NavButton("  Presets")
+        _presets_icon = QIcon(asset_url("nav/presets.png"))
+        if not _presets_icon.isNull():
+            presets_btn.setIcon(_presets_icon)
+            presets_btn.setIconSize(QSize(18, 18))
+        presets_btn.clicked.connect(self._open_presets_modal)
+        nav_layout.addWidget(presets_btn)
         sidebar_layout.addWidget(nav_wrap)
 
         # Decor block — marker scrawl + wax-seal emblem + members line.
@@ -301,6 +312,10 @@ class MainWindow(QMainWindow):
         self._dataset_tab.caption_finished.connect(self._refresh_rail)
         self._characters_tab.characters_changed.connect(self._refresh_rail)
         self._train_tab.subject_type_changed.connect(self._refresh_rail)
+        # Live OPTIMIZER tile: the Train Presets modal floats over Home, so reflect
+        # preset flips immediately rather than waiting for the next full refresh.
+        self._train_tab.optimizer_changed.connect(
+            lambda label: self._home_tab.set_train_summary(optimizer=label))
 
         # When setup settings change, sync to train tab
         self._setup_tab.settings_changed.connect(self._sync_environment_to_train)
@@ -402,6 +417,11 @@ class MainWindow(QMainWindow):
             self._home_tab.refresh(self._collect_home_context())
         self._refresh_rail()
 
+    def _open_presets_modal(self):
+        """Sidebar Presets item: jump to Home and open its Train Presets modal."""
+        self._switch_tab(0)
+        self._home_tab.open_train_presets()
+
     def _refresh_rail(self):
         """Recompute the progress rail from the active dataset folder + current tab."""
         from core import workflow
@@ -460,6 +480,7 @@ class MainWindow(QMainWindow):
             "style_anchor": self._train_tab._dataset_style_anchor(),
             # live pillar readouts (Home condenses these into the two step cards)
             "caption_counts": self._dataset_tab.caption_counts(),
+            "optimizer_label": self._train_tab.optimizer_label(),
             "net_dim": self._train_tab._dim_spin.value(),
             "net_alpha": self._train_tab._alpha_spin.value(),
             "net_res": 1024,

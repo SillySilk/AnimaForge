@@ -154,6 +154,7 @@ class TrainTab(QWidget):
     load_set_requested = Signal(str, str)    # (dataset_folder, trigger_word)
     subject_type_changed = Signal()          # Person/Object/Style changed -> refresh rail
     run_progress = Signal(object)            # RunProgress payload mirrored onto Home
+    optimizer_changed = Signal(str)          # preset label for the Home OPTIMIZER tile
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -261,7 +262,8 @@ class TrainTab(QWidget):
     def apply_defaults(self, app_settings):
         """Initialize the Train tab controls from the App Defaults in Settings."""
         self._app_settings = app_settings
-        self._on_optimizer_changed()  # optimizer fixed to Prodigy
+        self._set_optimizer(app_settings.get("default_optimizer") or "prodigy")
+        self._on_optimizer_changed()  # sync LR row visibility + note + summary
         self._dim_spin.setValue(app_settings.get("default_network_dim"))
         self._alpha_spin.setValue(app_settings.get("default_network_alpha"))
         self._uncap_check.setChecked(app_settings.get("default_uncap_steps"))
@@ -426,33 +428,40 @@ class TrainTab(QWidget):
         self._delete_set_btn.clicked.connect(self._delete_set)
         self._refresh_sets_combo()
 
-        # Optimizer & Network (static — collapsed at the bottom)
-        opt_box = CollapsibleBox("Optimizer & Network")
+        # Optimizer & Network — expanded and first in the Train Presets panel (users
+        # asked to actually see the optimizer presets).
+        opt_box = CollapsibleBox("Optimizer & Network", expanded=True)
         opt_layout = opt_box.content_layout()
         opt_layout.setSpacing(6)
 
-        # Optimizer is fixed to Prodigy+ ScheduleFree — the only optimizer we ever want.
-        # No selector: picking anything else only ever wasted runs. (Backend in
-        # config_generator still accepts an `optimizer` arg, just not driven from the UI.)
+        # Two named presets. Prodigy+ ScheduleFree stays the forgiving default;
+        # AdamW8bit + constant LR mirrors the classic Civitai trainer recipe for
+        # comparison runs (user feedback round 1).
         optim_row = QHBoxLayout()
-        optim_row.addWidget(QLabel("Optimizer:"))
-        opt_value = QLabel("Prodigy+ ScheduleFree (auto LR)")
-        opt_value.setObjectName("label_step_calc")
-        optim_row.addWidget(opt_value, 1)
+        optim_row.addWidget(QLabel("Optimizer preset:"))
+        self._optimizer_combo = QComboBox()
+        self._optimizer_combo.addItem(
+            "Prodigy+ ScheduleFree — auto LR (recommended)", "prodigy")
+        self._optimizer_combo.addItem(
+            "AdamW8bit — constant LR (Civitai classic)", "adamw8bit")
+        self._optimizer_combo.currentIndexChanged.connect(self._on_optimizer_changed)
+        optim_row.addWidget(self._optimizer_combo, 1)
         opt_layout.addLayout(optim_row)
 
-        # Learning-rate spin kept (hidden) so saved-set/RunDefinition plumbing stays intact;
-        # Prodigy is learning-rate-free so it's never shown or used.
+        # Learning rate — only meaningful (and only shown) for AdamW8bit; Prodigy is
+        # learning-rate-free.
         self._lr_row_widget = QWidget()
         lr_row = QHBoxLayout(self._lr_row_widget)
         lr_row.setContentsMargins(0, 0, 0, 0)
+        lr_row.addWidget(QLabel("Learning rate:"))
         self._lr_spin = QDoubleSpinBox()
         self._lr_spin.setDecimals(6)
         self._lr_spin.setRange(0.000001, 0.01)
         self._lr_spin.setValue(1e-4)
         lr_row.addWidget(self._lr_spin)
+        lr_row.addStretch()
         opt_layout.addWidget(self._lr_row_widget)
-        self._lr_row_widget.setVisible(False)  # Prodigy: never shown
+        self._lr_row_widget.setVisible(False)  # shown only for AdamW8bit
 
         dim_row = QHBoxLayout()
         dim_row.addWidget(QLabel("Network dim:"))
@@ -470,10 +479,10 @@ class TrainTab(QWidget):
         dim_row.addStretch()
         opt_layout.addLayout(dim_row)
 
-        opt_note = QLabel("Prodigy+ ScheduleFree auto-tunes the learning rate and needs no schedule — the most forgiving choice for anchoring concepts.")
-        opt_note.setWordWrap(True)
-        opt_note.setStyleSheet("font-size: 10px; color: #8a8a93; font-style: italic;")
-        opt_layout.addWidget(opt_note)
+        self._opt_note = QLabel(self._OPT_NOTES["prodigy"])
+        self._opt_note.setWordWrap(True)
+        self._opt_note.setStyleSheet("font-size: 10px; color: #8a8a93; font-style: italic;")
+        opt_layout.addWidget(self._opt_note)
 
         # Run Options (bucketing / state / continue / metadata) — static, collapsed
         run_box = CollapsibleBox("Run Options")
@@ -726,6 +735,8 @@ class TrainTab(QWidget):
         rl = QVBoxLayout(relocated)
         rl.setContentsMargins(0, 0, 0, 0)
         rl.setSpacing(14)
+        # Optimizer presets lead the panel (expanded) — the most-requested setting.
+        rl.addWidget(opt_box)
         rl.addWidget(sample_box)
         rl.addWidget(btn_grp)
 
@@ -734,7 +745,7 @@ class TrainTab(QWidget):
                                 "letter-spacing: 1px; padding-top: 6px;")
         rl.addWidget(adv_label)
         rl.addWidget(gen_btn)
-        for box in (sets_box, opt_box, run_box, config_box):
+        for box in (sets_box, run_box, config_box):
             rl.addWidget(box)
         rl.addStretch()
         self._relocated_controls = relocated
@@ -851,11 +862,31 @@ class TrainTab(QWidget):
         except Exception:
             return 1
 
-    def _current_optimizer(self) -> str:
-        return "prodigy"  # fixed; the optimizer selector was removed
+    _OPT_NOTES = {
+        "prodigy": ("Prodigy+ ScheduleFree auto-tunes the learning rate and needs no "
+                    "schedule — the most forgiving choice for anchoring concepts."),
+        "adamw8bit": ("AdamW8bit with a constant learning rate — the classic Civitai-era "
+                      "recipe, handy for comparing against older runs. Uses the learning "
+                      "rate above (default 1e-4)."),
+    }
+    _OPT_TILE = {"prodigy": "Prodigy", "adamw8bit": "AdamW8bit"}
 
-    def _on_optimizer_changed(self):
-        # Optimizer is fixed to Prodigy; kept as a harmless no-op for legacy callers.
+    def _current_optimizer(self) -> str:
+        return self._optimizer_combo.currentData() or "prodigy"
+
+    def optimizer_label(self) -> str:
+        """Short name for the Home cockpit tile."""
+        return self._OPT_TILE.get(self._current_optimizer(), "Prodigy")
+
+    def _set_optimizer(self, optimizer: str):
+        idx = self._optimizer_combo.findData((optimizer or "prodigy").lower())
+        self._optimizer_combo.setCurrentIndex(idx if idx >= 0 else 0)
+
+    def _on_optimizer_changed(self, *_):
+        opt = self._current_optimizer()
+        self._lr_row_widget.setVisible(opt == "adamw8bit")
+        self._opt_note.setText(self._OPT_NOTES.get(opt, ""))
+        self.optimizer_changed.emit(self.optimizer_label())
         self._update_config_summary()
 
     def _update_config_summary(self):
@@ -1003,7 +1034,7 @@ class TrainTab(QWidget):
     def apply_run_definition(self, rd):
         """Inverse of build_run_definition: push a saved set back into the widgets."""
         self._lora_name_edit.setText(rd.lora_name or "")
-        self._on_optimizer_changed()  # optimizer fixed to Prodigy
+        self._set_optimizer(getattr(rd, "optimizer", "prodigy"))
         self._lr_spin.setValue(rd.learning_rate)
         self._dim_spin.setValue(rd.network_dim)
         self._alpha_spin.setValue(rd.network_alpha)

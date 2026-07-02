@@ -772,6 +772,10 @@ class HomeTab(QWidget):
         modal.add_footer_button("Close", primary=True).clicked.connect(modal.close_modal)
         modal.open()
 
+    def open_train_presets(self):
+        """Public entry for the sidebar Presets nav item — same Train Presets modal."""
+        self._open_train_modal()
+
     def _open_train_modal(self):
         panel = getattr(self, "_train_panel", None)
         if panel is None:
@@ -885,7 +889,8 @@ class HomeTab(QWidget):
         done, total = context.get("caption_counts", (0, 0))
         self.set_caption_status(done, total)
         self.set_train_summary(
-            steps=context.get("target_steps"), optimizer="Prodigy",
+            steps=context.get("target_steps"),
+            optimizer=context.get("optimizer_label") or "Prodigy",
             dim=context.get("net_dim"), alpha=context.get("net_alpha"),
             res=context.get("net_res"))
         try:

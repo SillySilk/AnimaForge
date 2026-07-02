@@ -35,10 +35,20 @@ def test_emits_anima_keys(tmp_path):
 
 
 def test_no_sdxl_keys(tmp_path):
+    # Check KEY names only — pytest's tmp_path embeds this test's own name
+    # ("test_no_sdxl_keys0"), so path VALUES always contain "sdxl" and a dump-wide
+    # substring check fails on itself (the old "known flaky" failure).
     main, _ = _gen(tmp_path)
-    flat = toml.dumps(main)
+
+    def all_keys(d):
+        for k, v in d.items():
+            yield k
+            if isinstance(v, dict):
+                yield from all_keys(v)
+
+    keys = " ".join(all_keys(main))
     for forbidden in ["sdxl", "clip_skip", "min_snr_gamma", "no_half_vae", "xformers"]:
-        assert forbidden not in flat, f"{forbidden} should not appear in Anima config"
+        assert forbidden not in keys, f"{forbidden} should not appear in Anima config"
 
 
 def test_prodigy_default(tmp_path):

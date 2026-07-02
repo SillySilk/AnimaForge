@@ -14,6 +14,7 @@ def test_generate_all_writes_valid_images(tmp_path: Path):
         "hero_forge.png", "bg_embers.png", "panel_metal.png",
         "nav/home.png", "nav/setup.png", "nav/dataset.png",
         "nav/characters.png", "nav/train.png", "nav/batch.png",
+        "nav/presets.png",
     }
     rel = {p.relative_to(tmp_path).as_posix() for p in paths}
     assert expected <= rel, f"missing: {expected - rel}"
@@ -29,4 +30,4 @@ def test_generate_all_is_idempotent(tmp_path: Path):
     gen_assets.generate_all(tmp_path)
     paths2 = gen_assets.generate_all(tmp_path)
     assert (tmp_path / "emblem.png").exists()
-    assert len(paths2) == 13
+    assert len(paths2) == 14

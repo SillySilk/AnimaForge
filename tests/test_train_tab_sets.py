@@ -111,3 +111,22 @@ def test_set_row_has_blank_name_field_and_selector():
     assert hasattr(t, "_set_name_edit")
     assert t._set_name_edit.text() == ""          # blank by default, no stale name
     assert hasattr(t, "_sets_combo")
+
+
+def test_optimizer_preset_round_trips_adamw8bit():
+    # The preset selector is back (user feedback): AdamW8bit must survive a
+    # RunDefinition round-trip and reveal the LR row; Prodigy hides it.
+    rd = RunDefinition(
+        lora_name="Cmp", dataset_folder="C:/ds", image_count=3,
+        optimizer="adamw8bit", learning_rate=0.0002, network_dim=16,
+        network_alpha=8, target_steps=1000,
+    )
+    t = TrainTab()
+    t.apply_run_definition(rd)
+    assert t._current_optimizer() == "adamw8bit"
+    assert t.optimizer_label() == "AdamW8bit"
+    assert not t._lr_row_widget.isHidden()
+    assert abs(t._lr_spin.value() - 0.0002) < 1e-9
+    t._set_optimizer("prodigy")
+    assert t._current_optimizer() == "prodigy"
+    assert t._lr_row_widget.isHidden()
