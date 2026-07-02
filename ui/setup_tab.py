@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -335,7 +336,8 @@ class SetupTab(QWidget):
         # reads as a readiness checklist, not a wall of fields.
         self._advanced_group = self._build_advanced_group()
         self._defaults_group = self._build_defaults_group()
-        for grp in (self._advanced_group, self._defaults_group):
+        self._presets_group = self._build_presets_group()
+        for grp in (self._advanced_group, self._defaults_group, self._presets_group):
             grp.setParent(self)
             grp.setVisible(False)
         fine_label = QLabel("Fine Tuning")
@@ -345,6 +347,7 @@ class SetupTab(QWidget):
         fine_row.setSpacing(10)
         for text, opener in [("⚙  App Defaults", self._open_defaults_modal),
                              ("⚙  Advanced Training", self._open_advanced_modal),
+                             ("🎛  Training Presets", self._open_presets_settings_modal),
                              ("📖  Setup Guide", self._show_install_dialog)]:
             b = QPushButton(text)
             b.setObjectName("af_btn_ghost")
@@ -701,6 +704,120 @@ class SetupTab(QWidget):
     def _open_advanced_modal(self):
         self._open_setting_modal(self._advanced_group, "Advanced Training",
                                  "Flow weighting, dropout, VRAM warnings — leave default unless you know.")
+
+    def _open_presets_settings_modal(self):
+        self._refresh_presets_list()
+        self._open_setting_modal(self._presets_group, "Training Presets",
+                                 "Your named training intents — picked from the front page in one click.")
+
+    # ------------------------------------------------------------------
+    # Training presets management (custom intent profiles)
+    # ------------------------------------------------------------------
+
+    def _build_presets_group(self) -> QGroupBox:
+        from PySide6.QtWidgets import QListWidget
+        g = QGroupBox("Custom Training Presets")
+        v = QVBoxLayout(g)
+        v.setSpacing(8)
+        hint = QLabel(
+            "Built-ins (Person, Object / Concept, Style) are always available on the Home "
+            "PRESET picker. Add your own here for bigger configurations — larger network "
+            "dim/alpha, longer runs, a fixed optimizer — and they appear in the same picker.")
+        hint.setObjectName("label_field")
+        hint.setWordWrap(True)
+        v.addWidget(hint)
+        self._presets_list = QListWidget()
+        self._presets_list.setMinimumHeight(140)
+        v.addWidget(self._presets_list)
+        row = QHBoxLayout()
+        add_btn = QPushButton("➕ New Preset…")
+        add_btn.clicked.connect(self._new_preset_dialog)
+        del_btn = QPushButton("🗑 Delete selected")
+        del_btn.clicked.connect(self._delete_selected_preset)
+        row.addWidget(add_btn)
+        row.addWidget(del_btn)
+        row.addStretch()
+        v.addLayout(row)
+        return g
+
+    def _refresh_presets_list(self):
+        from core import train_presets as tp
+        self._presets_list.clear()
+        for p in tp.parse_customs(self._app.get(tp.SETTINGS_KEY)):
+            self._presets_list.addItem(f"{p.name}   —   {tp.summary_line(p)}")
+
+    def _new_preset_dialog(self):
+        from core import train_presets as tp
+        from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox,
+                                       QDoubleSpinBox, QFormLayout, QSpinBox)
+        dlg = QDialog(self)
+        dlg.setWindowTitle("New Training Preset")
+        form = QFormLayout(dlg)
+        name_edit = QLineEdit()
+        name_edit.setPlaceholderText("e.g. Big Character (dim 64)")
+        form.addRow("Name:", name_edit)
+        subject = QComboBox()
+        for label, key in [("Character / Person", "character"),
+                           ("Object / Concept", "concept"), ("Art Style", "style")]:
+            subject.addItem(label, key)
+        form.addRow("Subject type:", subject)
+        optimizer = QComboBox()
+        optimizer.addItem("Prodigy+ ScheduleFree — auto LR", "prodigy")
+        optimizer.addItem("AdamW8bit — constant LR", "adamw8bit")
+        form.addRow("Optimizer:", optimizer)
+        lr = QDoubleSpinBox()
+        lr.setDecimals(6)
+        lr.setRange(0.000001, 0.01)
+        lr.setValue(0.0001)
+        lr.setEnabled(False)  # Prodigy is LR-free
+        optimizer.currentIndexChanged.connect(
+            lambda _i: lr.setEnabled(optimizer.currentData() == "adamw8bit"))
+        form.addRow("Learning rate:", lr)
+        dim = QSpinBox()
+        dim.setRange(1, 128)
+        dim.setValue(16)
+        form.addRow("Network dim:", dim)
+        alpha = QSpinBox()
+        alpha.setRange(1, 128)
+        alpha.setValue(8)
+        form.addRow("Alpha:", alpha)
+        steps = QSpinBox()
+        steps.setRange(0, 100000)
+        steps.setSingleStep(100)
+        steps.setSpecialValueText("Auto (from dataset)")
+        form.addRow("Target steps:", steps)
+        uncap = QCheckBox("Uncap steps (long runs — scale with dataset)")
+        form.addRow("", uncap)
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        form.addRow(buttons)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        preset = tp.TrainPreset(
+            name=name_edit.text(), subject_type=subject.currentData(),
+            optimizer=optimizer.currentData(), learning_rate=lr.value(),
+            network_dim=dim.value(), network_alpha=alpha.value(),
+            target_steps=steps.value(), uncap_steps=uncap.isChecked())
+        try:
+            self._app.set(tp.SETTINGS_KEY, tp.add_custom(self._app.get(tp.SETTINGS_KEY), preset))
+        except ValueError as e:
+            QMessageBox.warning(self, "Cannot save preset", str(e))
+            return
+        self._refresh_presets_list()
+
+    def _delete_selected_preset(self):
+        from core import train_presets as tp
+        item = self._presets_list.currentItem()
+        if item is None:
+            return
+        name = item.text().split("   —   ")[0].strip()
+        if QMessageBox.question(self, "Delete preset", f"Delete preset “{name}”?",
+                                QMessageBox.Yes | QMessageBox.No,
+                                QMessageBox.No) != QMessageBox.Yes:
+            return
+        self._app.set(tp.SETTINGS_KEY, tp.remove_custom(self._app.get(tp.SETTINGS_KEY), name))
+        self._refresh_presets_list()
 
     def _build_forge_group(self) -> QGroupBox:
         g = QGroupBox("Forge / Stable Diffusion API (deliver + test-render)")

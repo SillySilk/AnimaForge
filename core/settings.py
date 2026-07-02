@@ -55,6 +55,8 @@ DEFAULTS = {
     # ComfyUI has no test-render API we can target (workflows vary), but a plain
     # copy into its LoRA folder covers the ComfyUI crowd (user feedback).
     "comfyui_lora_dir": "",
+    # Custom training presets (JSON array — see core/train_presets.py)
+    "train_presets_json": "",
     # App defaults (Train tab initializes from these)
     "default_optimizer": "prodigy",
     "default_network_dim": 16,

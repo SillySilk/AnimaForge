@@ -60,6 +60,9 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1100, 720)
         self.resize(1280, 800)
 
+        from core import train_presets
+        self._preset_name = train_presets.DEFAULT_NAME  # "Person"
+
         self._build_ui()
         self._connect_signals()
 
@@ -343,6 +346,9 @@ class MainWindow(QMainWindow):
         # "Name your characters?" prompt after tagging jumps to the Characters tab
         self._dataset_tab.open_characters_requested.connect(lambda: self._switch_tab(3))
 
+        # PRESET button on the Set card → the picker (MainWindow owns preset data)
+        self._home_tab.preset_pick_requested.connect(self._open_preset_picker)
+
         # Dashboard quick actions
         self._home_tab.navigate.connect(self._switch_tab)
         self._home_tab.autodetect_requested.connect(self._on_home_autodetect)
@@ -426,9 +432,65 @@ class MainWindow(QMainWindow):
         self._refresh_rail()
 
     def _open_presets_modal(self):
-        """Sidebar Presets item: jump to Home and open its Train Presets modal."""
+        """Sidebar Presets item: jump to Home and open the Training Presets picker."""
         self._switch_tab(0)
-        self._home_tab.open_train_presets()
+        self._open_preset_picker()
+
+    # ------------------------------------------------------------------
+    # Training presets (intent profiles)
+    # ------------------------------------------------------------------
+
+    def _presets_store(self) -> str:
+        return self._setup_tab.get_app_settings().get("train_presets_json")
+
+    def _open_preset_picker(self):
+        """List + explicit Select — nothing applies from hovering or scrolling
+        (an earlier combo flipped values on stray mouse-wheel; radios that replaced
+        it couldn't grow). Double-click also selects (still a deliberate act)."""
+        from core import train_presets as tp
+        from ui.forge_modal import ForgeModal
+        from PySide6.QtWidgets import QListWidget, QListWidgetItem
+        presets = tp.all_presets(self._presets_store())
+        modal = ForgeModal(
+            self, title="Training Presets", eyebrow="The Set · Preset",
+            subtitle="Pick the training intent — nothing changes until you hit Select.",
+            max_width=560)
+        lst = QListWidget()
+        lst.setCursor(Qt.PointingHandCursor)
+        for p in presets:
+            item = QListWidgetItem(f"{p.name}\n     {tp.summary_line(p)}")
+            item.setData(Qt.UserRole, p.name)
+            lst.addItem(item)
+            if p.name == self._preset_name:
+                lst.setCurrentItem(item)
+        lst.setMinimumHeight(min(380, 52 * lst.count() + 12))
+        modal.body.addWidget(lst)
+        hint = QLabel("Add your own in Setup → Training Presets.")
+        hint.setObjectName("af_eyebrow_mute")
+        modal.body.addWidget(hint)
+        modal.add_footer_button("Cancel").clicked.connect(modal.close_modal)
+        select_btn = modal.add_footer_button("Select", primary=True)
+
+        def _select():
+            item = lst.currentItem()
+            if item is not None:
+                self._apply_preset_by_name(item.data(Qt.UserRole))
+            modal.close_modal()
+
+        select_btn.clicked.connect(_select)
+        lst.itemDoubleClicked.connect(lambda _i: _select())
+        modal.open()
+
+    def _apply_preset_by_name(self, name: str):
+        from core import train_presets as tp
+        p = tp.find(self._presets_store(), name)
+        if p is None:
+            return
+        self._preset_name = p.name
+        self._train_tab.apply_preset(p)
+        self._home_tab.set_preset_label(p.name, p.subject_type)
+        self._home_tab.refresh(self._collect_home_context())
+        self._status_bar.showMessage(f"Preset: {p.name} — {tp.summary_line(p)}", 6000)
 
     def _refresh_rail(self):
         """Recompute the progress rail from the active dataset folder + current tab."""
@@ -484,6 +546,7 @@ class MainWindow(QMainWindow):
             "trigger_word": self._dataset_tab.get_trigger_word(),
             "quality_prefix": self._dataset_tab.get_prefix(),
             "subject_type": self._train_tab.get_subject_type(),
+            "preset_name": self._preset_name,
             "target_steps": self._train_tab.get_target_steps(),
             "style_anchor": self._train_tab._dataset_style_anchor(),
             # live pillar readouts (Home condenses these into the two step cards)
@@ -511,10 +574,20 @@ class MainWindow(QMainWindow):
         self._train_tab.set_subject_type(key)
 
     def _sync_home_anchor_visibility(self):
-        """Show the Style @anchor (Home + Characters) only when the subject type is Style."""
+        """Show the Style @anchor (Home + Characters) only when the subject type is Style.
+
+        Also keeps the PRESET button honest: when the subject drifts away from the
+        active preset (filename auto-detect, a loaded Saved Set), the label falls back
+        to the built-in intent for that subject rather than lying about what's applied.
+        """
+        from core import train_presets as tp
         is_style = self._train_tab.is_style_subject()
         self._home_tab.set_style_anchor_visible(is_style)
-        self._home_tab.set_subject_radio(self._train_tab.get_subject_type())
+        subject = self._train_tab.get_subject_type()
+        current = tp.find(self._presets_store(), self._preset_name)
+        if current is None or current.subject_type != subject:
+            self._preset_name = tp.builtin_for_subject(subject).name
+        self._home_tab.set_preset_label(self._preset_name, subject)
         self._characters_tab.set_anchor_gate(is_style)
 
     def _on_home_run(self):

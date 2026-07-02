@@ -260,6 +260,23 @@ class TrainTab(QWidget):
         wired by this tab but displayed on Home — the single place to tune steps."""
         return self._step_calc_group
 
+    def apply_preset(self, preset):
+        """Apply a core.train_presets.TrainPreset (front-page picker). Sets values
+        only — never starts a run. target_steps 0 = re-suggest from the dataset."""
+        self.set_subject_type(preset.subject_type)
+        self._set_optimizer(preset.optimizer)
+        self._on_optimizer_changed()
+        if preset.optimizer == "adamw8bit" and preset.learning_rate:
+            self._lr_spin.setValue(preset.learning_rate)
+        self._dim_spin.setValue(preset.network_dim)
+        self._alpha_spin.setValue(preset.network_alpha)
+        self._uncap_check.setChecked(preset.uncap_steps)
+        if preset.target_steps:
+            self.set_target_steps(preset.target_steps)
+        else:
+            self._apply_suggestion()
+        self._recalculate()
+
     def apply_defaults(self, app_settings):
         """Initialize the Train tab controls from the App Defaults in Settings."""
         self._app_settings = app_settings
@@ -808,9 +825,22 @@ class TrainTab(QWidget):
 
         # Live sample preview (filled from {output_dir}/sample during training).
         # Per the handoff: a 4-wide grid bounded to ~2 visible rows, scroll for older sets.
-        preview_title = QLabel("Live Preview (newest first — two rows of four, scroll for older)")
+        # Preview header: title + display-mode toggle (flat newest-first grid vs
+        # labeled per-epoch rows for side-by-side checkpoint comparison). A view
+        # switch on a preview surface — displays state, drives nothing.
+        preview_head = QHBoxLayout()
+        preview_title = QLabel("Live Preview")
         preview_title.setStyleSheet("font-size: 12px; font-weight: 600; color: #8a8a93;")
-        right_layout.addWidget(preview_title)
+        preview_head.addWidget(preview_title)
+        preview_head.addStretch()
+        self._compare_toggle = QCheckBox("Compare epochs")
+        self._compare_toggle.setToolTip(
+            "Group previews by epoch, newest on top — spot the earliest epoch that "
+            "already looks right and stop there.")
+        self._compare_toggle.toggled.connect(
+            lambda _on: self._render_preview(getattr(self, "_preview_files", []) or []))
+        preview_head.addWidget(self._compare_toggle)
+        right_layout.addLayout(preview_head)
         self._preview_container = QWidget()
         self._preview_grid = QGridLayout(self._preview_container)
         self._preview_grid.setContentsMargins(0, 0, 0, 0)
@@ -1610,17 +1640,42 @@ class TrainTab(QWidget):
         gap, cols = 8, 4
         vw = self._preview_scroll.viewport().width()
         col_w = max(80, (vw - (cols - 1) * gap - 4) // cols)
-        for i, path in enumerate(files):
+
+        def _add_thumb(path, row, col):
             pm = QPixmap(path)
             if pm.isNull():
-                continue
+                return False
             scaled = pm.scaled(col_w, col_w, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             thumb = _ClickableThumb(path)
             thumb.setPixmap(scaled)
             thumb.setFixedSize(scaled.size())
             thumb.setToolTip(path)
             thumb.clicked.connect(self._show_image)
-            self._preview_grid.addWidget(thumb, i // cols, i % cols)
+            self._preview_grid.addWidget(thumb, row, col)
+            return True
+
+        if self._compare_toggle.isChecked():
+            # Checkpoint comparison: one labeled band per epoch/step round, newest on
+            # top — scan down a column to watch one prompt evolve and pick the
+            # earliest epoch that already looks right.
+            from core.samples import group_by_round
+            row = 0
+            for label, group in group_by_round(files):
+                band = QLabel(label.upper())
+                band.setStyleSheet("color: #f4d160; font-size: 11px; font-weight: 700; "
+                                   "letter-spacing: 1px; padding-top: 6px;")
+                self._preview_grid.addWidget(band, row, 0, 1, cols)
+                row += 1
+                shown = 0
+                for path in group:
+                    if _add_thumb(path, row + shown // cols, shown % cols):
+                        shown += 1
+                row += max(1, (shown + cols - 1) // cols)
+        else:
+            shown = 0
+            for path in files:
+                if _add_thumb(path, shown // cols, shown % cols):
+                    shown += 1
         self._preview_scroll.setFixedHeight(2 * col_w + gap + 4)
 
     def resizeEvent(self, event):

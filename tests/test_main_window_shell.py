@@ -60,20 +60,45 @@ def test_home_run_split_wired():
     assert hasattr(w._train_tab, "add_current_to_batch")
 
 
-def test_subject_radios_drive_type_and_gear_modal():
+def test_preset_picker_drives_type_and_gear_modal():
+    from core import train_presets as tp
     w = MainWindow()
     h = w._home_tab
-    assert set(h._type_radios) == {"character", "concept", "style"}
-    # picking a radio drives the subject type through to Train
-    h._type_radios["style"].setChecked(True)
+    # "Person" is the default preset, shown on the PRESET button
+    assert w._preset_name == tp.DEFAULT_NAME
+    assert "Person" in h._preset_btn.text()
+    # applying a preset drives the subject type through to Train + updates the label
+    w._apply_preset_by_name("Style")
     assert w._train_tab.get_subject_type() == "style"
+    assert "Style" in h._preset_btn.text()
+    # subject drift (e.g. filename auto-detect) pulls the label back to the built-in
+    w._train_tab.set_subject_type("character")
+    assert "Person" in h._preset_btn.text()
     # the numeric Step Calculator is stashed and shown in the gear modal
     panel = h._stepcalc_panel
     assert panel.isHidden()
     h._open_stepcalc_modal()
     assert panel.isHidden() is False
     h._restash(panel)
-    assert panel.isHidden() and panel.parent() is h
+
+
+def test_custom_preset_appears_and_applies():
+    from core import train_presets as tp
+    w = MainWindow()
+    a = w._setup_tab.get_app_settings()
+    saved = a.get(tp.SETTINGS_KEY)
+    try:
+        a.set(tp.SETTINGS_KEY, tp.add_custom("", tp.TrainPreset(
+            "Big Style", subject_type="style", network_dim=64, network_alpha=32,
+            target_steps=1500)))
+        w._apply_preset_by_name("Big Style")
+        assert w._train_tab._dim_spin.value() == 64
+        assert w._train_tab._alpha_spin.value() == 32
+        assert w._train_tab.get_target_steps() == 1500
+        assert w._train_tab.get_subject_type() == "style"
+        assert "Big Style" in w._home_tab._preset_btn.text()
+    finally:
+        a.set(tp.SETTINGS_KEY, saved)  # the store is machine-global — restore it
 
 
 def test_caption_options_modal_reparents_and_restashes_panel():

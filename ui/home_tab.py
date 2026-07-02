@@ -5,8 +5,8 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal, QThread
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
-    QButtonGroup, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QInputDialog,
-    QLabel, QLineEdit, QPushButton, QRadioButton, QScrollArea, QVBoxLayout, QWidget,
+    QFileDialog, QFrame, QGridLayout, QHBoxLayout, QInputDialog,
+    QLabel, QLineEdit, QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
 from ui.forge_modal import ForgeModal
@@ -73,7 +73,8 @@ class HomeTab(QWidget):
     run_caption_requested = Signal()  # pillar "Run Captioning" button
     start_train_requested = Signal()  # pillar "Start Training" button
     stop_train_requested = Signal()   # pillar "Stop" button (enabled while a run is live)
-    presets_closed = Signal()         # a Presets/Step Calculator modal closed → re-pull summary
+    presets_closed = Signal()         # an Options/Step Calculator modal closed → re-pull summary
+    preset_pick_requested = Signal()  # PRESET button — MainWindow opens the picker (owns the data)
 
     _GLYPH = {"ok": "✓", "idle": "–", "err": "✗"}
     _OBJ = {"ok": "ready_row_ok", "idle": "ready_row_idle", "err": "ready_row_err"}
@@ -336,25 +337,25 @@ class HomeTab(QWidget):
         self._name_msg.setVisible(False)
         c.addWidget(self._name_msg)
 
-        # Subject type as radios (easy to pick, hard to fat-finger) + a gear that opens the
-        # numeric Step Calculator (target steps, cap removal, readout) in a modal.
+        # Training preset — ONE labeled control instead of a knob row (radios were too
+        # restrictive once presets became user-extensible; a bare combo flipped values
+        # on stray scrolls in an earlier iteration). The picker modal lists presets and
+        # applies nothing until its explicit Select button. Gear = Step Calculator.
         c.addSpacing(6)
         sub_row = QHBoxLayout()
         sub_row.setSpacing(10)
-        sub_lbl = QLabel("SUBJECT TYPE")
+        sub_lbl = QLabel("PRESET")
         sub_lbl.setObjectName("af_eyebrow_mute")
         sub_row.addWidget(sub_lbl)
-        self._type_group = QButtonGroup(self)
-        self._type_radios = {}
-        for key, label in zip(self._TYPE_KEYS, self._TYPE_LABELS):
-            rb = QRadioButton(label)
-            rb.setObjectName("af_radio")
-            rb.setCursor(Qt.PointingHandCursor)
-            rb.toggled.connect(lambda checked, k=key: checked and self.type_changed.emit(k))
-            self._type_group.addButton(rb)
-            self._type_radios[key] = rb
-            sub_row.addWidget(rb)
-        self._type_radios["character"].setChecked(True)
+        self._preset_btn = QPushButton("👤  Person  ▾")
+        self._preset_btn.setObjectName("af_btn_ghost")
+        self._preset_btn.setMinimumHeight(36)
+        self._preset_btn.setCursor(Qt.PointingHandCursor)
+        self._preset_btn.setToolTip(
+            "Training preset — subject, optimizer, network size & steps in one pick.\n"
+            "Add your own in Setup → Training Presets.")
+        self._preset_btn.clicked.connect(self.preset_pick_requested.emit)
+        sub_row.addWidget(self._preset_btn)
         sub_row.addStretch()
         gear = QPushButton("⚙")
         gear.setObjectName("af_icon_btn")
@@ -395,6 +396,8 @@ class HomeTab(QWidget):
         cl.addWidget(self._pillar_head("STEP 01", "Caption",
                                        action_label="Options",
                                        on_action=self._open_caption_modal))
+        # (Train pillar's action is also "Options" now — "Presets" is reserved for
+        # the intent presets picker on the Set card.)
         marker = QLabel("Tag, describe & combine — training-ready text for every image.")
         marker.setObjectName("af_marker")
         marker.setWordWrap(True)
@@ -451,7 +454,7 @@ class HomeTab(QWidget):
         tl.addWidget(self._pillar_accent())
         tl.addSpacing(18)
         tl.addWidget(self._pillar_head("STEP 02", "Train",
-                                       action_label="Presets",
+                                       action_label="Options",
                                        on_action=self._open_train_modal))
         marker2 = QLabel("Anima-tuned settings, already dialed in. Just pull the lever.")
         marker2.setObjectName("af_marker")
@@ -545,7 +548,7 @@ class HomeTab(QWidget):
             ("steps", "TARGET STEPS", "—",
              "Click to set the target steps (Step Calculator)", self._open_stepcalc_modal),
             ("optimizer", "OPTIMIZER", "Prodigy",
-             "Click to change the optimizer & network (Train Presets)", self._open_train_modal),
+             "Click to change the optimizer & network (Train Options)", self._open_train_modal),
         ]
         for key, cap_text, val, tip, on_click in tile_defs:
             tile = _ClickTile(on_click)
@@ -810,7 +813,7 @@ class HomeTab(QWidget):
         modal.open()
 
     def open_train_presets(self):
-        """Public entry for the sidebar Presets nav item — same Train Presets modal."""
+        """Back-compat public entry — opens the Train Options modal."""
         self._open_train_modal()
 
     def _open_train_modal(self):
@@ -818,7 +821,7 @@ class HomeTab(QWidget):
         if panel is None:
             return
         modal = ForgeModal(
-            self.window(), title="Train Presets", eyebrow="Step 02 · Presets",
+            self.window(), title="Train Options", eyebrow="Step 02 · Options",
             subtitle="Sample previews, optimizer & network, run options — all here.",
             max_width=960)
         panel.setVisible(True)
@@ -851,13 +854,12 @@ class HomeTab(QWidget):
         modal.add_footer_button("Done", primary=True).clicked.connect(modal.close_modal)
         modal.open()
 
-    def set_subject_radio(self, key: str):
-        """Reflect the current subject type on the radios (no signal echo)."""
-        rb = self._type_radios.get((key or "").lower())
-        if rb is not None and not rb.isChecked():
-            rb.blockSignals(True)
-            rb.setChecked(True)
-            rb.blockSignals(False)
+    _TYPE_ICON = {"character": "👤", "concept": "📦", "style": "🎨"}
+
+    def set_preset_label(self, name: str, subject_type: str = ""):
+        """Reflect the active training preset on the PRESET button (display only)."""
+        icon = self._TYPE_ICON.get((subject_type or "").lower(), "👤")
+        self._preset_btn.setText(f"{icon}  {name}  ▾")
 
     def set_style_anchor_visible(self, visible: bool):
         """Show the Style @anchor field only for Style runs (driven by Train's subject type)."""
@@ -906,10 +908,10 @@ class HomeTab(QWidget):
         self._prefix_edit.setText(context.get("quality_prefix", "") or "")
         self._prefix_edit.blockSignals(False)
 
-        # Subject type drives the radios (numeric widgets live in the gear modal); reflect it
-        # here plus the Style @anchor visibility.
+        # Active preset + subject type drive the PRESET button and @anchor visibility.
         key = (context.get("subject_type") or "character").lower()
-        self.set_subject_radio(key)
+        if context.get("preset_name"):
+            self.set_preset_label(context["preset_name"], key)
         self._set_anchor_visible(key == "style")
 
         self._anchor_edit.blockSignals(True)
