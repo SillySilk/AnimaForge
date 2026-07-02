@@ -663,6 +663,12 @@ class SetupTab(QWidget):
         if folder:
             self._forge_lora_edit.setText(folder)
 
+    def _browse_comfy_lora(self):
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select ComfyUI LoRA Folder", self._comfy_lora_edit.text())
+        if folder:
+            self._comfy_lora_edit.setText(folder)
+
     def _test_forge(self):
         from core import forge_api
         url = self._forge_url_edit.text().strip() or "http://127.0.0.1:7860"
@@ -729,6 +735,18 @@ class SetupTab(QWidget):
         self._forge_test_check = QCheckBox("Auto test-render after training")
         v.addWidget(self._forge_deliver_check)
         v.addWidget(self._forge_test_check)
+        r3 = QHBoxLayout()
+        r3.addWidget(QLabel("ComfyUI LoRA folder:"))
+        self._comfy_lora_edit = QLineEdit()
+        self._comfy_lora_edit.setPlaceholderText(".../ComfyUI/models/loras")
+        self._comfy_lora_edit.setToolTip(
+            "Optional — enables 'Deliver to ComfyUI' (a plain copy; ComfyUI has no render API to target)")
+        r3.addWidget(self._comfy_lora_edit)
+        cb = QPushButton("Browse…")
+        cb.setFixedWidth(108)
+        cb.clicked.connect(self._browse_comfy_lora)
+        r3.addWidget(cb)
+        v.addLayout(r3)
         self._forge_status = QLabel("")
         self._forge_status.setWordWrap(True)
         self._forge_status.setStyleSheet("font-size: 11px; color: #8a8a93;")
@@ -859,6 +877,7 @@ class SetupTab(QWidget):
         self._scan_edit.setText(a.first_run_scan_default())
         self._forge_url_edit.setText(a.get("forge_api_url"))
         self._forge_lora_edit.setText(a.get("forge_lora_dir"))
+        self._comfy_lora_edit.setText(a.get("comfyui_lora_dir"))
         self._forge_deliver_check.setChecked(a.get("forge_auto_deliver"))
         self._forge_test_check.setChecked(a.get("forge_auto_test"))
         self._weighting_combo.setCurrentText(a.get("weighting_scheme"))
@@ -882,6 +901,7 @@ class SetupTab(QWidget):
         self._scan_edit.textChanged.connect(lambda t: a.set("model_scan_dir", t))
         self._forge_url_edit.textChanged.connect(lambda t: a.set("forge_api_url", t))
         self._forge_lora_edit.textChanged.connect(lambda t: a.set("forge_lora_dir", t))
+        self._comfy_lora_edit.textChanged.connect(lambda t: a.set("comfyui_lora_dir", t))
         self._forge_deliver_check.toggled.connect(lambda b: a.set("forge_auto_deliver", b))
         self._forge_test_check.toggled.connect(lambda b: a.set("forge_auto_test", b))
         self._weighting_combo.currentTextChanged.connect(lambda t: a.set("weighting_scheme", t))
@@ -914,30 +934,43 @@ class SetupTab(QWidget):
         self.settings_changed.emit()
 
     def _save_settings(self):
-        self._settings.setValue("sdscripts_path", self._sdscripts_edit.text())
-        self._settings.setValue("dit_path", self._dit_edit.text())
-        self._settings.setValue("qwen3_path", self._qwen3_edit.text())
-        self._settings.setValue("vae_path", self._vae_edit.text())
-        self._settings.setValue("output_dir", self._output_edit.text())
+        # Install-internal paths are stored relative to the app root (QSettings is
+        # machine-global, so absolute paths leak between side-by-side copies).
+        from core.paths import to_portable
+        self._settings.setValue("sdscripts_path", to_portable(self._sdscripts_edit.text()))
+        self._settings.setValue("dit_path", to_portable(self._dit_edit.text()))
+        self._settings.setValue("qwen3_path", to_portable(self._qwen3_edit.text()))
+        self._settings.setValue("vae_path", to_portable(self._vae_edit.text()))
+        self._settings.setValue("output_dir", to_portable(self._output_edit.text()))
         self._settings.setValue("lmstudio_url", self._lms_url_edit.text())
         self._settings.setValue("lmstudio_model", self._lms_model_edit.text())
         self._settings.setValue("lmstudio_refine_in_process", self._lms_in_process_check.isChecked())
         self._settings.sync()
 
     def _load_settings(self):
-        default_sd = str(Path(__file__).resolve().parents[1] / "sd-scripts")
-        saved_sd = self._settings.value("sdscripts_path", "", type=str)
-        if not saved_sd or not (Path(saved_sd) / "anima_train_network.py").is_file():
+        from core.paths import app_root, from_portable, in_other_install
+        root = app_root()
+
+        # sd-scripts: this install's bundled copy wins over an invalid path OR a path
+        # that leaked from another AnimaForge copy on the same machine. A user's own
+        # external sd-scripts clone is still honored.
+        default_sd = str(root / "sd-scripts")
+        saved_sd = from_portable(self._settings.value("sdscripts_path", "", type=str))
+        if (not saved_sd
+                or not (Path(saved_sd) / "anima_train_network.py").is_file()
+                or in_other_install(saved_sd)):
             saved_sd = default_sd
         self._sdscripts_edit.setText(saved_sd)
 
-        self._dit_edit.setText(self._settings.value("dit_path", "", type=str))
-        self._qwen3_edit.setText(self._settings.value("qwen3_path", "", type=str))
-        self._vae_edit.setText(self._settings.value("vae_path", "", type=str))
+        self._dit_edit.setText(from_portable(self._settings.value("dit_path", "", type=str)))
+        self._qwen3_edit.setText(from_portable(self._settings.value("qwen3_path", "", type=str)))
+        self._vae_edit.setText(from_portable(self._settings.value("vae_path", "", type=str)))
 
-        default_out = str(Path(__file__).resolve().parents[1] / "output")
-        saved_out = self._settings.value("output_dir", default_out, type=str)
-        self._output_edit.setText(saved_out or default_out)
+        default_out = str(root / "output")
+        saved_out = from_portable(self._settings.value("output_dir", default_out, type=str))
+        if not saved_out or in_other_install(saved_out):
+            saved_out = default_out
+        self._output_edit.setText(saved_out)
 
         self._lms_url_edit.setText(
             self._settings.value("lmstudio_url", "http://localhost:1234/v1", type=str)
