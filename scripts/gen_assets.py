@@ -92,7 +92,33 @@ def _anvil(draw, ox, oy, scale, color):
     draw.polygon(P([(4, 20), (30, 20), (34, 30), (0, 30)]), fill=color)
 
 
+# Brand source of truth: the maintainer's logo badge (local-only; design/ is
+# gitignored). When present, the emblem + app icon are derived from it and the
+# resized PNGs get committed in assets/. Without it (public contributors), the
+# original drawn forge art below is the fallback.
+_LOGO_SRC = Path(__file__).resolve().parents[1] / "design" / "logo" / "Logo.png"
+
+
+def _brand_logo(size: int) -> "Image.Image | None":
+    """The brand badge resized to `size` px square (RGBA), or None if absent."""
+    if not _LOGO_SRC.is_file():
+        return None
+    img = Image.open(_LOGO_SRC).convert("RGBA")
+    # square-pad first so a non-square export can't distort the badge
+    w, h = img.size
+    if w != h:
+        side = max(w, h)
+        padded = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+        padded.paste(img, ((side - w) // 2, (side - h) // 2))
+        img = padded
+    return img.resize((size, size), Image.LANCZOS)
+
+
 def make_emblem_png(path: Path) -> Path:
+    logo = _brand_logo(256)
+    if logo is not None:
+        logo.save(path, optimize=True)
+        return path
     size = (256, 256)
     img = Image.new("RGBA", size, (0, 0, 0, 0))
     # warm flame glow behind, fading to transparent
@@ -129,6 +155,11 @@ def make_emblem_svg(path: Path) -> Path:
 
 
 def make_icon(png_path: Path, ico_path: Path):
+    logo = _brand_logo(256)
+    if logo is not None:
+        logo.save(png_path, optimize=True)
+        logo.save(ico_path, sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+        return png_path, ico_path
     size = (256, 256)
     tile = _radial(size, PANEL, BLACK, radius=200).convert("RGBA")
     tile = Image.alpha_composite(tile, _warm_glow(size, (128, 104), 110))

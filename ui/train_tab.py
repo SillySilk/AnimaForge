@@ -1567,7 +1567,14 @@ class TrainTab(QWidget):
             f"• Exact config files → “Show Details…” below"
         )
         box = QMessageBox(self)
-        box.setIcon(QMessageBox.Question)
+        # the brand badge instead of the stock "?" — launch is the ceremony moment
+        from PySide6.QtGui import QPixmap
+        from utils.styles import asset_url
+        _badge = QPixmap(asset_url("emblem.png"))
+        if not _badge.isNull():
+            box.setIconPixmap(_badge.scaledToHeight(64, Qt.SmoothTransformation))
+        else:
+            box.setIcon(QMessageBox.Question)
         box.setWindowTitle("Start Training")
         box.setText(f"Start run “{name}”?")
         box.setInformativeText(info)
