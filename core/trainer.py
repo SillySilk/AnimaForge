@@ -121,11 +121,18 @@ class TrainingProcess(QObject):
         """
         Extract the current step count from Kohya output.
 
+        Only the main training bar counts — sd-scripts names it ``desc="steps"``.
+        Other tqdm bars in the same stream (latent caching, "Sampling" while a
+        preview set renders, weight loading) would otherwise clobber the step,
+        the total, and the dials mid-run.
+
         Patterns handled:
-          100%|████| 3000/3000 [45:23<00:00,  1.10it/s, loss=0.0821]
-          steps:  33%|███       | 100/3000 [01:32<24:17]
+          steps:  33%|███       | 100/3000 [01:32<24:17,  1.10it/s, loss=0.0821]
           steps: 100/3000
         """
+        if not line.lstrip().lower().startswith("steps"):
+            return None
+
         # Pattern 1: tqdm bar  "current/total [..."
         m = re.search(r"(\d+)/(\d+)\s*\[", line)
         if m:

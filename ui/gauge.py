@@ -130,7 +130,10 @@ class DialRow(QFrame):
         self.loss.set(f"{loss:.3f}", frac, note=trend)
 
     def set_speed(self, it_s: float, ceiling: float = 4.0):
-        self.speed.set(f"{it_s:.2f} it/s", min(1.0, it_s / ceiling))
+        # Fast GPUs (RTX 5090) exceed a fixed 4 it/s and would peg the needle for the
+        # whole run — let the session's observed peak stretch the dial instead.
+        self._speed_peak = max(getattr(self, "_speed_peak", 0.0), it_s)
+        self.speed.set(f"{it_s:.2f} it/s", min(1.0, it_s / max(ceiling, self._speed_peak)))
 
     def set_eta(self, eta_seconds: int, elapsed_seconds: int = 0):
         from core.train_metrics import format_eta
