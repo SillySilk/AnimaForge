@@ -76,3 +76,36 @@ def test_set_processing_frame_moves_highlight():
     assert b.property("processing") == "true"
     t._clear_processing_frame()
     assert b.property("processing") == "false"
+
+
+def test_gallery_click_opens_editor_with_card_captions(monkeypatch):
+    # Regression: after the gallery redesign removed the card's inline _caption_edit,
+    # _open_image_editor still read it — every click raised inside the slot and the
+    # editor never opened ("we lost click-to-edit").
+    import ui.dataset_tab as dt_mod
+    from ui.dataset_tab import DatasetTab
+
+    t = DatasetTab()
+    t._cards = [_card(), ImageCard("/x/b.png", "/x/b.txt", "second caption", 0)]
+
+    opened = {}
+
+    class FakeDlg:
+        class _Sig:
+            def connect(self, *_):
+                pass
+        caption_saved = _Sig()
+        cast_changed = _Sig()
+
+        def __init__(self, items, index, characters, parent):
+            opened["items"], opened["index"] = items, index
+
+        def exec(self):
+            opened["shown"] = True
+
+    monkeypatch.setattr(dt_mod, "ImageEditorDialog", FakeDlg)
+    t._open_image_editor("/x/b.png")
+    assert opened.get("shown")
+    assert opened["index"] == 1
+    assert opened["items"][1]["caption"] == "second caption"
+    assert opened["items"][0]["caption"] == LONG

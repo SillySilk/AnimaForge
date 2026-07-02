@@ -284,6 +284,10 @@ class ImageCard(QWidget):
     def txt_path(self) -> str:
         return self._txt_path
 
+    @property
+    def caption_text(self) -> str:
+        return self._caption_text or ""
+
 
 class DatasetTab(QWidget):
     dataset_loaded = Signal(str, int)  # (folder_path, image_count)
@@ -1349,9 +1353,12 @@ class DatasetTab(QWidget):
     def _open_image_editor(self, image_path: str):
         if not self._cards:
             return
+        # NB: cards carry a read-only preview since the gallery redesign; the full
+        # text lives in caption_text. (Reading the removed _caption_edit here made
+        # every gallery click raise inside the slot, so the editor never opened.)
         items = [
             {"image_path": c._image_path, "txt_path": c._txt_path,
-             "caption": c._caption_edit.toPlainText()}
+             "caption": c.caption_text}
             for c in self._cards
         ]
         index = next((i for i, it in enumerate(items) if it["image_path"] == image_path), 0)
