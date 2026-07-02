@@ -458,12 +458,33 @@ class MainWindow(QMainWindow):
         lst = QListWidget()
         lst.setCursor(Qt.PointingHandCursor)
         for p in presets:
-            item = QListWidgetItem(f"{p.name}\n     {tp.summary_line(p)}")
+            item = QListWidgetItem()
             item.setData(Qt.UserRole, p.name)
+            # Three-deck row: name / settings / the step math in small print. The
+            # built-ins read identically without that last line — the exposure
+            # formula IS the difference between Person, Object and Style.
+            row = QWidget()
+            rv = QVBoxLayout(row)
+            rv.setContentsMargins(10, 7, 10, 7)
+            rv.setSpacing(1)
+            name_lbl = QLabel(p.name)
+            name_lbl.setStyleSheet(
+                "background: transparent; color: #e8e0c8; font-size: 14px; font-weight: 700;")
+            summ_lbl = QLabel(tp.summary_line(p))
+            summ_lbl.setStyleSheet(
+                "background: transparent; color: #8a8a93; font-size: 11px;")
+            math_lbl = QLabel(tp.formula_line(p))
+            math_lbl.setStyleSheet(
+                "background: transparent; color: #a8925a; font-size: 10px; font-style: italic;")
+            for lbl in (name_lbl, summ_lbl, math_lbl):
+                rv.addWidget(lbl)
+            row.setStyleSheet("background: transparent;")
+            item.setSizeHint(row.sizeHint())
             lst.addItem(item)
+            lst.setItemWidget(item, row)
             if p.name == self._preset_name:
                 lst.setCurrentItem(item)
-        lst.setMinimumHeight(min(380, 52 * lst.count() + 12))
+        lst.setMinimumHeight(min(420, 68 * lst.count() + 12))
         modal.body.addWidget(lst)
         hint = QLabel("Add your own in Setup → Training Presets.")
         hint.setObjectName("af_eyebrow_mute")

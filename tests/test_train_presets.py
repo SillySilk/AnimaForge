@@ -68,3 +68,18 @@ def test_summary_line():
                        target_steps=900, uncap_steps=True)
     line = tp.summary_line(p)
     assert "AdamW8bit" in line and "900 steps" in line and "uncapped" in line
+
+
+def test_formula_line_differs_per_builtin():
+    lines = [tp.formula_line(p) for p in tp.BUILTINS]
+    # the small print is the visible difference between the three intents
+    assert len(set(lines)) == 3
+    assert "56" in lines[0] and "34" in lines[1] and "26" in lines[2]
+    assert all("÷ 4" in l for l in lines)
+
+
+def test_formula_line_fixed_steps():
+    p = tp.TrainPreset("X", target_steps=1500)
+    assert tp.formula_line(p) == "steps fixed at 1,500"
+    p2 = tp.TrainPreset("Y", target_steps=5000, uncap_steps=True)
+    assert "uncapped" in tp.formula_line(p2)

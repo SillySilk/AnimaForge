@@ -123,6 +123,30 @@ def remove_custom(store_json: str, name: str) -> str:
         [p for p in parse_customs(store_json) if p.name.lower() != want])
 
 
+# Why the built-ins differ even though optimizer/network match: the step budget.
+_FORMULA_NOTES = {
+    "character": "identities need the most exposure",
+    "concept": "objects converge faster",
+    "style": "style takes fastest",
+}
+
+
+def formula_line(p: TrainPreset) -> str:
+    """The step math behind a preset, for the picker's small print.
+
+    The built-ins look identical at a glance (same optimizer/network) — the real
+    difference is the exposures-per-image target driving the auto step count, so
+    show that formula. Fixed-step presets state the fixed number instead.
+    """
+    if p.target_steps:
+        return f"steps fixed at {p.target_steps:,}" + (" · uncapped" if p.uncap_steps else "")
+    from core.step_calculator import BATCH_SIZE, target_exposures
+    exp = target_exposures(p.subject_type)
+    note = _FORMULA_NOTES.get(p.subject_type, "")
+    line = f"auto steps = {exp} × images ÷ {BATCH_SIZE}"
+    return f"{line}  ({note})" if note else line
+
+
 def summary_line(p: TrainPreset) -> str:
     """One-line description for pickers/lists."""
     opt = "Prodigy (auto LR)" if p.optimizer == "prodigy" else f"AdamW8bit @ {p.learning_rate:g}"
