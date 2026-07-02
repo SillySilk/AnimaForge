@@ -1318,6 +1318,9 @@ class TrainTab(QWidget):
             QMessageBox.warning(self, "Cannot Start Training", msg)
             return
 
+        if not self._check_empty_captions(interactive=confirm):
+            return
+
         if confirm and not self._confirm_preflight():
             return
 
@@ -1361,6 +1364,54 @@ class TrainTab(QWidget):
             sets.mark_run_active(rd)
 
         self._trainer.start(self._config_path, self._setup_path)
+
+    def _check_empty_captions(self, interactive: bool = True) -> bool:
+        """Guard against empty/missing .txt captions (training fails on them).
+
+        Interactive: offer a one-click trigger-word fill (trigger-only training),
+        continue-anyway, or cancel. Non-interactive (unattended pipeline): auto-fill
+        with the trigger when one is set, otherwise proceed as before. Returns True
+        to proceed with the run.
+        """
+        from core import dataset_manager
+        empty = dataset_manager.find_empty_captions(self._dataset_path)
+        if not empty:
+            return True
+        trigger = (self._trigger_word or "").strip()
+        if not interactive:
+            if trigger:
+                n = dataset_manager.fill_empty_captions(self._dataset_path, trigger)
+                self.status_message.emit(
+                    f"Filled {n} empty caption(s) with the trigger word “{trigger}”.")
+            return True
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle("Empty Captions")
+        box.setText(
+            f"{len(empty)} of {self._image_count} images have empty or missing captions.")
+        info = "Training fails on captionless images."
+        if trigger:
+            info += (f"\n\nFill the empty ones with the trigger word “{trigger}” "
+                     "(trigger-only training), continue as-is, or cancel and caption first.")
+        else:
+            info += ("\n\nNo trigger word is set, so one-click fill isn't available — "
+                     "run captioning (or set a trigger word), or continue at your own risk.")
+        box.setInformativeText(info)
+        fill_btn = None
+        if trigger:
+            fill_btn = box.addButton("Fill with trigger word", QMessageBox.AcceptRole)
+        box.addButton("Continue anyway", QMessageBox.DestructiveRole)
+        cancel_btn = box.addButton("Cancel", QMessageBox.RejectRole)
+        box.setDefaultButton(fill_btn or cancel_btn)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is cancel_btn:
+            return False
+        if fill_btn is not None and clicked is fill_btn:
+            n = dataset_manager.fill_empty_captions(self._dataset_path, trigger)
+            self.status_message.emit(
+                f"Filled {n} empty caption(s) with the trigger word “{trigger}”.")
+        return True
 
     def _confirm_preflight(self) -> bool:
         """Show a pre-flight summary before a (potentially long) run. Returns True to proceed."""

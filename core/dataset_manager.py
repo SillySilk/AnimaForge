@@ -217,6 +217,40 @@ def apply_prefix(folder_path: str, prefix_text: str, trigger_word: str = "") -> 
     return modified, skipped, errors
 
 
+def find_empty_captions(folder_path: str) -> list:
+    """Image paths whose training .txt caption is missing or whitespace-only.
+
+    Training fails on captionless images, so callers gate a run on this (offering a
+    trigger-word fill for trigger-only datasets). Sorted by filename for stable output.
+    """
+    folder = Path(folder_path)
+    if not folder.is_dir():
+        return []
+    empty = []
+    for f in sorted(folder.iterdir(), key=lambda f: f.name.lower()):
+        if not (f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS):
+            continue
+        txt = f.with_suffix(".txt")
+        if not txt.is_file() or not load_caption(str(txt)).strip():
+            empty.append(str(f))
+    return empty
+
+
+def fill_empty_captions(folder_path: str, trigger_word: str) -> int:
+    """Write the trigger word into every missing/whitespace-only .txt caption.
+
+    Never touches images that already have a caption. Returns files written.
+    """
+    trigger = (trigger_word or "").strip()
+    if not trigger:
+        return 0
+    written = 0
+    for img in find_empty_captions(folder_path):
+        if save_caption(str(Path(img).with_suffix(".txt")), trigger):
+            written += 1
+    return written
+
+
 def latest_files(folder_path: str, n: int = 6) -> list:
     """Return image paths in a folder, newest by mtime first. Up to n, or all if n is None.
     [] if folder missing."""

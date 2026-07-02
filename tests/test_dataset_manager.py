@@ -130,3 +130,43 @@ def test_apply_prefix_skips_duplicate(tmp_path):
     # second run should skip
     m, s, e = apply_prefix(str(tmp_path), prefix_text="", trigger_word="mychar")
     assert (m, s, e) == (0, 1, 0)
+
+
+# ---- empty-caption guard (pre-training) ----
+
+def _img(tmp_path, name, caption=None):
+    p = tmp_path / name
+    p.write_bytes(b"fake")
+    if caption is not None:
+        p.with_suffix(".txt").write_text(caption, encoding="utf-8")
+    return p
+
+
+def test_find_empty_captions_missing_and_whitespace(tmp_path):
+    from core.dataset_manager import find_empty_captions
+    _img(tmp_path, "a.png")                    # no .txt at all
+    _img(tmp_path, "b.png", "  \n\t ")         # whitespace-only
+    _img(tmp_path, "c.png", "a real caption")  # fine
+    (tmp_path / "notes.txt").write_text("stray txt, no image", encoding="utf-8")
+    empty = find_empty_captions(str(tmp_path))
+    assert [Path(p).name for p in empty] == ["a.png", "b.png"]
+    assert find_empty_captions(str(tmp_path / "nope")) == []
+
+
+def test_fill_empty_captions_writes_trigger_only_where_empty(tmp_path):
+    from core.dataset_manager import find_empty_captions, fill_empty_captions
+    _img(tmp_path, "a.png")
+    _img(tmp_path, "b.png", "")
+    _img(tmp_path, "c.png", "keep me")
+    assert fill_empty_captions(str(tmp_path), "  mychar  ") == 2
+    assert (tmp_path / "a.txt").read_text(encoding="utf-8") == "mychar"
+    assert (tmp_path / "b.txt").read_text(encoding="utf-8") == "mychar"
+    assert (tmp_path / "c.txt").read_text(encoding="utf-8") == "keep me"
+    assert find_empty_captions(str(tmp_path)) == []
+
+
+def test_fill_empty_captions_noop_without_trigger(tmp_path):
+    from core.dataset_manager import fill_empty_captions
+    _img(tmp_path, "a.png")
+    assert fill_empty_captions(str(tmp_path), "   ") == 0
+    assert not (tmp_path / "a.txt").exists()
