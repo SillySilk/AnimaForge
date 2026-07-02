@@ -1694,8 +1694,11 @@ class TrainTab(QWidget):
                 QMessageBox.warning(self, "No LoRA", f"{src} not found — train it first.")
             return False
         from core import forge_api
+        from core.paths import delivery_filename
         try:
-            out = forge_api.deliver_lora(str(src), lora_dir, a.get("forge_api_url"))
+            out = forge_api.deliver_lora(
+                str(src), lora_dir, a.get("forge_api_url"),
+                dest_name=delivery_filename(self.get_lora_name(), self._trigger_word))
             self._on_log_line(f"[Forge] Delivered LoRA → {out}")
             if not silent:
                 QMessageBox.information(self, "Delivered to Forge", f"Copied to:\n{out}")
@@ -1726,8 +1729,11 @@ class TrainTab(QWidget):
                 QMessageBox.warning(self, "No LoRA", f"{src} not found — train it first.")
             return False
         from core import forge_api
+        from core.paths import delivery_filename
         try:
-            out = forge_api.deliver_lora(str(src), lora_dir)  # no API refresh for Comfy
+            out = forge_api.deliver_lora(
+                str(src), lora_dir,  # no API refresh for Comfy
+                dest_name=delivery_filename(self.get_lora_name(), self._trigger_word))
             self._on_log_line(f"[ComfyUI] Delivered LoRA → {out}")
             if not silent:
                 QMessageBox.information(self, "Delivered to ComfyUI", f"Copied to:\n{out}")
@@ -1743,8 +1749,12 @@ class TrainTab(QWidget):
             return
         from PySide6.QtCore import QThread
         from core.forge_worker import ForgeRenderWorker
+        from core.paths import delivery_filename
         a = self._app_settings
-        name = self._lora_name_edit.text().strip()
+        # The test prompt's <lora:...> tag must match the DELIVERED filename, which
+        # carries the trigger suffix.
+        name = delivery_filename(self._lora_name_edit.text().strip(),
+                                 self._trigger_word)[:-len(".safetensors")]
         prompts = [p.strip() for p in a.get("sample_prompts").splitlines() if p.strip()]
         if not prompts:
             prompts = ["upper body portrait, looking at viewer"]

@@ -88,6 +88,23 @@ def sanitize_name(lora_name: str) -> str:
     return safe.rstrip(". ")
 
 
+def delivery_filename(lora_name: str, trigger_word: str = "") -> str:
+    """Filename for a *delivered* LoRA copy: ``{name}_{trigger}.safetensors``.
+
+    The trigger rides in the filename so end users can read the activation word
+    or phrase straight off the file. Multi-word phrases are underscored (spaces
+    don't survive filing systems / prompt tags reliably). Skipped when no trigger
+    is set, or when the name already carries it (name == trigger or already
+    suffixed). The training output keeps the plain name — this is only for the
+    copies handed to Forge / ComfyUI.
+    """
+    name = sanitize_name(lora_name)
+    trig = "_".join(sanitize_name((trigger_word or "").strip()).split())
+    if trig and trig.lower() != name.lower() and not name.lower().endswith("_" + trig.lower()):
+        name = f"{name}_{trig}"
+    return f"{name}.safetensors"
+
+
 def run_output_dir(base_dir: str, lora_name: str) -> str:
     """Per-run output folder `{base_dir}/{sanitized lora_name}`.
 

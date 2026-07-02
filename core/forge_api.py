@@ -39,15 +39,17 @@ def ping(api_url: str, timeout: float = 5.0) -> bool:
         return False
 
 
-def deliver_lora(src_safetensors: str, dest_dir: str, api_url: str = None) -> str:
+def deliver_lora(src_safetensors: str, dest_dir: str, api_url: str = None,
+                 dest_name: str = None) -> str:
     """Copy the trained LoRA into Forge's models/Lora dir; refresh Forge if api_url given.
 
-    Returns the destination path. Raises on copy failure.
+    `dest_name` renames the copy (used to suffix the trigger word so end users can
+    read it off the filename). Returns the destination path. Raises on copy failure.
     """
     src = Path(src_safetensors)
     dest = Path(dest_dir)
     dest.mkdir(parents=True, exist_ok=True)
-    out = dest / src.name
+    out = dest / (dest_name or src.name)
     shutil.copy2(src, out)
     if api_url:
         try:

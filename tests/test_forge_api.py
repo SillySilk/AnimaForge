@@ -30,6 +30,17 @@ def test_deliver_lora_copies_file(tmp_path):
     assert Path(out).name == "mylora.safetensors"
 
 
+def test_deliver_lora_renames_with_dest_name(tmp_path):
+    src = tmp_path / "out" / "mylora.safetensors"
+    src.parent.mkdir()
+    src.write_bytes(b"weights")
+    dest_dir = tmp_path / "comfy" / "loras"
+    out = forge_api.deliver_lora(str(src), str(dest_dir), api_url=None,
+                                 dest_name="mylora_mychar.safetensors")
+    assert Path(out).name == "mylora_mychar.safetensors"
+    assert Path(out).read_bytes() == b"weights"
+
+
 def test_ping_false_on_bad_url():
     # Nothing listening on this port → graceful False, not an exception.
     assert forge_api.ping("http://127.0.0.1:9", timeout=1.0) is False

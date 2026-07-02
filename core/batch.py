@@ -219,7 +219,11 @@ class BatchRunner(QObject):
             src = Path(run_output_dir(run.output_dir, run.lora_name)) / f"{run.lora_name}.safetensors"
             if lora_dir and src.is_file():
                 from core import forge_api
-                out = forge_api.deliver_lora(str(src), lora_dir, app.get("forge_api_url"))
+                from core.paths import delivery_filename
+                out = forge_api.deliver_lora(
+                    str(src), lora_dir, app.get("forge_api_url"),
+                    dest_name=delivery_filename(run.lora_name,
+                                                getattr(run, "trigger_word", "")))
                 self.log_line.emit(f"[Batch] Delivered '{run.lora_name}' → {out}")
         except Exception as e:
             self.log_line.emit(f"[Batch] deliver failed: {e}")

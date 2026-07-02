@@ -4,7 +4,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from core.paths import (
-    from_portable, in_other_install, run_output_dir, sanitize_name, to_portable,
+    delivery_filename, from_portable, in_other_install, run_output_dir,
+    sanitize_name, to_portable,
 )
 
 
@@ -27,6 +28,33 @@ def test_sanitizes_illegal_chars():
     assert sanitize_name("  trailing.  ") == "trailing"
     # composed path uses the sanitized leaf
     assert Path(run_output_dir("/out", "a/b")).name == "a_b"
+
+
+# ---- delivered-copy filename (trigger rides in the name) ----
+
+def test_delivery_filename_appends_trigger():
+    assert delivery_filename("MyChar_v1", "mychar") == "MyChar_v1_mychar.safetensors"
+
+
+def test_delivery_filename_underscores_phrase():
+    # multi-word trigger phrases are underscored — spaces don't survive filing
+    assert delivery_filename("Style01", "my cool char") == "Style01_my_cool_char.safetensors"
+    assert delivery_filename("Style01", "  my   cool char ") == "Style01_my_cool_char.safetensors"
+
+
+def test_delivery_filename_no_trigger_plain():
+    assert delivery_filename("MyChar_v1", "") == "MyChar_v1.safetensors"
+    assert delivery_filename("MyChar_v1", "   ") == "MyChar_v1.safetensors"
+
+
+def test_delivery_filename_skips_redundant_trigger():
+    # name == trigger, or already suffixed: don't stutter
+    assert delivery_filename("mychar", "MyChar") == "mychar.safetensors"
+    assert delivery_filename("MyChar_v1_mychar", "mychar") == "MyChar_v1_mychar.safetensors"
+
+
+def test_delivery_filename_sanitizes():
+    assert delivery_filename("a/b", 'tr:ig') == "a_b_tr_ig.safetensors"
 
 
 # ---- portable (per-install) path storage ----
