@@ -29,7 +29,9 @@ from PySide6.QtWidgets import (
 
 from core import characters as characters_mod
 from core.caption_progress import parse_progress
-from core.dataset_manager import scan_folder, save_caption, apply_prefix, combine_all
+from core.dataset_manager import (
+    SUPPORTED_EXTENSIONS, apply_prefix, combine_all, save_caption, scan_folder,
+)
 from core.tagger import TaggerProcess
 from core.joycaption import JoyCaptionProcess
 from core.llm_refine import LLMRefineProcess
@@ -148,31 +150,43 @@ class ImageCard(QWidget):
         self._cast_btn.adjustSize()
         self._cast_btn.move(7, THUMB_SIZE - self._cast_btn.height() - 7)
         self._cast_btn.clicked.connect(lambda: self.cast_clicked.emit(self._image_path))
+
+        # Trash can rides the thumbnail's top-right corner — always visible (the old
+        # spot beside the filename was easy to miss; deleting a double must be one
+        # obvious click).
+        self._delete_btn = QPushButton("🗑", self._thumb_label)
+        self._delete_btn.setFixedSize(26, 26)
+        self._delete_btn.setToolTip("Delete this image and its caption files")
+        self._delete_btn.setCursor(Qt.PointingHandCursor)
+        self._delete_btn.move(THUMB_SIZE - 26 - 7, 7)
+        self._delete_btn.setStyleSheet(
+            "QPushButton { background-color: rgba(12,11,10,0.82); border: 1px solid #3a3a1f;"
+            " border-radius: 13px; color: #c88a80; font-size: 13px; }"
+            "QPushButton:hover { border: 1px solid #e05050; color: #ff6a5c;"
+            " background-color: rgba(42,20,16,0.92); }")
+        self._delete_btn.clicked.connect(self._on_delete_clicked)
+
+        # "DOUBLE" badge (bottom-right, amber) — shown when another file shares this
+        # stem; the pair silently shares one caption file. Hidden by default.
+        self._dup_badge = QLabel("DOUBLE", self._thumb_label)
+        self._dup_badge.setStyleSheet(
+            "background-color: rgba(42,32,10,0.92); color: #ffb84d; border: 1px solid #b8860b;"
+            " border-radius: 8px; padding: 1px 7px; font-size: 10px; font-weight: 700;")
+        self._dup_badge.adjustSize()
+        self._dup_badge.move(THUMB_SIZE - self._dup_badge.width() - 7,
+                             THUMB_SIZE - self._dup_badge.height() - 7)
+        self._dup_badge.hide()
+
         layout.addWidget(self._thumb_label, alignment=Qt.AlignHCenter)
 
-        # Filename + always-visible trash (delete image + caption).
-        meta = QHBoxLayout()
-        meta.setContentsMargins(0, 0, 0, 0)
-        meta.setSpacing(4)
+        # Filename (the trash can moved onto the thumbnail's top-right corner).
         filename = Path(self._image_path).name
         name_label = QLabel(filename)
         name_label.setObjectName("image_filename")
         name_label.setToolTip(filename)
         fm = name_label.fontMetrics()
-        name_label.setText(fm.elidedText(filename, Qt.ElideMiddle, THUMB_SIZE - 30))
-        meta.addWidget(name_label, 1)
-        delete_btn = QPushButton("🗑")
-        delete_btn.setObjectName("btn_delete_image")
-        delete_btn.setFixedSize(24, 24)
-        delete_btn.setToolTip("Delete this image and caption")
-        delete_btn.setCursor(Qt.PointingHandCursor)
-        delete_btn.clicked.connect(self._on_delete_clicked)
-        delete_btn.setStyleSheet(
-            "QPushButton { background-color: transparent; border: none; color: #a05048; font-size: 13px; }"
-            "QPushButton:hover { color: #e05050; }"
-        )
-        meta.addWidget(delete_btn, 0)
-        layout.addLayout(meta)
+        name_label.setText(fm.elidedText(filename, Qt.ElideMiddle, THUMB_SIZE - 6))
+        layout.addWidget(name_label)
 
         # Read-only 2-line caption preview — editing happens in the editor modal (click).
         self._caption_preview = QLabel()
@@ -228,6 +242,17 @@ class ImageCard(QWidget):
 
     def set_cast_count(self, n: int):
         self._cast_btn.setText(self._cast_label(n))
+
+    def mark_duplicate(self, other_names: list):
+        """Show/hide the DOUBLE badge. `other_names` = images sharing this stem."""
+        if other_names:
+            self._dup_badge.setToolTip(
+                "Same name as " + ", ".join(other_names) + " — these files share ONE "
+                "caption (.txt), so this picture trains at double exposure. "
+                "Keep one and delete the rest (🗑).")
+            self._dup_badge.show()
+        else:
+            self._dup_badge.hide()
 
     def _load_thumbnail(self):
         try:
@@ -811,6 +836,13 @@ class DatasetTab(QWidget):
             self._gallery_layout.addWidget(card, row, col)
             self._cards.append(card)
             self._cards_by_name[name] = card
+
+        # Flag "doubles": images sharing a stem (hero.png + hero.jpg) share one .txt
+        # and double that picture's exposure — badge them so one can be trashed.
+        from core.dataset_manager import duplicate_stem_names
+        dupes = duplicate_stem_names(d["image_path"] for d in self._image_data)
+        for card in self._cards:
+            card.mark_duplicate(dupes.get(card.filename, []))
 
         set_name = Path(self._folder_path).name if self._folder_path else ""
         self._set_name_label.setText(
@@ -1625,15 +1657,22 @@ class DatasetTab(QWidget):
             return
 
         try:
-            Path(image_path).unlink()
-            # Also delete the caption + sidecar files if they exist
-            for ext in (".txt", ".tags", ".nl"):
-                sidecar = Path(image_path).with_suffix(ext)
-                if sidecar.is_file():
-                    sidecar.unlink()
+            p = Path(image_path)
+            p.unlink()
+            # Delete the caption + sidecar files too — UNLESS another image still
+            # shares this stem (a "double" like hero.png + hero.jpg): the survivor
+            # owns the same .txt, and trashing one twin must not orphan its caption.
+            stem_twins = [f for f in p.parent.iterdir()
+                          if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS
+                          and f.stem.lower() == p.stem.lower()]
+            if not stem_twins:
+                for ext in (".txt", ".tags", ".nl"):
+                    sidecar = p.with_suffix(ext)
+                    if sidecar.is_file():
+                        sidecar.unlink()
 
-            # Reload the gallery
+            # Reload the gallery — the card vanishing is the feedback (a success
+            # popup per deletion made cleaning several doubles a chore).
             self._load_images()
-            QMessageBox.information(self, "Deleted", f"'{filename}' deleted successfully.")
         except Exception as e:
             QMessageBox.warning(self, "Delete Failed", f"Could not delete file:\n{e}")

@@ -109,3 +109,21 @@ def test_gallery_click_opens_editor_with_card_captions(monkeypatch):
     assert opened["index"] == 1
     assert opened["items"][1]["caption"] == "second caption"
     assert opened["items"][0]["caption"] == LONG
+
+
+def test_delete_button_on_thumbnail_and_double_badge():
+    c = _card()
+    # trash can overlays the thumbnail (top-right), always visible
+    assert c._delete_btn.parent() is c._thumb_label
+    assert not hasattr(c, "delete_btn_row")  # old below-thumbnail spot is gone
+    fired = []
+    c.image_deleted.connect(lambda p: fired.append(p))
+    c._delete_btn.click()
+    assert fired == ["/x/aria_03.png"]
+    # DOUBLE badge hidden by default, shown with twins, hideable again
+    assert c._dup_badge.isHidden()
+    c.mark_duplicate(["aria_03.jpg"])
+    assert not c._dup_badge.isHidden()
+    assert "aria_03.jpg" in c._dup_badge.toolTip()
+    c.mark_duplicate([])
+    assert c._dup_badge.isHidden()

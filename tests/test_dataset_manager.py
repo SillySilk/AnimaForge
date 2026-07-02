@@ -170,3 +170,15 @@ def test_fill_empty_captions_noop_without_trigger(tmp_path):
     _img(tmp_path, "a.png")
     assert fill_empty_captions(str(tmp_path), "   ") == 0
     assert not (tmp_path / "a.txt").exists()
+
+
+def test_duplicate_stem_names_flags_extension_twins():
+    from core.dataset_manager import duplicate_stem_names
+    dupes = duplicate_stem_names([
+        "/d/hero_001.png", "/d/hero_001.jpg", "/d/Solo.png", "/d/HERO_001.webp",
+    ])
+    # case-insensitive stem match; each double lists its twins, singles omitted
+    assert set(dupes) == {"hero_001.png", "hero_001.jpg", "HERO_001.webp"}
+    assert set(dupes["hero_001.png"]) == {"hero_001.jpg", "HERO_001.webp"}
+    assert "Solo.png" not in dupes
+    assert duplicate_stem_names([]) == {}

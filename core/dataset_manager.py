@@ -11,6 +11,25 @@ TAGS_EXT = ".tags"
 NL_EXT = ".nl"
 
 
+def duplicate_stem_names(image_paths) -> dict:
+    """Map each image filename to the OTHER images sharing its stem (case-insensitive).
+
+    Two files like ``hero_001.png`` + ``hero_001.jpg`` are "doubles": the trainer sees
+    both images but they silently share ONE ``.txt`` caption (sidecars key off the
+    stem), doubling that picture's exposure. Names without a twin are omitted.
+    """
+    by_stem: dict = {}
+    for p in image_paths:
+        p = Path(p)
+        by_stem.setdefault(p.stem.lower(), []).append(p.name)
+    out = {}
+    for names in by_stem.values():
+        if len(names) > 1:
+            for n in names:
+                out[n] = [m for m in names if m != n]
+    return out
+
+
 def scan_folder(path: str) -> list:
     """
     Scan a folder for image files and their associated caption .txt files.
