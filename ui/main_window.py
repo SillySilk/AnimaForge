@@ -348,6 +348,8 @@ class MainWindow(QMainWindow):
 
         # PRESET button on the Set card → the picker (MainWindow owns preset data)
         self._home_tab.preset_pick_requested.connect(self._open_preset_picker)
+        # 📜 beside Start → the same config preview the Options modal offers
+        self._home_tab.preview_config_requested.connect(self._train_tab._preview_config)
 
         # Dashboard quick actions
         self._home_tab.navigate.connect(self._switch_tab)
@@ -489,6 +491,11 @@ class MainWindow(QMainWindow):
         hint = QLabel("Add your own in Setup → Training Presets.")
         hint.setObjectName("af_eyebrow_mute")
         modal.body.addWidget(hint)
+        # Bridge to the deeper knobs (optimizer/network/sample/run options) — a tester
+        # looked for them here first. Same Home-owned modal, one click away.
+        options_btn = modal.add_footer_button("Train Options…")
+        options_btn.clicked.connect(
+            lambda: (modal.close_modal(), self._home_tab.open_train_presets()))
         modal.add_footer_button("Cancel").clicked.connect(modal.close_modal)
         select_btn = modal.add_footer_button("Select", primary=True)
 

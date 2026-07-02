@@ -743,6 +743,11 @@ class TrainTab(QWidget):
         start_stop_row.addWidget(self._start_btn)
         start_stop_row.addWidget(self._stop_btn)
         btn_layout.addLayout(start_stop_row)
+        # Launching lives on the FRONT only — a second Start inside the Train Options
+        # modal confused a tester ("Home has Start, Options has another Start"). The
+        # buttons stay alive (run-state code toggles their enabled flags) but hidden.
+        self._start_btn.setVisible(False)
+        self._stop_btn.setVisible(False)
 
         # ---- Assemble left panel ----
         # LoRA name + dataset path are owned here (engine reads them) but the front page is
@@ -1558,7 +1563,8 @@ class TrainTab(QWidget):
             f"• {self._image_count} images · {total} steps\n"
             f"• {mode}\n"
             f"• LoRA → {Path(run_dir) / (name + '.safetensors')}\n"
-            f"• Previews → {previews}"
+            f"• Previews → {previews}\n"
+            f"• Exact config files → “Show Details…” below"
         )
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Question)

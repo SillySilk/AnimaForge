@@ -87,8 +87,10 @@ QWidget {{
     background-color: transparent; }}
 #af_decor_meta {{ font-family: {F_TYPE}; color: #4a4a44; font-size: 10px;
     letter-spacing: 2px; background-color: transparent; }}
-#af_ver {{ color: #4a4a44; font-family: {F_TYPE}; font-size: 10px;
-    letter-spacing: 2px; background-color: transparent; }}
+/* version stamp: monospace, NOT the typewriter face — a tester read v1.6.0 as
+   v1.8.0 in Special Elite; technical digits must be unambiguous */
+#af_ver {{ color: #5a5a54; font-family: Consolas, "Courier New", monospace; font-size: 11px;
+    letter-spacing: 1px; background-color: transparent; }}
 
 /* ---- legacy sidebar/nav (kept for un-migrated screens + tests) ---- */
 #sidebar {{ background-color: #08080a; border-right: 1px solid #2a2a1e; }}

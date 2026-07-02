@@ -65,7 +65,7 @@ class ForgeModal(QWidget):
         inner.setObjectName("af_modal_card")
         iv = QVBoxLayout(inner)
         iv.setContentsMargins(28, 22, 28, 24)
-        iv.setSpacing(6)
+        iv.setSpacing(8)
 
         if eyebrow:
             lbl_eb = QLabel(eyebrow.upper())
@@ -85,7 +85,7 @@ class ForgeModal(QWidget):
 
         # caller-populated content
         self.body = QVBoxLayout()
-        self.body.setSpacing(10)
+        self.body.setSpacing(12)
         iv.addLayout(self.body)
 
         iv.addStretch()

@@ -75,6 +75,7 @@ class HomeTab(QWidget):
     stop_train_requested = Signal()   # pillar "Stop" button (enabled while a run is live)
     presets_closed = Signal()         # an Options/Step Calculator modal closed → re-pull summary
     preset_pick_requested = Signal()  # PRESET button — MainWindow opens the picker (owns the data)
+    preview_config_requested = Signal()  # 📜 beside Start — inspect the exact TOMLs pre-launch
 
     _GLYPH = {"ok": "✓", "idle": "–", "err": "✗"}
     _OBJ = {"ok": "ready_row_ok", "idle": "ready_row_idle", "err": "ready_row_err"}
@@ -487,6 +488,15 @@ class HomeTab(QWidget):
         self._stop_train_btn.setToolTip("Stop the current training run (asks to confirm)")
         self._stop_train_btn.clicked.connect(self.stop_train_requested.emit)
         start_stop.addWidget(self._stop_train_btn)
+        # Config check right where the launch happens (user feedback: it was only
+        # discoverable inside Options). Inspection aid, not a run control.
+        config_btn = QPushButton("📜")
+        config_btn.setObjectName("af_icon_btn")
+        config_btn.setFixedSize(48, 48)
+        config_btn.setCursor(Qt.PointingHandCursor)
+        config_btn.setToolTip("Preview the exact config files this run will use")
+        config_btn.clicked.connect(self.preview_config_requested.emit)
+        start_stop.addWidget(config_btn)
         tl.addLayout(start_stop)
         g.addWidget(tr, 0, 2)
 
@@ -503,9 +513,9 @@ class HomeTab(QWidget):
     def _pillar_head(self, step: str, title: str, action_label=None, on_action=None) -> QWidget:
         head = QWidget()
         h = QHBoxLayout(head)
-        h.setContentsMargins(0, 0, 0, 0)
+        h.setContentsMargins(0, 0, 0, 6)
         col = QVBoxLayout()
-        col.setSpacing(2)
+        col.setSpacing(4)
         eb = QLabel(step)
         eb.setObjectName("af_eyebrow_flame")
         col.addWidget(eb)
