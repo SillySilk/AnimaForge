@@ -24,8 +24,10 @@ _FONT_DIR = os.path.join(
 
 # role -> (filename, expected family, fallback stack used if the file is missing)
 # "Segoe UI Symbol" is kept in every stack so Qt's per-glyph fallback can render
-# the UI's chevrons/arrows/anvil (‹ › → ⚒ ✓ ♻ ⚒) that the display faces lack.
-_SYM = '"Segoe UI Symbol"'
+# the UI's chevrons/arrows/anvil (‹ › → ⚒ ✓ ♻ ⚒) that the display faces lack;
+# "Malgun Gothic" follows so CJK text (Korean Windows) renders cleanly instead of
+# falling into whatever Qt picks last.
+_SYM = '"Segoe UI Symbol", "Malgun Gothic"'
 _FONTS = {
     "display": ("PirataOne-Regular.ttf", "Pirata One", f'"Times New Roman", {_SYM}, serif'),
     "marker": ("PermanentMarker-Regular.ttf", "Permanent Marker", f'"Comic Sans MS", {_SYM}, cursive'),

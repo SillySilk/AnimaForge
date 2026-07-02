@@ -52,6 +52,9 @@ DEFAULTS = {
     "forge_lora_dir": "",
     "forge_auto_deliver": False,
     "forge_auto_test": False,
+    # ComfyUI has no test-render API we can target (workflows vary), but a plain
+    # copy into its LoRA folder covers the ComfyUI crowd (user feedback).
+    "comfyui_lora_dir": "",
     # App defaults (Train tab initializes from these)
     "default_optimizer": "prodigy",
     "default_network_dim": 16,
@@ -74,10 +77,12 @@ DEFAULTS = {
     "save_every_n_steps": 250,
     # Pre-launch guard: warn if free VRAM is below this many MB before training (0 disables).
     "min_free_vram_mb": 12000,
-    # Sample images during training (on by default so progress previews "just happen")
+    # Sample images during training (on by default so progress previews "just happen").
+    # Every epoch by default: the workflow is watching per-epoch previews and stopping
+    # at the earliest-best — a sparse default hid progress for whole runs (user feedback).
     "sample_enable": True,
     "sample_prompts": "",
-    "sample_every_n_epochs": 10,
+    "sample_every_n_epochs": 1,
     "sample_count": 4,
     "sample_sampler": "euler_a",
     "sample_at_first": True,

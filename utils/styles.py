@@ -17,11 +17,17 @@ def asset_url(name: str) -> str:
 # time. Fallback stacks keep the app legible before fonts load / if a file is
 # missing.
 _FALLBACK_FAMILIES = {
-    "display": '"Pirata One", "Times New Roman", "Segoe UI Symbol", serif',
-    "marker": '"Permanent Marker", "Comic Sans MS", "Segoe UI Symbol", cursive',
-    "type": '"Special Elite", "Courier New", "Segoe UI Symbol", monospace',
-    "body": '"Crimson Pro", Georgia, "Segoe UI Symbol", serif',
+    "display": '"Pirata One", "Times New Roman", "Segoe UI Symbol", "Malgun Gothic", serif',
+    "marker": '"Permanent Marker", "Comic Sans MS", "Segoe UI Symbol", "Malgun Gothic", cursive',
+    "type": '"Special Elite", "Courier New", "Segoe UI Symbol", "Malgun Gothic", monospace',
+    "body": '"Crimson Pro", Georgia, "Segoe UI Symbol", "Malgun Gothic", serif',
 }
+
+# Functional text (buttons, inputs, paths, form labels, status) uses the system UI
+# face, not the decorative set — user feedback: the display faces were hard to read
+# in dense panels, and on Korean Windows the CJK fallback was ugly. "Malgun Gothic"
+# rides in every stack so Korean glyphs render cleanly via Qt's per-glyph fallback.
+_F_UI = '"Segoe UI", "Malgun Gothic", "Segoe UI Symbol", sans-serif'
 
 
 def build_stylesheet(families: dict | None = None) -> str:
@@ -35,8 +41,9 @@ def build_stylesheet(families: dict | None = None) -> str:
         fam.update(families)
     F_DISPLAY = fam["display"]  # Pirata One — blackletter headlines, big numbers
     F_MARKER = fam["marker"]    # Permanent Marker — scrawled taglines
-    F_TYPE = fam["type"]        # Special Elite — eyebrows, labels, nav, buttons
-    F_BODY = fam["body"]        # Crimson Pro — body copy, inputs, captions
+    F_TYPE = fam["type"]        # Special Elite — decorative eyebrows + nav (character)
+    F_BODY = fam["body"]        # Crimson Pro — long-form body copy only
+    F_UI = _F_UI                # system UI — everything functional (readability)
 
     return f"""
 QMainWindow {{ background-color: #0a0a0b; color: #c6c6ce; }}
@@ -44,7 +51,7 @@ QMainWindow {{ background-color: #0a0a0b; color: #c6c6ce; }}
 QWidget {{
     background-color: #0a0a0b;
     color: #c6c6ce;
-    font-family: {F_BODY};
+    font-family: {F_UI};
     font-size: 14px;
 }}
 
@@ -114,7 +121,7 @@ QWidget {{
    ============================================================ */
 QPushButton {{
     background-color: #161512; color: #e8e0c8; border: 1px solid #3a3a1f;
-    border-radius: 6px; padding: 8px 14px; font-family: {F_TYPE}; font-size: 11px;
+    border-radius: 6px; padding: 8px 14px; font-family: {F_UI}; font-size: 12px;
     letter-spacing: 0; min-height: 22px;
 }}
 QPushButton:hover {{ background-color: #201d14; border: 1px solid #d4af37; color: #f4d160; }}
@@ -167,7 +174,7 @@ QPushButton:disabled {{ background-color: #121110; color: #4a4a44; border: 1px s
 #af_segment:checked {{ background: #161208; color: #f4d160; border: 1px solid #8a5a12; }}
 
 /* Subject-type radios on Home's Set card. */
-#af_radio {{ color: #c6c6ce; font-size: 13px; spacing: 6px; padding: 3px 2px; }}
+#af_radio {{ color: #c6c6ce; font-size: 13px; spacing: 6px; padding: 5px 2px; }}
 #af_radio::indicator {{ width: 15px; height: 15px; border-radius: 8px; border: 2px solid #3a3a1f; background: #100f0d; }}
 #af_radio::indicator:checked {{ border: 2px solid #d4af37; background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fp:0.5, fy:0.5, stop:0 #f4d160, stop:0.5 #d4af37, stop:0.6 #100f0d); }}
 #af_radio:hover {{ color: #e8e0c8; }}
@@ -200,7 +207,7 @@ QPushButton:disabled {{ background-color: #121110; color: #4a4a44; border: 1px s
 
 /* ---- forge redesign buttons ---- */
 #af_btn_ghost {{ background-color: transparent; border: 1px solid #3a3a1f; color: #f4d160;
-    border-radius: 6px; padding: 0 14px; font-family: {F_TYPE}; font-size: 11px; letter-spacing: 1px; }}
+    border-radius: 6px; padding: 0 14px; font-family: {F_UI}; font-size: 12px; letter-spacing: 1px; }}
 #af_btn_ghost:hover {{ background-color: rgba(212,151,43,0.10); border-color: #8a5a12; color: #ffe085; }}
 #af_btn_forge {{
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #f6c453, stop:1 #b8860b);
@@ -209,7 +216,7 @@ QPushButton:disabled {{ background-color: #121110; color: #4a4a44; border: 1px s
 #af_btn_forge:hover {{ background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ffe085, stop:1 #d4972b); border: 1px solid #fff0c0; }}
 #af_btn_forge:pressed {{ background: #8a5a12; }}
 #af_pill_ok {{ background-color: rgba(143,168,107,0.10); border: 1px solid rgba(143,168,107,0.4);
-    color: #8fa86b; border-radius: 18px; padding: 0 14px; font-family: {F_TYPE}; font-size: 11px; letter-spacing: 1px; }}
+    color: #8fa86b; border-radius: 18px; padding: 0 14px; font-family: {F_UI}; font-size: 11px; letter-spacing: 1px; }}
 #af_pill_ok:hover {{ background-color: rgba(143,168,107,0.18); }}
 #af_icon_btn {{ background-color: #141312; border: 1px solid #3a3a1f; border-radius: 6px; color: #8a8a93; }}
 #af_icon_btn:hover {{ color: #f4d160; border-color: #8a5a12; }}
@@ -219,7 +226,7 @@ QPushButton:disabled {{ background-color: #121110; color: #4a4a44; border: 1px s
    ============================================================ */
 QSpinBox, QDoubleSpinBox, QComboBox, QLineEdit {{
     background-color: #100f0d; color: #e8e0c8; border: 1px solid #3a3a3f;
-    border-radius: 5px; padding: 4px 8px; font-family: {F_BODY}; font-size: 14px; min-height: 26px;
+    border-radius: 5px; padding: 4px 8px; font-family: {F_UI}; font-size: 13px; min-height: 28px;
 }}
 QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus, QLineEdit:focus {{
     border: 1px solid #d4af37; background-color: #15130d;
@@ -244,11 +251,13 @@ QComboBox QAbstractItemView {{ background-color: #15130d; color: #e8e0c8; border
     selection-background-color: #8a5a12; selection-color: #fff0c0; }}
 
 QTextEdit {{ background-color: #100f0d; color: #c6c6ce; border: 1px solid #3a3a3f; border-radius: 5px;
-    padding: 6px; font-family: {F_BODY}; font-size: 13px; }}
+    padding: 6px; font-family: {F_UI}; font-size: 13px; }}
 QTextEdit:focus {{ border: 1px solid #d4af37; }}
 QTextEdit[readOnly="true"] {{ background-color: #0c0b0a; color: #9a9aa2; }}
-/* monospace logs opt in with objectName log_view */
-#log_view {{ font-family: {F_TYPE}; font-size: 12px; color: #9a9aa2; background-color: #100f0d; }}
+/* monospace logs opt in with objectName log_view — a real monospace, not the
+   typewriter display face (logs must be scannable) */
+#log_view {{ font-family: Consolas, "Malgun Gothic", monospace; font-size: 12px;
+    color: #9a9aa2; background-color: #100f0d; }}
 
 /* ---- Progress Bar ---- */
 QProgressBar {{ background-color: #100f0d; border: 1px solid #3a3a1f; border-radius: 5px;
@@ -259,20 +268,22 @@ QProgressBar::chunk {{ background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
 /* ---- Labels ---- */
 QLabel {{ color: #c6c6ce; background-color: transparent; }}
 #label_section {{ color: #d4af37; font-family: {F_DISPLAY}; font-size: 18px; letter-spacing: 1px; padding: 4px 0; }}
-#label_field {{ color: #8a8a93; font-family: {F_TYPE}; font-size: 11px; letter-spacing: 1px; }}
+#label_field {{ color: #8a8a93; font-family: {F_UI}; font-size: 12px; letter-spacing: 0px; }}
 #label_status_ok {{ color: #d4af37; font-size: 18px; }}
 #label_status_err {{ color: #d9534f; font-size: 18px; }}
 #label_status_unknown {{ color: #6a6a72; font-size: 18px; }}
-#label_image_count {{ color: #f4d160; font-family: {F_TYPE}; font-size: 13px; }}
-#label_step_calc {{ color: #f4d160; font-family: {F_TYPE}; font-size: 13px; padding: 6px;
+#label_image_count {{ color: #f4d160; font-family: {F_UI}; font-size: 13px; }}
+#label_step_calc {{ color: #f4d160; font-family: {F_UI}; font-size: 13px; padding: 8px;
     background-color: #161208; border: 1px solid #3a3a1f; border-radius: 5px; }}
-#label_config_summary {{ color: #9a9aa2; font-size: 12px; font-family: {F_TYPE}; padding: 8px;
+#label_config_summary {{ color: #9a9aa2; font-size: 12px; font-family: {F_UI}; padding: 8px;
     background-color: #0c0b0a; border: 1px solid #2a2a1e; border-radius: 5px; }}
 
 /* forge redesign text roles */
 #af_eyebrow_flame {{ color: #ff9a5c; font-family: {F_TYPE}; font-size: 11px;
     letter-spacing: 2px; background-color: transparent; }}
-#af_eyebrow_mute {{ color: #8a8a93; font-family: {F_TYPE}; font-size: 10px;
+/* doubles as the form-label face (LORA NAME, TARGET STEPS…) — readable UI font,
+   slightly larger; the uppercase + tracking keeps the eyebrow look */
+#af_eyebrow_mute {{ color: #9a9aa2; font-family: {F_UI}; font-size: 11px;
     letter-spacing: 2px; background-color: transparent; }}
 #af_display_gold {{ color: #d4af37; font-family: {F_DISPLAY}; font-size: 32px; background-color: transparent; }}
 #af_display_gold4 {{ color: #f4d160; font-family: {F_DISPLAY}; font-size: 23px; background-color: transparent; }}
@@ -299,7 +310,7 @@ QLabel {{ color: #c6c6ce; background-color: transparent; }}
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(212,151,43,0.10), stop:1 rgba(168,49,30,0.06)); }}
 #af_pillar_accent {{ background-color: #8a5a12; max-height: 2px; min-height: 2px; }}
 #af_chip {{ background-color: #100f0d; border: 1px solid #2a2a1e; border-radius: 5px;
-    color: #e8e0c8; font-family: {F_TYPE}; font-size: 10px; letter-spacing: 1px; padding: 8px 4px; }}
+    color: #e8e0c8; font-family: {F_UI}; font-size: 11px; letter-spacing: 1px; padding: 8px 6px; }}
 
 /* ---- Slider (forge gold) ---- */
 QSlider::groove:horizontal {{ height: 4px; background: #2a2a1e; border-radius: 2px; }}
@@ -330,12 +341,12 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
 #image_card:hover {{ border: 1px solid #d4af37; background-color: #1a1810; }}
 #image_card[processing="true"] {{ border: 2px solid #d4af37; background-color: #1a1810; }}
 #image_thumb {{ background-color: #0c0b0a; border-radius: 4px; }}
-#image_filename {{ color: #8a8a93; font-family: {F_TYPE}; font-size: 10px; padding: 2px 0; }}
+#image_filename {{ color: #8a8a93; font-family: {F_UI}; font-size: 11px; padding: 2px 0; }}
 
 /* ---- GroupBox (brushed metal) ---- */
 QGroupBox {{ background-color: #141312;
     border-image: url({_ASSETS}/panel_metal.png) 0 0 0 0 repeat repeat;
-    border: 1px solid #2a2a1e; border-radius: 8px; margin-top: 12px; padding-top: 8px;
+    border: 1px solid #2a2a1e; border-radius: 8px; margin-top: 14px; padding-top: 10px;
     font-family: {F_TYPE}; color: #d4af37; }}
 QGroupBox::title {{ subcontrol-origin: margin; subcontrol-position: top left; padding: 0 8px;
     color: #d4af37; letter-spacing: 1px; }}
@@ -351,7 +362,7 @@ QGroupBox::title {{ subcontrol-origin: margin; subcontrol-position: top left; pa
 /* ---- Splitter / Status / Frame / Tooltip / Dialog ---- */
 QSplitter::handle {{ background-color: #2a2a1e; width: 2px; }}
 QStatusBar {{ background-color: #08080a; color: #8a8a93; border-top: 1px solid #2a2a1e;
-    font-family: {F_TYPE}; font-size: 12px; }}
+    font-family: {F_UI}; font-size: 12px; }}
 QFrame[frameShape="4"], QFrame[frameShape="5"] {{ color: #2a2a1e; }}
 QToolTip {{ background-color: #141312; color: #e8e0c8; border: 1px solid #d4af37; padding: 4px 8px; border-radius: 4px; }}
 QDialog {{ background-color: #0a0a0b; color: #c6c6ce; }}

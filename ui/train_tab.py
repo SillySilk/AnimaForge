@@ -696,6 +696,12 @@ class TrainTab(QWidget):
         forge_row.addWidget(test_btn)
         btn_layout.addLayout(forge_row)
 
+        comfy_btn = QPushButton("📤 Deliver to ComfyUI")
+        comfy_btn.setToolTip("Copy the trained LoRA into your ComfyUI models/loras folder "
+                             "(set it in Setup → Forge / API)")
+        comfy_btn.clicked.connect(self._deliver_to_comfyui)
+        btn_layout.addWidget(comfy_btn)
+
         self._config_path_label = QLabel("No config generated yet")
         self._config_path_label.setObjectName("label_field")
         self._config_path_label.setWordWrap(True)
@@ -734,23 +740,36 @@ class TrainTab(QWidget):
         # Sample Previews, Actions, and the Advanced set-once block are relocated onto the
         # Home command center (single source of truth). They stay owned & wired by this tab
         # — all engine logic is untouched — but are displayed on Home via control_panel().
+        # Two-column layout: the modal was a single tall stack and felt cramped
+        # (user feedback asked for a full Presets page — the columns give it page
+        # room while Home stays the only control surface).
         relocated = QWidget()
-        rl = QVBoxLayout(relocated)
+        rl = QHBoxLayout(relocated)
         rl.setContentsMargins(0, 0, 0, 0)
-        rl.setSpacing(14)
-        # Optimizer presets lead the panel (expanded) — the most-requested setting.
-        rl.addWidget(opt_box)
-        rl.addWidget(sample_box)
-        rl.addWidget(btn_grp)
+        rl.setSpacing(18)
 
+        # Left column — the per-run dials: optimizer presets (most-requested) + previews.
+        left_col = QVBoxLayout()
+        left_col.setSpacing(14)
+        left_col.addWidget(opt_box)
+        left_col.addWidget(sample_box)
+        left_col.addStretch()
+
+        # Right column — actions + the set-once advanced blocks.
+        right_col = QVBoxLayout()
+        right_col.setSpacing(14)
+        right_col.addWidget(btn_grp)
         adv_label = QLabel("Advanced (set once)")
         adv_label.setStyleSheet("color: #6a6a72; font-size: 11px; font-weight: 600; "
                                 "letter-spacing: 1px; padding-top: 6px;")
-        rl.addWidget(adv_label)
-        rl.addWidget(gen_btn)
+        right_col.addWidget(adv_label)
+        right_col.addWidget(gen_btn)
         for box in (sets_box, run_box, config_box):
-            rl.addWidget(box)
-        rl.addStretch()
+            right_col.addWidget(box)
+        right_col.addStretch()
+
+        rl.addLayout(left_col, 1)
+        rl.addLayout(right_col, 1)
         self._relocated_controls = relocated
 
         left_layout.addStretch()
@@ -1482,7 +1501,13 @@ class TrainTab(QWidget):
         return True
 
     def _confirm_preflight(self) -> bool:
-        """Show a pre-flight summary before a (potentially long) run. Returns True to proceed."""
+        """Show a pre-flight summary before a (potentially long) run. Returns True to proceed.
+
+        The exact TOMLs the trainer will read ride along under "Show Details…" so the
+        recipe can be checked at the last moment (user feedback: the config preview is
+        most useful right before launch). Same generation path as Start — no parallel
+        rendering.
+        """
         from pathlib import Path
         name = self._lora_name_edit.text().strip()
         run_dir = self._run_dir()
@@ -1492,22 +1517,50 @@ class TrainTab(QWidget):
             mode = f"↻ RESUME from {Path(self._resume_state_path).name}"
         else:
             mode = "✦ Fresh run"
+        previews = f"{Path(run_dir) / 'sample'}"
+        if self._app_settings is not None:
+            if self._app_settings.get("sample_enable"):
+                every = self._app_settings.get("sample_every_n_epochs")
+                previews += "  (every epoch)" if every <= 1 else f"  (every {every} epochs)"
+            else:
+                previews += "  (disabled)"
         info = (
             f"• {self._image_count} images · {total} steps\n"
             f"• {mode}\n"
             f"• LoRA → {Path(run_dir) / (name + '.safetensors')}\n"
-            f"• Previews → {Path(run_dir) / 'sample'}"
+            f"• Previews → {previews}"
         )
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Question)
         box.setWindowTitle("Start Training")
         box.setText(f"Start run “{name}”?")
         box.setInformativeText(info)
+        box.setDetailedText(self._config_preview_text())
         start_btn = box.addButton("▶  Start", QMessageBox.AcceptRole)
         box.addButton("Cancel", QMessageBox.RejectRole)
         box.setDefaultButton(start_btn)
         box.exec()
         return box.clickedButton() is start_btn
+
+    def _config_preview_text(self) -> str:
+        """Generate the real config TOMLs and return their text (for Show Details…).
+
+        Empty string on any failure — the confirm dialog then simply has no details
+        pane; Start regenerates and surfaces errors on its own path.
+        """
+        try:
+            self._generate_config()
+        except Exception:
+            return ""
+        parts = []
+        for path in (self._config_path, self._dataset_config_path):
+            if not path:
+                continue
+            try:
+                parts.append(f"══ {path}\n\n{Path(path).read_text(encoding='utf-8')}")
+            except OSError:
+                continue
+        return "\n\n".join(parts)
 
     def _stop_training(self):
         reply = QMessageBox.question(
@@ -1653,6 +1706,38 @@ class TrainTab(QWidget):
                 QMessageBox.warning(self, "Deliver Failed", str(e))
             return False
 
+    def _deliver_to_comfyui(self, silent: bool = False):
+        """Copy the trained LoRA into the user's ComfyUI loras folder.
+
+        Plain copy only — ComfyUI workflows vary too much for a test-render API
+        (user feedback: the copy alone is the useful part).
+        """
+        if not self._app_settings:
+            return False
+        lora_dir = self._app_settings.get("comfyui_lora_dir")
+        src = self._lora_output_path()
+        if not lora_dir:
+            if not silent:
+                QMessageBox.warning(self, "No ComfyUI folder",
+                                    "Set the ComfyUI LoRA folder in the Setup tab first.")
+            return False
+        if not src or not src.is_file():
+            if not silent:
+                QMessageBox.warning(self, "No LoRA", f"{src} not found — train it first.")
+            return False
+        from core import forge_api
+        try:
+            out = forge_api.deliver_lora(str(src), lora_dir)  # no API refresh for Comfy
+            self._on_log_line(f"[ComfyUI] Delivered LoRA → {out}")
+            if not silent:
+                QMessageBox.information(self, "Delivered to ComfyUI", f"Copied to:\n{out}")
+            return True
+        except Exception as e:
+            self._on_log_line(f"[ComfyUI] Deliver failed: {e}")
+            if not silent:
+                QMessageBox.warning(self, "Deliver Failed", str(e))
+            return False
+
     def _test_in_forge(self, save_dir=None):
         if not self._app_settings:
             return
@@ -1787,6 +1872,11 @@ class TrainTab(QWidget):
             # the COMPLETED epoch (whose samples we're viewing): 0 while epoch 1 trains, and it
             # advances to N only once epoch N has finished. Never used to auto-stop.
             self._dials.set_epoch(int(m.group(1)), total_epochs)
+        # Only the main training bar (desc="steps") feeds the dials — the "Sampling"
+        # bar during preview renders and the caching/loading bars are also tqdm and
+        # would otherwise swing Speed/ETA to nonsense between steps.
+        if not line.lstrip().lower().startswith("steps"):
+            return
         metrics = parse_tqdm(line)
         if "loss" in metrics:
             self._dials.set_loss(metrics["loss"])

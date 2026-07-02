@@ -221,7 +221,8 @@ class MainWindow(QMainWindow):
         btm_layout.addWidget(gear)
         self._nav_buttons.append((gear, 1))
 
-        self._ver_label = QLabel("v1.0.0 · EST. NOWHERE")
+        from core.version import __version__
+        self._ver_label = QLabel(f"v{__version__} · EST. NOWHERE")
         self._ver_label.setObjectName("af_ver")
         self._ver_label.setAlignment(Qt.AlignCenter)
         btm_layout.addWidget(self._ver_label)
@@ -316,6 +317,10 @@ class MainWindow(QMainWindow):
         # preset flips immediately rather than waiting for the next full refresh.
         self._train_tab.optimizer_changed.connect(
             lambda label: self._home_tab.set_train_summary(optimizer=label))
+        # Closing a Presets/Step Calculator modal re-pulls the whole Home summary
+        # (steps, dim/alpha, optimizer) — it used to go stale until the next tab switch.
+        self._home_tab.presets_closed.connect(
+            lambda: self._home_tab.refresh(self._collect_home_context()))
 
         # When setup settings change, sync to train tab
         self._setup_tab.settings_changed.connect(self._sync_environment_to_train)

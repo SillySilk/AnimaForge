@@ -32,6 +32,19 @@ class _LmsPing(QThread):
         self.done.emit(ok)
 
 
+class _ClickTile(QFrame):
+    """A stat tile that acts as a button: click anywhere on it to open its editor."""
+
+    def __init__(self, on_click, parent=None):
+        super().__init__(parent)
+        self._on_click = on_click
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and self._on_click is not None:
+            self._on_click()
+        super().mousePressEvent(event)
+
+
 class HomeTab(QWidget):
     """Home — "The Bench": the one-click cockpit.
 
@@ -60,6 +73,7 @@ class HomeTab(QWidget):
     run_caption_requested = Signal()  # pillar "Run Captioning" button
     start_train_requested = Signal()  # pillar "Start Training" button
     stop_train_requested = Signal()   # pillar "Stop" button (enabled while a run is live)
+    presets_closed = Signal()         # a Presets/Step Calculator modal closed → re-pull summary
 
     _GLYPH = {"ok": "✓", "idle": "–", "err": "✗"}
     _OBJ = {"ok": "ready_row_ok", "idle": "ready_row_idle", "err": "ready_row_err"}
@@ -276,7 +290,7 @@ class HomeTab(QWidget):
         # name (+ Check) / trigger / prefix
         grid = QGridLayout()
         grid.setHorizontalSpacing(16)
-        grid.setVerticalSpacing(6)
+        grid.setVerticalSpacing(8)
         grid.addWidget(self._field_label("LORA NAME"), 0, 0)
         grid.addWidget(self._field_label("TRIGGER WORD (OPTIONAL)"), 0, 1)
         grid.addWidget(self._field_label("QUALITY PREFIX (OPTIONAL)"), 0, 2)
@@ -525,10 +539,19 @@ class HomeTab(QWidget):
         row = QHBoxLayout()
         row.setSpacing(8)
         self._tile_values = {}
-        for key, cap_text, val in [("steps", "TARGET STEPS", "—"),
-                                   ("optimizer", "OPTIMIZER", "Prodigy")]:
-            tile = QFrame()
+        # Each tile opens the modal that edits its value — a readout you can't click
+        # was the #1 "how do I change the steps?" stumble (user feedback).
+        tile_defs = [
+            ("steps", "TARGET STEPS", "—",
+             "Click to set the target steps (Step Calculator)", self._open_stepcalc_modal),
+            ("optimizer", "OPTIMIZER", "Prodigy",
+             "Click to change the optimizer & network (Train Presets)", self._open_train_modal),
+        ]
+        for key, cap_text, val, tip, on_click in tile_defs:
+            tile = _ClickTile(on_click)
             tile.setObjectName("af_well")
+            tile.setCursor(Qt.PointingHandCursor)
+            tile.setToolTip(tip)
             tv = QVBoxLayout(tile)
             tv.setContentsMargins(12, 9, 12, 9)
             tv.setSpacing(2)
@@ -797,10 +820,13 @@ class HomeTab(QWidget):
         modal = ForgeModal(
             self.window(), title="Train Presets", eyebrow="Step 02 · Presets",
             subtitle="Sample previews, optimizer & network, run options — all here.",
-            max_width=620)
+            max_width=960)
         panel.setVisible(True)
         modal.body.addWidget(panel)
         modal.closed.connect(lambda p=panel: self._restash(p))
+        # Home's steps/optimizer/dim·alpha readouts otherwise refresh only on tab
+        # switch — closing the editor is the moment they must be current.
+        modal.closed.connect(self.presets_closed.emit)
         modal.add_footer_button("Close", primary=True).clicked.connect(modal.close_modal)
         modal.open()
 
@@ -821,6 +847,7 @@ class HomeTab(QWidget):
             max_width=520)
         modal.body.addWidget(panel)
         modal.closed.connect(lambda p=panel: self._restash(p))
+        modal.closed.connect(self.presets_closed.emit)
         modal.add_footer_button("Done", primary=True).clicked.connect(modal.close_modal)
         modal.open()
 
