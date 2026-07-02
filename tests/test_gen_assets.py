@@ -10,7 +10,7 @@ from scripts import gen_assets
 def test_generate_all_writes_valid_images(tmp_path: Path):
     paths = gen_assets.generate_all(tmp_path)
     expected = {
-        "emblem.png", "emblem.svg", "icon.png", "icon.ico",
+        "emblem.png", "forge_seal.png", "emblem.svg", "icon.png", "icon.ico",
         "hero_forge.png", "bg_embers.png", "panel_metal.png",
         "nav/home.png", "nav/setup.png", "nav/dataset.png",
         "nav/characters.png", "nav/train.png", "nav/batch.png",
@@ -30,4 +30,4 @@ def test_generate_all_is_idempotent(tmp_path: Path):
     gen_assets.generate_all(tmp_path)
     paths2 = gen_assets.generate_all(tmp_path)
     assert (tmp_path / "emblem.png").exists()
-    assert len(paths2) == 14
+    assert len(paths2) == 15

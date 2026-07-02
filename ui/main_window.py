@@ -118,10 +118,12 @@ class MainWindow(QMainWindow):
         brand_layout.setContentsMargins(0, 6, 0, 12)
         brand_layout.setSpacing(6)
 
+        # The brand badge fills the sidebar's full width (one badge per page; the
+        # decor seal further down uses the older drawn forge mark instead).
         self._emblem = QLabel()
         self._emblem_pm = QPixmap(asset_url("emblem.png"))
         if not self._emblem_pm.isNull():
-            self._emblem.setPixmap(self._emblem_pm.scaledToHeight(72, Qt.SmoothTransformation))
+            self._emblem.setPixmap(self._emblem_pm.scaledToWidth(250, Qt.SmoothTransformation))
         self._emblem.setAlignment(Qt.AlignHCenter)
         self._emblem.setStyleSheet("background-color: transparent;")
         brand_layout.addWidget(self._emblem)
@@ -195,8 +197,9 @@ class MainWindow(QMainWindow):
         quote.setWordWrap(True)
         decor_layout.addWidget(quote)
         seal = QLabel()
-        if not self._emblem_pm.isNull():
-            seal.setPixmap(self._emblem_pm.scaledToHeight(46, Qt.SmoothTransformation))
+        seal_pm = QPixmap(asset_url("forge_seal.png"))  # the old flame mark, not the badge
+        if not seal_pm.isNull():
+            seal.setPixmap(seal_pm.scaledToHeight(46, Qt.SmoothTransformation))
         seal.setAlignment(Qt.AlignHCenter)
         seal.setStyleSheet("background-color: transparent;")
         decor_layout.addWidget(seal)
@@ -413,8 +416,8 @@ class MainWindow(QMainWindow):
             widget.setVisible(not collapsed)
         # Shrink the emblem and hide nav labels in the collapsed rail.
         if not self._emblem_pm.isNull():
-            self._emblem.setPixmap(self._emblem_pm.scaledToHeight(
-                42 if collapsed else 72, Qt.SmoothTransformation))
+            self._emblem.setPixmap(self._emblem_pm.scaledToWidth(
+                64 if collapsed else 250, Qt.SmoothTransformation))
         for btn, _ in self._nav_buttons:
             btn.set_collapsed(collapsed)
 

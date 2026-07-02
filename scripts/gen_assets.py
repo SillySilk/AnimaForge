@@ -114,11 +114,8 @@ def _brand_logo(size: int) -> "Image.Image | None":
     return img.resize((size, size), Image.LANCZOS)
 
 
-def make_emblem_png(path: Path) -> Path:
-    logo = _brand_logo(256)
-    if logo is not None:
-        logo.save(path, optimize=True)
-        return path
+def _draw_forge_mark(path: Path) -> Path:
+    """The original drawn flame-over-anvil mark (pre-badge art)."""
     size = (256, 256)
     img = Image.new("RGBA", size, (0, 0, 0, 0))
     # warm flame glow behind, fading to transparent
@@ -135,6 +132,23 @@ def make_emblem_png(path: Path) -> Path:
     draw.line([(56, 196), (200, 196)], fill=SILVER + (180,), width=3)
     img.save(path)
     return path
+
+
+def make_emblem_png(path: Path) -> Path:
+    logo = _brand_logo(256)
+    if logo is not None:
+        logo.save(path, optimize=True)
+        return path
+    return _draw_forge_mark(path)
+
+
+def make_forge_seal(path: Path) -> Path:
+    """The drawn forge mark as its own asset — the sidebar's small decor seal.
+
+    The brand badge (emblem.png) appears ONCE per page, big at the top; the seal
+    is deliberately the different, older mark so the page never shows two badges.
+    """
+    return _draw_forge_mark(path)
 
 
 def make_emblem_svg(path: Path) -> Path:
@@ -256,6 +270,7 @@ def generate_all(assets_dir: Path) -> list[Path]:
     (assets_dir / "nav").mkdir(parents=True, exist_ok=True)
     out: list[Path] = []
     out.append(make_emblem_png(assets_dir / "emblem.png"))
+    out.append(make_forge_seal(assets_dir / "forge_seal.png"))
     out.append(make_emblem_svg(assets_dir / "emblem.svg"))
     png, ico = make_icon(assets_dir / "icon.png", assets_dir / "icon.ico")
     out.extend([png, ico])
