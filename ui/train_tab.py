@@ -155,6 +155,7 @@ class TrainTab(QWidget):
     subject_type_changed = Signal()          # Person/Object/Style changed -> refresh rail
     run_progress = Signal(object)            # RunProgress payload mirrored onto Home
     optimizer_changed = Signal(str)          # preset label for the Home OPTIMIZER tile
+    training_active = Signal(bool)           # run started/ended -> Home Start/Stop state
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -666,11 +667,13 @@ class TrainTab(QWidget):
         btn_layout = QVBoxLayout(btn_grp)
         btn_layout.setSpacing(8)
 
-        # Generate Config moves under Advanced — Start already regenerates the config
-        # on every launch, so it's an inspection aid, not part of the main path.
-        gen_btn = QPushButton("⚙ Generate Config Files")
+        # Preview Config lives under Advanced — Start already regenerates the config
+        # on every launch, so it's an inspection aid, not part of the main path. It
+        # generates the real TOMLs and shows them (user feedback: config preview).
+        gen_btn = QPushButton("⚙ Preview Config Files")
         gen_btn.setObjectName("btn_primary")
-        gen_btn.clicked.connect(self._generate_config)
+        gen_btn.setToolTip("Generate the exact TOML files training will use and view them")
+        gen_btn.clicked.connect(self._preview_config)
 
         add_batch_btn = QPushButton("➕ Add to Batch")
         add_batch_btn.setToolTip("Snapshot the current setup as a queued run on the Batch tab")
@@ -1343,6 +1346,40 @@ class TrainTab(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Config Error", str(e))
 
+    def _preview_config(self):
+        """Generate the exact TOMLs training will use and show them read-only.
+
+        No parallel rendering path: this previews the same files _start_training
+        regenerates at launch, so what you see is what the trainer reads.
+        """
+        self._generate_config()
+        if not self._config_path:
+            return  # _generate_config already surfaced the validation/config error
+        from ui.forge_modal import ForgeModal
+        parts = []
+        for path in (self._config_path, self._dataset_config_path):
+            if not path:
+                continue
+            try:
+                body = Path(path).read_text(encoding="utf-8")
+            except OSError as e:
+                body = f"(could not read: {e})"
+            parts.append(f"# ══ {path}\n\n{body}")
+        viewer = QTextEdit()
+        viewer.setReadOnly(True)
+        viewer.setPlainText("\n\n".join(parts))
+        viewer.setStyleSheet(
+            "font-family: Consolas, monospace; font-size: 11px; color: #c9c9ce; "
+            "background-color: #0c0b0a; border: 1px solid #2a2a1e; border-radius: 5px;")
+        viewer.setMinimumHeight(420)
+        modal = ForgeModal(
+            self.window(), title="Config Preview", eyebrow="Step 02 · Inspect",
+            subtitle="The exact files the trainer reads — regenerated from the current settings.",
+            max_width=760)
+        modal.body.addWidget(viewer)
+        modal.add_footer_button("Close", primary=True).clicked.connect(modal.close_modal)
+        modal.open()
+
     def _start_training(self, confirm: bool = True):
         valid, msg = self._validate_for_training()
         if not valid:
@@ -1683,6 +1720,7 @@ class TrainTab(QWidget):
     def _on_training_started(self):
         self._start_btn.setEnabled(False)
         self._stop_btn.setEnabled(True)
+        self.training_active.emit(True)
         self._rp(kind="phase", label="Preparing…")
         self._stepping = False
         self._denoiser = LogDenoiser()
@@ -1694,6 +1732,7 @@ class TrainTab(QWidget):
     def _on_training_finished(self, success: bool):
         self._start_btn.setEnabled(True)
         self._stop_btn.setEnabled(False)
+        self.training_active.emit(False)
         self._preview_timer.stop()
         self._poll_sample_dir()  # catch the final sample set
         if success:

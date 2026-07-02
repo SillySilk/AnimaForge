@@ -59,6 +59,7 @@ class HomeTab(QWidget):
     run_requested = Signal()          # "Forge It" — the unattended caption→train pipeline
     run_caption_requested = Signal()  # pillar "Run Captioning" button
     start_train_requested = Signal()  # pillar "Start Training" button
+    stop_train_requested = Signal()   # pillar "Stop" button (enabled while a run is live)
 
     _GLYPH = {"ok": "✓", "idle": "–", "err": "✗"}
     _OBJ = {"ok": "ready_row_ok", "idle": "ready_row_idle", "err": "ready_row_err"}
@@ -450,13 +451,26 @@ class HomeTab(QWidget):
         self._network_line.setObjectName("af_eyebrow_mute")
         tl.addWidget(self._network_line)
         tl.addStretch()
-        # primary action; the mass of settings lives in the Presets modal
+        # primary action; the mass of settings lives in the Presets modal. Stop rides
+        # alongside (the front owns ALL run controls — it went missing in the Bench
+        # redesign) and lights up only while a run is live.
+        start_stop = QHBoxLayout()
+        start_stop.setSpacing(8)
         self._start_train_btn = QPushButton("🚀  Start Training")
         self._start_train_btn.setObjectName("btn_start")
         self._start_train_btn.setMinimumHeight(48)
         self._start_train_btn.setCursor(Qt.PointingHandCursor)
         self._start_train_btn.clicked.connect(self.start_train_requested.emit)
-        tl.addWidget(self._start_train_btn)
+        start_stop.addWidget(self._start_train_btn, 1)
+        self._stop_train_btn = QPushButton("■  Stop")
+        self._stop_train_btn.setObjectName("btn_stop")
+        self._stop_train_btn.setMinimumHeight(48)
+        self._stop_train_btn.setCursor(Qt.PointingHandCursor)
+        self._stop_train_btn.setEnabled(False)
+        self._stop_train_btn.setToolTip("Stop the current training run (asks to confirm)")
+        self._stop_train_btn.clicked.connect(self.stop_train_requested.emit)
+        start_stop.addWidget(self._stop_train_btn)
+        tl.addLayout(start_stop)
         g.addWidget(tr, 0, 2)
 
         g.setColumnStretch(0, 1)
@@ -826,6 +840,11 @@ class HomeTab(QWidget):
         # The mounted Train control panel carries the live RunProgress; Home mirrors it there,
         # so this remains a no-op-safe hook for MainWindow's existing wiring.
         pass
+
+    def set_training_active(self, active: bool):
+        """Mirror the run state onto the front-page Start/Stop pair."""
+        self._start_train_btn.setEnabled(not active)
+        self._stop_train_btn.setEnabled(bool(active))
 
     # ---- refresh + nav ----
     def _go(self, index):
