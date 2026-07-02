@@ -60,7 +60,13 @@ install.bat   :: one-time — builds a self-contained .venv with the full stack
 launch.bat    :: start training
 ```
 
-`install.bat` finds or downloads a compatible Python (3.10/3.11), builds an isolated `.venv`, and installs everything (PySide6 GUI, PyTorch CUDA 12.1, the Kohya `sd-scripts` backend). No system-wide Python changes.
+`install.bat` finds or downloads a compatible Python (3.10/3.11), builds an isolated `.venv`, and installs everything (PySide6 GUI, PyTorch with the right CUDA build for your GPU, the Kohya `sd-scripts` backend). No system-wide Python changes.
+
+> **RTX 50-series (Blackwell) note** — 50-series cards need the **CUDA 12.8** PyTorch build; the standard CUDA 12.1 build fails at training time with `CUDA error: no kernel image is available for execution on the device`. The installer detects 50-series cards and picks the right build automatically. If you installed before this fix (or moved the install to a new GPU), open **Setup → PyTorch Runtime → Upgrade PyTorch** — it auto-selects the CUDA 12.8 build on 50-series cards. Manual equivalent:
+> ```
+> .venv\Scripts\python -m pip install --upgrade "torch>=2.7" torchvision --index-url https://download.pytorch.org/whl/cu128
+> ```
+> All other generations (GTX 900 through RTX 40-series) are covered by the default CUDA 12.1 build — don't switch older cards to cu128; pre-Turing GPUs aren't included in those wheels.
 
 <div align="center">
 <img src="https://raw.githubusercontent.com/SillySilk/AnimaForge/civitai-assets/setup.png" alt="Setup tab" width="80%">

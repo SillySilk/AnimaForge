@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from core.env import subprocess_python
 from core.settings import AppSettings
 from ui.forge_modal import ForgeModal
 from utils.proc import apply_no_window
@@ -35,6 +36,18 @@ QWEN3_FILENAME = "qwen_3_06b_base.safetensors"
 QWEN_VAE_FILENAME = "qwen_image_vae.safetensors"
 # Official Anima DiT filename; auto-detect also matches any 'anima*.safetensors' rename.
 PREFERRED_DIT = "anima-base-v1.0.safetensors"
+
+
+def torch_upgrade_plan(rtx50: bool) -> tuple:
+    """(pip requirement, wheel index, human label) for the PyTorch upgrade.
+
+    RTX 50-series (Blackwell, sm_120) needs cu128 wheels (torch >= 2.7); everything
+    else stays on cu121 — older cards (e.g. Pascal) aren't covered by cu128 builds.
+    """
+    if rtx50:
+        return ("torch>=2.7", "https://download.pytorch.org/whl/cu128",
+                "CUDA 12.8 — RTX 50-series")
+    return ("torch>=2.5", "https://download.pytorch.org/whl/cu121", "CUDA 12.1")
 
 
 class SetupTab(QWidget):
@@ -219,7 +232,9 @@ class SetupTab(QWidget):
         torch_layout.setSpacing(8)
         torch_hint = QLabel(
             "Anima training needs PyTorch 2.5 or newer (older versions produce NaN loss). "
-            "Check the version in your sd-scripts venv and upgrade if needed."
+            "Check the version in your training environment and upgrade if needed. "
+            "RTX 50-series (Blackwell) cards additionally need the CUDA 12.8 build — "
+            "Upgrade installs the right one automatically."
         )
         torch_hint.setObjectName("label_field")
         torch_hint.setWordWrap(True)
@@ -227,7 +242,7 @@ class SetupTab(QWidget):
         torch_btn_row = QHBoxLayout()
         check_torch_btn = QPushButton("Check PyTorch Version")
         check_torch_btn.clicked.connect(self._check_torch_version)
-        self._upgrade_torch_btn = QPushButton("⬆ Upgrade PyTorch (2.5+, CUDA 12.1)")
+        self._upgrade_torch_btn = QPushButton("⬆ Upgrade PyTorch (auto-picks CUDA build)")
         self._upgrade_torch_btn.clicked.connect(self._upgrade_torch)
         torch_btn_row.addWidget(check_torch_btn)
         torch_btn_row.addWidget(self._upgrade_torch_btn)
@@ -479,13 +494,16 @@ class SetupTab(QWidget):
     # ------------------------------------------------------------------
 
     def _venv_python(self) -> str:
-        sd = self.get_sdscripts_path()
-        return str(Path(sd) / "venv" / "Scripts" / "python.exe") if sd else ""
+        # Resolve exactly like training does (core/env.py): unified .venv installs run
+        # everything from sys.executable; a legacy sd-scripts/venv is a fallback only.
+        # The old hardcoded sd-scripts/venv path broke this button on unified installs
+        # even though training worked fine.
+        return subprocess_python(self.get_sdscripts_path())
 
     def _check_torch_version(self):
         py = self._venv_python()
         if not py or not Path(py).is_file():
-            self._torch_log.append("Could not find the sd-scripts venv python. Set sd-scripts path first.")
+            self._torch_log.append("Could not find a training python interpreter. Check the install (.venv) or set the sd-scripts path.")
             return
         if self._torch_process is not None and self._torch_process.state() != QProcess.NotRunning:
             self._torch_log.append("A PyTorch operation is already running.")
@@ -504,6 +522,17 @@ class SetupTab(QWidget):
         m = re.search(r"torch\s+(\d+)\.(\d+)", text)
         if m:
             self._pytorch_ok = (int(m.group(1)), int(m.group(2))) >= (2, 5)
+        # Blackwell needs cu128 wheels: a cu121/cu124 torch on an RTX 50-series card
+        # fails at run time with "no kernel image is available".
+        cu = re.search(r"cuda\s+(\d+)\.(\d+)", text)
+        if cu and (int(cu.group(1)), int(cu.group(2))) < (12, 8):
+            from core import gpu_check
+            if gpu_check.is_rtx_50_series(gpu_check.gpu_name()):
+                self._torch_log.append(
+                    "⚠ RTX 50-series GPU detected, but this PyTorch build lacks Blackwell "
+                    "kernels (training fails with 'no kernel image is available'). "
+                    "Click Upgrade to install the CUDA 12.8 build."
+                )
 
     def is_pytorch_ok(self) -> bool:
         return bool(getattr(self, "_pytorch_ok", False))
@@ -511,12 +540,16 @@ class SetupTab(QWidget):
     def _upgrade_torch(self):
         py = self._venv_python()
         if not py or not Path(py).is_file():
-            self._torch_log.append("Could not find the sd-scripts venv python. Set sd-scripts path first.")
+            self._torch_log.append("Could not find a training python interpreter. Check the install (.venv) or set the sd-scripts path.")
             return
         if self._torch_process is not None and self._torch_process.state() != QProcess.NotRunning:
             self._torch_log.append("A PyTorch operation is already running.")
             return
-        self._torch_log.append("\n⬆ Upgrading PyTorch to 2.5+ (CUDA 12.1). This downloads ~2.5GB and may take several minutes…")
+        from core import gpu_check
+        spec, index, label = torch_upgrade_plan(
+            gpu_check.is_rtx_50_series(gpu_check.gpu_name()))
+        self._torch_log.append(
+            f"\n⬆ Upgrading PyTorch ({label}). This downloads ~2.5GB and may take several minutes…")
         self._upgrade_torch_btn.setEnabled(False)
         self._torch_process = QProcess(self)
         apply_no_window(self._torch_process)  # no console window pop-up on Windows
@@ -525,8 +558,8 @@ class SetupTab(QWidget):
         self._torch_process.finished.connect(self._on_torch_finished)
         args = [
             "-m", "pip", "install", "--upgrade",
-            "torch>=2.5", "torchvision",
-            "--index-url", "https://download.pytorch.org/whl/cu121",
+            spec, "torchvision",
+            "--index-url", index,
         ]
         self._torch_process.start(py, args)
 
@@ -944,6 +977,10 @@ class SetupTab(QWidget):
             "    venv\\Scripts\\activate\n\n"
             "Step 4 — Install PyTorch 2.5+ (Anima requires it; older = NaN loss)\n"
             "    pip install \"torch>=2.5\" torchvision --index-url https://download.pytorch.org/whl/cu121\n"
+            "  RTX 50-series (Blackwell) cards need the CUDA 12.8 build instead:\n"
+            "    pip install \"torch>=2.7\" torchvision --index-url https://download.pytorch.org/whl/cu128\n"
+            "  RTX 50-series (Blackwell) cards need the CUDA 12.8 build instead:\n"
+            "    pip install \"torch>=2.7\" torchvision --index-url https://download.pytorch.org/whl/cu128\n"
             "  (or use the 'Upgrade PyTorch' button above)\n\n"
             "Step 5 — sd-scripts dependencies\n"
             "    pip install -r requirements.txt\n"

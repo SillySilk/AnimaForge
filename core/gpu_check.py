@@ -32,6 +32,40 @@ def free_vram_mb():
     return parse_free_mb(out.stdout)
 
 
+def parse_gpu_name(stdout: str):
+    for line in (stdout or "").splitlines():
+        line = line.strip()
+        if line:
+            return line
+    return None
+
+
+def gpu_name():
+    """Marketing name of the first GPU (e.g. 'NVIDIA GeForce RTX 5090'), or None."""
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+            capture_output=True, text=True, timeout=10,
+            creationflags=no_window_creationflags(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0:
+        return None
+    return parse_gpu_name(out.stdout)
+
+
+def is_rtx_50_series(name) -> bool:
+    """Blackwell cards need cu128 torch wheels (cu121 has no sm_120 kernels).
+
+    Consumer models are RTX 5050/5060/5070/5080/5090 (+Ti/D variants). The third
+    digit is restricted to 5-9 so 'RTX 5000 Ada' / 'Quadro RTX 5000' (older pro
+    cards) do NOT match; pro Blackwell parts carry 'Blackwell' in the name.
+    """
+    n = (name or "").lower()
+    return "blackwell" in n or bool(re.search(r"rtx\s*50[5-9]0\b", n))
+
+
 def resident_gpu_apps():
     found = []
     try:

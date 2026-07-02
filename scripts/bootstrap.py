@@ -8,6 +8,8 @@ Creates `.venv` at the repo root, then installs — in order so torch (cu121) wi
 the CPU torch that sd-scripts' `diffusers[torch]` would otherwise pull:
   1. pip upgrade
   2. torch>=2.5 + torchvision from the cu121 index
+     (RTX 50-series / Blackwell detected → torch>=2.7 from cu128 instead; cu121
+     wheels lack sm_120 kernels and fail with "no kernel image is available")
   3. sd-scripts/requirements.txt  (its trailing `-e .` installs the kohya lib editable)
   4. requirements.txt             (GUI: PySide6, Pillow, toml)
   5. onnx + onnxruntime-gpu       (WD14 tagger: onnx loads the model, ort runs it)
@@ -21,6 +23,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 TORCH_INDEX = "https://download.pytorch.org/whl/cu121"
+TORCH_INDEX_CU128 = "https://download.pytorch.org/whl/cu128"
 MIN_PY = (3, 10)
 MAX_PY = (3, 11)  # inclusive: 3.10 and 3.11 are both supported by the torch/sd-scripts pins
 
@@ -46,13 +49,20 @@ def python_ok(version_str: str) -> bool:
     return MIN_PY <= (v[0], v[1]) <= MAX_PY
 
 
-def pip_commands(venv_py: str, repo: str):
+def torch_step(rtx50: bool):
+    """pip args (requirement, index) for the torch install. Blackwell → cu128. Pure."""
+    if rtx50:
+        return ["torch>=2.7", "torchvision", "--index-url", TORCH_INDEX_CU128]
+    return ["torch>=2.5", "torchvision", "--index-url", TORCH_INDEX]
+
+
+def pip_commands(venv_py: str, repo: str, rtx50: bool = False):
     """Ordered list of pip command argv lists to populate the venv. Pure."""
     repo_p = Path(repo)
     base = [venv_py, "-m", "pip", "install"]
     return [
         [venv_py, "-m", "pip", "install", "--upgrade", "pip"],
-        base + ["torch>=2.5", "torchvision", "--index-url", TORCH_INDEX],
+        base + torch_step(rtx50),
         base + ["-r", str(repo_p / "sd-scripts" / "requirements.txt")],
         base + ["-r", str(repo_p / "requirements.txt")],
         base + ["onnx", "onnxruntime-gpu"],
@@ -151,8 +161,24 @@ def ensure_sd_scripts():
             )
 
 
+def detect_rtx50() -> bool:
+    """Best-effort Blackwell detection (nvidia-smi via core.gpu_check). False on any
+    failure — the cu121 default is the safe fallback for everything but 50-series."""
+    try:
+        sys.path.insert(0, str(REPO))
+        from core.gpu_check import gpu_name, is_rtx_50_series
+        name = gpu_name()
+        if is_rtx_50_series(name):
+            print(f"\n[bootstrap] {name} detected — using the CUDA 12.8 PyTorch build "
+                  "(Blackwell needs cu128 wheels).")
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def install_all(venv_py: Path):
-    for cmd in pip_commands(str(venv_py), str(REPO)):
+    for cmd in pip_commands(str(venv_py), str(REPO), rtx50=detect_rtx50()):
         cwd = step_cwd(cmd, str(REPO))
         rc, out = _run_tee(cmd, cwd=cwd)
         if rc == 0:

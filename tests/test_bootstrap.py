@@ -44,6 +44,19 @@ def test_pip_commands_first_is_pip_upgrade():
     assert cmds[0] == ["PY", "-m", "pip", "install", "--upgrade", "pip"]
 
 
+def test_pip_commands_rtx50_uses_cu128_and_torch27():
+    joined = [" ".join(c) for c in pip_commands("PY", "REPO", rtx50=True)]
+    torch_j = next(j for j in joined if "download.pytorch.org" in j)
+    assert "whl/cu128" in torch_j and "torch>=2.7" in torch_j
+    assert not any("cu121" in j for j in joined)
+
+
+def test_pip_commands_default_stays_cu121():
+    joined = [" ".join(c) for c in pip_commands("PY", "REPO")]
+    torch_j = next(j for j in joined if "download.pytorch.org" in j)
+    assert "whl/cu121" in torch_j and "torch>=2.5" in torch_j
+
+
 def test_step_cwd_runs_sdscripts_reqs_from_submodule_dir():
     # The sd-scripts requirements file ends with `-e .`; pip resolves `.` against the
     # CWD, so that step MUST run from the sd-scripts dir (where setup.py lives), not
