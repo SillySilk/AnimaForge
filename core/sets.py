@@ -6,6 +6,7 @@ it back when a saved state exists but the final {name}.safetensors does not.
 """
 import json
 import re
+import shutil
 from pathlib import Path
 
 from core.batch import RunDefinition
@@ -100,6 +101,79 @@ def delete_set(name: str, root=None) -> None:
         p = d / f"{stem}{ext}"
         if p.is_file():
             p.unlink()
+    snaps = d / stem
+    if snaps.is_dir():
+        shutil.rmtree(snaps, ignore_errors=True)
+
+
+# ---- caption snapshots (project autosave) ----
+# Autosave writes two restore points per run under sets/<name>/:
+#   captions-captioned/  — raw caption passes done (tag/describe/refine)
+#   captions-processed/  — combine done, final .txt built
+CAPTION_EXTS = (".txt", ".tags", ".nl")
+SNAPSHOT_STAGES = ("captioned", "processed")
+
+
+def _snapshot_dir(name: str, stage: str, root=None) -> Path:
+    return sets_dir(root) / _safe(name) / f"captions-{stage}"
+
+
+def snapshot_captions(dataset_folder: str, name: str, stage: str, root=None) -> int:
+    """Copy the dataset's caption files (.txt/.tags/.nl — never images) into the
+    set's snapshot folder for `stage`, replacing any previous snapshot of that
+    stage. Returns the number of files copied."""
+    src = Path(dataset_folder or "")
+    if not src.is_dir():
+        return 0
+    dst = _snapshot_dir(name, stage, root)
+    if dst.exists():
+        shutil.rmtree(dst)
+    dst.mkdir(parents=True, exist_ok=True)
+    n = 0
+    for p in sorted(src.iterdir()):
+        if p.is_file() and p.suffix.lower() in CAPTION_EXTS:
+            shutil.copy2(p, dst / p.name)
+            n += 1
+    return n
+
+
+def list_caption_snapshots(name: str, root=None) -> dict:
+    """{stage: file_count} for the stages that have a saved snapshot."""
+    out = {}
+    for stage in SNAPSHOT_STAGES:
+        d = _snapshot_dir(name, stage, root)
+        if d.is_dir():
+            count = sum(1 for p in d.iterdir() if p.is_file())
+            if count:
+                out[stage] = count
+    return out
+
+
+def restore_captions(dataset_folder: str, name: str, stage: str, root=None) -> int:
+    """Copy a snapshot's caption files back into the dataset folder (overwriting).
+    Returns the number of files restored."""
+    src = _snapshot_dir(name, stage, root)
+    dst = Path(dataset_folder or "")
+    if not src.is_dir() or not dst.is_dir():
+        return 0
+    n = 0
+    for p in sorted(src.iterdir()):
+        if p.is_file():
+            shutil.copy2(p, dst / p.name)
+            n += 1
+    return n
+
+
+def autosave_project(name: str, rd: RunDefinition, dataset_folder: str, stage: str,
+                     root=None):
+    """Save the Set under the LoRA name + snapshot its captions. Never raises —
+    returns (ok, human message) so callers can drop it on the status bar."""
+    try:
+        save_set(name, rd, root)
+        n = snapshot_captions(dataset_folder, name, stage, root)
+        return True, f"Project autosaved as '{name}' ({stage} — {n} caption file(s))."
+    except OSError as e:
+        return False, f"Project autosave failed: {e}"
 
 
 def mark_run_active(rd: RunDefinition, root=None) -> None:

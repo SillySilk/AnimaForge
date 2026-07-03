@@ -1,4 +1,4 @@
-from PySide6.QtCore import Qt, QSize, QSettings
+from PySide6.QtCore import Qt, QSize, QSettings, Signal
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
@@ -54,11 +54,16 @@ class NavButton(QPushButton):
 
 
 class MainWindow(QMainWindow):
+    # Updater worker threads → UI (queued back onto the main thread)
+    _update_check_done = Signal(str)            # remote version ("" = unreachable)
+    _update_apply_done = Signal(str, bool, str)  # (version, requirements_changed, error)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Anima Forge LoRA Trainer with Auto-Captioning")
         self.setMinimumSize(1100, 720)
         self.resize(1280, 800)
+        self._update_busy = False
 
         from core import train_presets
         self._preset_name = train_presets.DEFAULT_NAME  # "Person"
@@ -370,6 +375,9 @@ class MainWindow(QMainWindow):
         self._home_tab.navigate.connect(self._switch_tab)
         self._home_tab.autodetect_requested.connect(self._on_home_autodetect)
         self._home_tab.recover_requested.connect(self._on_home_recover)
+        self._home_tab.update_check_requested.connect(self._on_update_check)
+        self._update_check_done.connect(self._show_update_result)
+        self._update_apply_done.connect(self._on_update_applied)
 
         # Home "Quick Run" cockpit → drive the real tabs (Train owns the relocated widgets)
         self._home_tab.folder_chosen.connect(self._on_home_folder_chosen)
@@ -400,6 +408,8 @@ class MainWindow(QMainWindow):
         self._train_tab.run_progress.connect(self._home_tab.apply_run_progress)
         # Headless caption chain (Home pipeline) completion → advance the pipeline
         self._dataset_tab.auto_caption_finished.connect(self._qr_caption_done)
+        # Caption milestones → autosave the project under the LoRA name
+        self._dataset_tab.caption_stage_done.connect(self._on_caption_stage_done)
 
     # ------------------------------------------------------------------
     # Slots
@@ -720,6 +730,34 @@ class MainWindow(QMainWindow):
         self._qr_phases.pop(0)
         self._qr_advance()
 
+    def _on_caption_stage_done(self, stage: str):
+        """Autosave the project (Set + caption snapshot) named after the LoRA.
+
+        Fires at two milestones of every caption chain — 'captioned' (raw passes
+        done) and 'processed' (final .txt built) — so a failure or a later image
+        readjustment can be rolled back. Silent besides a status-bar note; must
+        never interrupt the running chain."""
+        from core import sets
+        name = self._train_tab.get_lora_name()
+        folder = self._dataset_tab.get_folder_path()
+        if not name or not folder:
+            self._status_bar.showMessage(
+                "Autosave skipped — name the LoRA to enable project autosave.", 6000)
+            return
+        rd, msg = self._train_tab.build_run_definition()
+        if rd is None:
+            # Settings aren't complete enough for a Set (e.g. model paths missing)
+            # — still keep the captions safe.
+            n = sets.snapshot_captions(folder, name, stage)
+            self._status_bar.showMessage(
+                f"Captions autosaved ('{name}', {stage} — {n} file(s)); "
+                f"settings not saved: {msg}", 8000)
+            return
+        ok, note = sets.autosave_project(name, rd, folder, stage)
+        self._status_bar.showMessage(note, 8000)
+        if ok:
+            self._train_tab.refresh_sets()
+
     def _on_home_autodetect(self):
         """Run the model scan, then show Settings (where the results land) + a status summary.
 
@@ -737,6 +775,81 @@ class MainWindow(QMainWindow):
         if rd is not None:
             self._switch_tab(4)
             self._train_tab.show_recovery_banner(rd)
+
+    # ---- self-update (Home footer "⟳ Updates") ----
+
+    def _on_update_check(self):
+        """Check GitHub main for a newer version — network runs off the UI thread."""
+        if self._update_busy:
+            return
+        self._update_busy = True
+        self._status_bar.showMessage("Checking GitHub for updates…")
+        import threading
+        from core import updater
+
+        def work():
+            self._update_check_done.emit(updater.fetch_remote_version() or "")
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _show_update_result(self, remote: str):
+        from core import updater
+        from core.version import __version__
+        self._update_busy = False
+        self._status_bar.clearMessage()
+        if not remote:
+            QMessageBox.warning(
+                self, "Check for Updates",
+                "Could not reach GitHub — check your connection and try again.")
+            return
+        if not updater.is_newer(remote, __version__):
+            QMessageBox.information(
+                self, "Check for Updates", f"You're up to date (v{__version__}).")
+            return
+        # Subtle sidebar hint even if they decline the update now.
+        self._ver_label.setText(f"v{__version__} · UPDATE AVAILABLE")
+        if QMessageBox.question(
+            self, "Update Available",
+            f"AnimaForge v{remote} is available (you have v{__version__}).\n\n"
+            "Download and update now? Your sets, settings, datasets, and models "
+            "are untouched.",
+        ) != QMessageBox.Yes:
+            return
+        self._update_busy = True
+        self._status_bar.showMessage(f"Downloading v{remote} from GitHub…")
+        import tempfile
+        import threading
+        from pathlib import Path
+        from core import updater as up
+        app_root = Path(__file__).resolve().parents[1]
+
+        def work():
+            try:
+                with tempfile.TemporaryDirectory() as td:
+                    new_root = up.download_and_extract(td)
+                    req_changed = up.requirements_changed(new_root, app_root)
+                    up.apply_update(new_root, app_root)
+                self._update_apply_done.emit(remote, req_changed, "")
+            except Exception as e:  # noqa: BLE001 — any failure = install untouched
+                self._update_apply_done.emit(remote, False, str(e))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_update_applied(self, version: str, req_changed: bool, error: str):
+        self._update_busy = False
+        if error:
+            self._status_bar.clearMessage()
+            QMessageBox.warning(
+                self, "Update Failed",
+                f"The update was not applied: {error}\n\nYour install is unchanged.")
+            return
+        self._status_bar.showMessage(f"Updated to v{version} — restart to finish.")
+        self._ver_label.setText(f"v{version} · RESTART TO APPLY")
+        extra = ("\n\nrequirements.txt changed — run install.bat before the next "
+                 "launch." if req_changed else "")
+        QMessageBox.information(
+            self, "Update Applied",
+            f"AnimaForge v{version} is in place.\nRestart AnimaForge to finish.{extra}")
 
     def _on_load_set_requested(self, dataset_folder: str, trigger: str):
         if dataset_folder:

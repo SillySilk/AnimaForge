@@ -42,6 +42,38 @@ from ui.run_progress import RunProgress
 import re as _re
 
 
+def countdown_continue_warning(parent, title: str, text: str, seconds: int = 10) -> bool:
+    """Yes/No warning that auto-chooses Continue after `seconds`.
+
+    For unattended (Walk Away) runs: the user has likely left the keyboard, so a
+    blocking default-No prompt would strand the whole pipeline. A present user can
+    still click Abort before the countdown ends. Returns True to continue."""
+    box = QMessageBox(parent)
+    box.setIcon(QMessageBox.Warning)
+    box.setWindowTitle(title)
+    box.setText(text)
+    yes_btn = box.addButton(f"Continue ({seconds})", QMessageBox.YesRole)
+    abort_btn = box.addButton("Abort run", QMessageBox.NoRole)
+    box.setDefaultButton(yes_btn)
+    remaining = [seconds]
+
+    def _tick():
+        remaining[0] -= 1
+        if remaining[0] <= 0:
+            timer.stop()
+            yes_btn.click()
+        else:
+            yes_btn.setText(f"Continue ({remaining[0]})")
+
+    timer = QTimer(box)
+    timer.setInterval(1000)
+    timer.timeout.connect(_tick)
+    timer.start()
+    box.exec()
+    timer.stop()
+    return box.clickedButton() is not abort_btn
+
+
 def phase_for_line(line: str):
     """Map a known sd-scripts warmup marker to a human phase label, else None."""
     low = line.lower()
@@ -441,9 +473,20 @@ class TrainTab(QWidget):
         load_row.addWidget(self._delete_set_btn)
         sets_layout.addLayout(load_row)
 
+        restore_row = QHBoxLayout()
+        self._restore_caps_btn = QPushButton("↩ Restore captions")
+        self._restore_caps_btn.setToolTip(
+            "Put the selected set's autosaved caption files back into its dataset folder.\n"
+            "Snapshots are saved automatically when captioning finishes and when the\n"
+            "final .txt files are built.")
+        restore_row.addWidget(self._restore_caps_btn)
+        restore_row.addStretch()
+        sets_layout.addLayout(restore_row)
+
         self._save_set_btn.clicked.connect(self._save_set)
         self._load_set_btn.clicked.connect(self._load_set)
         self._delete_set_btn.clicked.connect(self._delete_set)
+        self._restore_caps_btn.clicked.connect(self._restore_captions_from_set)
         self._refresh_sets_combo()
 
         # Optimizer & Network — expanded and first in the Train Presets panel (users
@@ -1128,6 +1171,60 @@ class TrainTab(QWidget):
         self._sets_combo.addItems(sets.list_sets())
         self._sets_combo.blockSignals(False)
 
+    def refresh_sets(self):
+        """Public refresh for MainWindow — autosave creates/updates sets outside this tab."""
+        self._refresh_sets_combo()
+
+    def _restore_captions_from_set(self):
+        from core import sets
+        name = self._sets_combo.currentText().strip()
+        if not name:
+            QMessageBox.information(self, "Restore Captions", "Pick a saved set first.")
+            return
+        snaps = sets.list_caption_snapshots(name)
+        if not snaps:
+            QMessageBox.information(
+                self, "Restore Captions",
+                f"No caption snapshots exist for '{name}' yet.\n\n"
+                "They're saved automatically when captioning finishes and when the "
+                "final .txt files are built.")
+            return
+        rd = sets.load_set(name)
+        folder = (rd.dataset_folder if rd else "") or self._dataset_path
+        if not folder or not Path(folder).is_dir():
+            QMessageBox.warning(self, "Restore Captions",
+                                "The set's dataset folder no longer exists.")
+            return
+        if len(snaps) > 1:
+            box = QMessageBox(self)
+            box.setWindowTitle("Restore Captions")
+            box.setIcon(QMessageBox.Question)
+            box.setText(f"'{name}' has two restore points. Which one?")
+            processed_btn = box.addButton(
+                f"Final captions ({snaps['processed']} files)", QMessageBox.AcceptRole)
+            captioned_btn = box.addButton(
+                f"Raw caption passes ({snaps['captioned']} files)", QMessageBox.AcceptRole)
+            cancel_btn = box.addButton("Cancel", QMessageBox.RejectRole)
+            box.setDefaultButton(processed_btn)
+            box.exec()
+            clicked = box.clickedButton()
+            if clicked is cancel_btn or clicked is None:
+                return
+            stage = "processed" if clicked is processed_btn else "captioned"
+        else:
+            stage = next(iter(snaps))
+        if QMessageBox.question(
+            self, "Restore Captions",
+            f"Overwrite the caption files in\n{folder}\nwith the '{stage}' snapshot "
+            f"({snaps[stage]} files)?",
+        ) != QMessageBox.Yes:
+            return
+        n = sets.restore_captions(folder, name, stage)
+        # Rescan the folder so the Dataset gallery shows the restored captions.
+        self.load_set_requested.emit(folder, "")
+        self.status_message.emit(
+            f"Restored {n} caption file(s) from '{name}' ({stage}).")
+
     def _save_set(self):
         from core import sets
         rd, msg = self.build_run_definition()
@@ -1493,14 +1590,25 @@ class TrainTab(QWidget):
             if need and free < need:
                 apps = gpu_check.resident_gpu_apps()
                 detail = (" Detected: " + ", ".join(apps) + ".") if apps else ""
-                reply = QMessageBox.warning(
-                    self, "Low GPU Memory",
+                warn_text = (
                     f"Only {free / 1024:.1f} GB VRAM free (need ~{need / 1024:.1f} GB)."
-                    f"{detail}\n\nTraining may run out of memory. Continue anyway?",
-                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
-                )
-                if reply != QMessageBox.Yes:
-                    return
+                    f"{detail}\n\nTraining may run out of memory. Continue anyway?")
+                if confirm:
+                    reply = QMessageBox.warning(
+                        self, "Low GPU Memory", warn_text,
+                        QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+                    )
+                    if reply != QMessageBox.Yes:
+                        return
+                else:
+                    # Unattended (Walk Away / pipeline) run: auto-continue so the
+                    # warning can't strand training while nobody is at the keyboard.
+                    if not countdown_continue_warning(
+                        self, "Low GPU Memory",
+                        warn_text + "\n\nUnattended run — continuing automatically "
+                        "in 10 seconds.",
+                    ):
+                        return
 
         # Record the active run so a crash can be recovered on next launch
         from core import sets

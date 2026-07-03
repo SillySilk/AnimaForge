@@ -62,6 +62,7 @@ class HomeTab(QWidget):
     navigate = Signal(int)
     autodetect_requested = Signal()
     recover_requested = Signal()
+    update_check_requested = Signal()  # "⟳ Updates" footer button — MainWindow runs the check
 
     # Quick Run cockpit intents — MainWindow translates these into the real tabs.
     folder_chosen = Signal(str)
@@ -673,6 +674,14 @@ class HomeTab(QWidget):
         self._recover_btn.setVisible(False)
         row.addWidget(self._recover_btn)
         row.addStretch()
+        # Small on purpose — occasional maintenance, not a run control.
+        updates = QPushButton("⟳ Updates")
+        updates.setObjectName("af_btn_ghost")
+        updates.setMinimumHeight(34)
+        updates.setCursor(Qt.PointingHandCursor)
+        updates.setToolTip("Check GitHub for a newer AnimaForge and update in place")
+        updates.clicked.connect(self.update_check_requested.emit)
+        row.addWidget(updates)
         detect = QPushButton("Auto-detect models")
         detect.setObjectName("af_btn_ghost")
         detect.setMinimumHeight(34)

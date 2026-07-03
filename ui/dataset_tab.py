@@ -321,6 +321,7 @@ class DatasetTab(QWidget):
     caption_finished = Signal()        # caption step status changed -> refresh progress rail
     caption_tick = Signal(str, int, int)  # (phase, done, total) per-image tick -> Home's stage chips
     auto_caption_finished = Signal(bool)  # headless Process chain ended (Home pipeline)
+    caption_stage_done = Signal(str)   # "captioned" (passes done) / "processed" (combine done) -> project autosave
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1105,6 +1106,8 @@ class DatasetTab(QWidget):
         elif key == "refine":
             self._start_refine()
         elif key == "combine":
+            # All caption passes are done — first autosave restore point.
+            self.caption_stage_done.emit("captioned")
             self._rebuild_txt_from_sidecars()
             self._refresh_step_status()
             self._chain.pop(0)
@@ -1139,6 +1142,8 @@ class DatasetTab(QWidget):
         self._chain_active = False
         self._process_btn.setEnabled(True)
         self._phase_label.setText("Idle")
+        # Final .txt files are built — second autosave restore point.
+        self.caption_stage_done.emit("processed")
         if self._auto_mode:
             self._auto_mode = False
             self.auto_caption_finished.emit(True)

@@ -118,3 +118,80 @@ def test_delete_set_tolerates_missing_markdown(tmp_path: Path):
     (d / "Legacy.json").write_text("{}", encoding="utf-8")  # pre-existing, no .md
     sets.delete_set("Legacy", root)  # must not raise
     assert not (d / "Legacy.json").exists()
+
+
+# ---- caption snapshots (project autosave) ----
+
+def _dataset(tmp_path: Path) -> Path:
+    ds = tmp_path / "ds"
+    ds.mkdir()
+    (ds / "a.png").write_bytes(b"img")
+    (ds / "a.txt").write_text("final caption", encoding="utf-8")
+    (ds / "a.tags").write_text("1girl, forge", encoding="utf-8")
+    (ds / "a.nl").write_text("a woman at a forge", encoding="utf-8")
+    (ds / "b.png").write_bytes(b"img")
+    (ds / "b.txt").write_text("second caption", encoding="utf-8")
+    return ds
+
+
+def test_snapshot_and_restore_roundtrip(tmp_path: Path):
+    root = str(tmp_path)
+    ds = _dataset(tmp_path)
+    n = sets.snapshot_captions(str(ds), "Eve", "processed", root)
+    assert n == 4  # 2 .txt + 1 .tags + 1 .nl — never the .png images
+    # Mutate + delete, then restore
+    (ds / "a.txt").write_text("ruined", encoding="utf-8")
+    (ds / "b.txt").unlink()
+    restored = sets.restore_captions(str(ds), "Eve", "processed", root)
+    assert restored == 4
+    assert (ds / "a.txt").read_text(encoding="utf-8") == "final caption"
+    assert (ds / "b.txt").read_text(encoding="utf-8") == "second caption"
+
+
+def test_snapshot_overwrites_previous_stage(tmp_path: Path):
+    root = str(tmp_path)
+    ds = _dataset(tmp_path)
+    sets.snapshot_captions(str(ds), "Eve", "captioned", root)
+    (ds / "a.tags").unlink()
+    (ds / "a.nl").unlink()
+    n = sets.snapshot_captions(str(ds), "Eve", "captioned", root)
+    assert n == 2  # old snapshot replaced, not merged
+    assert sets.list_caption_snapshots("Eve", root) == {"captioned": 2}
+
+
+def test_list_caption_snapshots_both_stages(tmp_path: Path):
+    root = str(tmp_path)
+    ds = _dataset(tmp_path)
+    sets.snapshot_captions(str(ds), "Eve", "captioned", root)
+    sets.snapshot_captions(str(ds), "Eve", "processed", root)
+    assert sets.list_caption_snapshots("Eve", root) == {
+        "captioned": 4, "processed": 4}
+    assert sets.list_caption_snapshots("Nobody", root) == {}
+
+
+def test_snapshot_restore_missing_folders_return_zero(tmp_path: Path):
+    root = str(tmp_path)
+    assert sets.snapshot_captions(str(tmp_path / "nope"), "Eve", "processed", root) == 0
+    ds = _dataset(tmp_path)
+    assert sets.restore_captions(str(ds), "Eve", "processed", root) == 0  # no snapshot
+
+
+def test_delete_set_removes_snapshots(tmp_path: Path):
+    root = str(tmp_path)
+    ds = _dataset(tmp_path)
+    sets.save_set("Eve", _rd("Eve", folder=str(ds)), root)
+    sets.snapshot_captions(str(ds), "Eve", "processed", root)
+    sets.delete_set("Eve", root)
+    assert sets.list_caption_snapshots("Eve", root) == {}
+    assert not (sets.sets_dir(root) / "Eve").exists()
+
+
+def test_autosave_project_saves_set_and_snapshot(tmp_path: Path):
+    root = str(tmp_path)
+    ds = _dataset(tmp_path)
+    ok, msg = sets.autosave_project("Eve", _rd("Eve", folder=str(ds)),
+                                    str(ds), "captioned", root)
+    assert ok
+    assert "Eve" in msg and "captioned" in msg
+    assert sets.load_set("Eve", root) is not None
+    assert sets.list_caption_snapshots("Eve", root) == {"captioned": 4}
