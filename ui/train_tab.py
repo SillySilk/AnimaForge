@@ -1059,6 +1059,7 @@ class TrainTab(QWidget):
         valid, msg = self._validate_for_config()
         if not valid:
             return None, msg
+        self._ensure_sample_prompts()
         rd = RunDefinition(
             lora_name=self._lora_name_edit.text().strip(),
             dataset_folder=self._dataset_path,
@@ -1245,6 +1246,27 @@ class TrainTab(QWidget):
         self._sample_enable_check.setChecked(True)
         self.status_message.emit(f"Filled {len(blocks)} sample prompt(s) from the dataset.")
 
+    def _ensure_sample_prompts(self):
+        """Guarantee real dataset captions back the previews before a run is snapshotted
+        or launched. The box is session-ephemeral and the load-time autofill fires before
+        captioning exists (load → caption → train), so an untouched box would otherwise
+        reach the trainer empty and previews would collapse to a single trigger-only
+        image per epoch. Fills only when empty — never clobbers authored prompts."""
+        if not self._sample_enable_check.isChecked():
+            return
+        if self._sample_prompts_edit.toPlainText().strip():
+            return
+        if not self._dataset_path:
+            return
+        from core.workflow import caption_state
+        if caption_state(self._dataset_path).get("done"):
+            self._fill_sample_prompts(self._dataset_path)
+
+    def refresh_sample_prompts_from_captions(self, *_):
+        """Captioning just finished: fill the (empty) sample box from the new captions
+        so the prompts are visible/editable before launch. Wired in MainWindow."""
+        self._ensure_sample_prompts()
+
     def _on_grab_prompts_clicked(self):
         if not self._dataset_path or not Path(self._dataset_path).is_dir():
             QMessageBox.warning(self, "No Dataset", "Load a captioned dataset first.")
@@ -1350,6 +1372,7 @@ class TrainTab(QWidget):
             QMessageBox.warning(self, "Cannot Generate Config", msg)
             return
 
+        self._ensure_sample_prompts()
         params = self._training_params
         lora_name = self._lora_name_edit.text().strip()
         run_dir = self._run_dir()  # per-run folder: {output_dir}/{lora_name}

@@ -194,3 +194,26 @@ def test_quality_prefix_cleared_gives_raw(tmp_path):
     a.prepare_sample_args(str(tmp_path), "demo", trigger_word="mychar")
     line = (tmp_path / "configs" / "demo_sample.txt").read_text(encoding="utf-8").splitlines()[0]
     assert line == "mychar, a closeup"
+
+
+def test_prepare_sample_args_explicit_prompts_override_settings(tmp_path):
+    # Batch runs pass their own snapshot; the live settings box must not leak in.
+    a = _appsettings(tmp_path)
+    a.set("sample_enable", True)
+    a.set("sample_quality_prefix", "")
+    a.set("sample_prompts", "stale box text")
+    a.prepare_sample_args(str(tmp_path), "demo", trigger_word="mychar",
+                          prompts=["a walk in the park", "mychar, at night"])
+    lines = (tmp_path / "configs" / "demo_sample.txt").read_text(encoding="utf-8").strip().splitlines()
+    assert lines == ["mychar, a walk in the park", "mychar, at night"]
+
+
+def test_prepare_sample_args_explicit_empty_falls_back_to_trigger(tmp_path):
+    # An explicit empty list (captionless dataset) still renders a minimal preview.
+    a = _appsettings(tmp_path)
+    a.set("sample_enable", True)
+    a.set("sample_quality_prefix", "")
+    a.set("sample_prompts", "stale box text")
+    a.prepare_sample_args(str(tmp_path), "demo", trigger_word="mychar", prompts=[])
+    lines = (tmp_path / "configs" / "demo_sample.txt").read_text(encoding="utf-8").strip().splitlines()
+    assert lines == ["mychar"]

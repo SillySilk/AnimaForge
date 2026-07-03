@@ -317,6 +317,12 @@ class MainWindow(QMainWindow):
         self._dataset_tab.dataset_loaded.connect(lambda *_: self._refresh_rail())
         self._dataset_tab.characters_changed.connect(self._refresh_rail)
         self._dataset_tab.caption_finished.connect(self._refresh_rail)
+        # Fresh captions → fill the (empty) sample-prompt box so previews launch with
+        # real dataset prompts; load-time autofill fires before captions exist.
+        self._dataset_tab.caption_finished.connect(
+            self._train_tab.refresh_sample_prompts_from_captions)
+        self._dataset_tab.auto_caption_finished.connect(
+            self._train_tab.refresh_sample_prompts_from_captions)
         # Home's stage chips: per-caption ticks while an engine runs, authoritative
         # sidecar counts the moment each step lands.
         self._dataset_tab.caption_tick.connect(self._home_tab.apply_caption_tick)

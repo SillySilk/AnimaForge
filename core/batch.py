@@ -64,6 +64,20 @@ class RunDefinition:
         return cls(**{k: v for k, v in d.items() if k in known})
 
 
+def resolve_sample_prompts(run: RunDefinition):
+    """The sample prompts a queued run should actually render with.
+
+    Prefer the run's own snapshot; when it's empty (e.g. the set was queued before the
+    dataset was captioned), draw `sample_count` random verbatim captions from the run's
+    dataset at execution time. Returns a list (possibly empty for a captionless dataset).
+    """
+    prompts = [p.strip() for p in (run.sample_prompts or []) if p and p.strip()]
+    if prompts:
+        return prompts
+    from core.sample_prompts import grab_caption_blocks
+    return grab_caption_blocks(run.dataset_folder, run.sample_count or 4)
+
+
 def save_queue(path: str, runs) -> None:
     Path(path).write_text(
         json.dumps([r.to_dict() for r in runs], indent=2), encoding="utf-8"
@@ -141,7 +155,9 @@ class BatchRunner(QObject):
             app = AppSettings()
             run_dir = run_output_dir(run.output_dir, run.lora_name)  # per-run folder
             extra = app.build_extra_training_args()
-            extra.update(app.prepare_sample_args(run_dir, run.lora_name, run.trigger_word))
+            extra.update(app.prepare_sample_args(
+                run_dir, run.lora_name, run.trigger_word,
+                prompts=resolve_sample_prompts(run)))
             from core import lowvram
             lv = lowvram.get_current() or {}  # active only if acknowledged this session
             cfg, _ = generate_configs(

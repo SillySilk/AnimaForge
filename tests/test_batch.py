@@ -61,3 +61,24 @@ def test_run_definition_sample_count_roundtrip():
     assert rd2.sample_count == 7
     # old sets without the key default to 4
     assert RunDefinition.from_dict({"lora_name": "y", "dataset_folder": "d", "image_count": 1}).sample_count == 4
+
+
+def test_resolve_sample_prompts_prefers_snapshot():
+    from core.batch import resolve_sample_prompts
+    rd = _rd(sample_prompts=["one", "  ", "two"])
+    assert resolve_sample_prompts(rd) == ["one", "two"]
+
+
+def test_resolve_sample_prompts_grabs_from_dataset_when_empty(tmp_path):
+    # Queued before captioning: draw real captions from the dataset at execution time.
+    from core.batch import resolve_sample_prompts
+    (tmp_path / "a.png").write_bytes(b"x")
+    (tmp_path / "a.txt").write_text("a cat on a mat", encoding="utf-8")
+    rd = _rd(dataset_folder=str(tmp_path), sample_prompts=[])
+    assert resolve_sample_prompts(rd) == ["a cat on a mat"]
+
+
+def test_resolve_sample_prompts_captionless_dataset_returns_empty(tmp_path):
+    from core.batch import resolve_sample_prompts
+    rd = _rd(dataset_folder=str(tmp_path), sample_prompts=[])
+    assert resolve_sample_prompts(rd) == []

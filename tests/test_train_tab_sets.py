@@ -130,3 +130,55 @@ def test_optimizer_preset_round_trips_adamw8bit():
     t._set_optimizer("prodigy")
     assert t._current_optimizer() == "prodigy"
     assert t._lr_row_widget.isHidden()
+
+
+def test_build_run_definition_fills_empty_prompts_from_captions(tmp_path: Path):
+    # load -> caption -> train: the box is empty at launch (load-time autofill ran
+    # before captions existed), so the snapshot must self-fill from the dataset.
+    sd = tmp_path / "sd"; sd.mkdir()
+    dit = tmp_path / "dit.safetensors"; dit.write_bytes(b"x")
+    q = tmp_path / "q.safetensors"; q.write_bytes(b"x")
+    vae = tmp_path / "vae.safetensors"; vae.write_bytes(b"x")
+    out = tmp_path / "out"; out.mkdir()
+    ds = tmp_path / "ds"; ds.mkdir()
+    for i, cap in enumerate(["a red fox in snow", "a knight at dusk",
+                             "a cat on a mat", "a girl in a forest",
+                             "a ship at sea", "a tower under stars"]):
+        (ds / f"img{i}.png").write_bytes(b"x")
+        (ds / f"img{i}.txt").write_text(cap, encoding="utf-8")
+
+    t = TrainTab()
+    t.set_environment(str(sd), str(dit), str(q), str(vae), str(out))
+    t.set_dataset(str(ds), 6)
+    t._lora_name_edit.setText("Demo")
+    t._sample_enable_check.setChecked(True)
+    t._sample_prompts_edit.clear()  # simulate the cleared-at-load box
+
+    rd, msg = t.build_run_definition()
+    assert rd is not None, msg
+    # preview count (default 4) random verbatim captions from the dataset
+    assert len(rd.sample_prompts) == t._preview_count_spin.value() == 4
+    assert all(p in {"a red fox in snow", "a knight at dusk", "a cat on a mat",
+                     "a girl in a forest", "a ship at sea", "a tower under stars"}
+               for p in rd.sample_prompts)
+
+
+def test_build_run_definition_never_clobbers_authored_prompts(tmp_path: Path):
+    sd = tmp_path / "sd"; sd.mkdir()
+    dit = tmp_path / "dit.safetensors"; dit.write_bytes(b"x")
+    q = tmp_path / "q.safetensors"; q.write_bytes(b"x")
+    vae = tmp_path / "vae.safetensors"; vae.write_bytes(b"x")
+    out = tmp_path / "out"; out.mkdir()
+    ds = tmp_path / "ds"; ds.mkdir()
+    (ds / "a.png").write_bytes(b"x")
+    (ds / "a.txt").write_text("dataset caption", encoding="utf-8")
+
+    t = TrainTab()
+    t.set_environment(str(sd), str(dit), str(q), str(vae), str(out))
+    t.set_dataset(str(ds), 1)
+    t._lora_name_edit.setText("Demo")
+    t._sample_prompts_edit.setPlainText("my own prompt")
+
+    rd, msg = t.build_run_definition()
+    assert rd is not None, msg
+    assert rd.sample_prompts == ["my own prompt"]
