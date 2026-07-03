@@ -319,6 +319,7 @@ class DatasetTab(QWidget):
     characters_changed = Signal()      # per-image cast/chat edited here -> Characters tab resync
     open_characters_requested = Signal()  # "name characters" prompt -> jump to Characters tab
     caption_finished = Signal()        # caption step status changed -> refresh progress rail
+    caption_tick = Signal(str, int, int)  # (phase, done, total) per-image tick -> Home's stage chips
     auto_caption_finished = Signal(bool)  # headless Process chain ended (Home pipeline)
 
     def __init__(self, parent=None):
@@ -390,10 +391,10 @@ class DatasetTab(QWidget):
         """Quality prefix is edited on Home; keep this tab's (hidden) copy in sync."""
         self._prefix_edit.setText(prefix or "")
 
-    def caption_counts(self) -> tuple:
-        """(captioned, total) — training-ready .txt count and image count, for Home's status."""
+    def caption_stage_counts(self) -> tuple:
+        """(tags, nl, txt, total) — per-stage sidecar counts for Home's pillar stage chips."""
         c = self._step_status_counts()
-        return c["txt"], c["total"]
+        return c["tags"], c["nl"], c["txt"], c["total"]
 
     def caption_controls(self) -> QWidget:
         """The caption control panel (Process + individual steps + stop + live progress).
@@ -1617,6 +1618,7 @@ class DatasetTab(QWidget):
             self._caption_bar.setValue(tick.done)
             self._caption_file.setText(tick.filename)
             self._set_processing_frame(tick.filename)
+            self.caption_tick.emit(tick.phase, tick.done, tick.total)
 
     def _on_tagger_finished(self, success: bool):
         self._autotag_btn.setEnabled(True)

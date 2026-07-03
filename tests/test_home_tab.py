@@ -97,3 +97,38 @@ def test_cockpit_trigger_sync_and_signal():
     t.trigger_changed.connect(lambda s: emitted.append(s))
     t._trigger_edit.textEdited.emit("newtrig")         # simulate a user edit
     assert emitted == ["newtrig"]
+
+
+def test_stage_counts_from_context():
+    t = HomeTab()
+    t.refresh(_ctx(caption_stage_counts=(98, 42, 0, 98)))
+    assert t._stage_count_labels["tag"].text() == "98 / 98"
+    assert t._stage_count_labels["describe"].text() == "42 / 98"
+    assert t._stage_count_labels["combine"].text() == "0 / 98"
+    # empty dataset -> placeholder, no fake zero-of-zero
+    t.refresh(_ctx())
+    assert t._stage_count_labels["describe"].text() == "—"
+
+
+def test_caption_tick_updates_chip_live():
+    t = HomeTab()
+    t.apply_caption_tick("Describe", 5, 98)
+    assert t._stage_count_labels["describe"].text() == "5 / 98"
+    assert t._stage_chips["describe"].objectName() == "af_stage_chip_live"
+    assert t._stage_chips["tag"].objectName() == "af_stage_chip"
+    # Refine ticks ride the DESCRIBE chip (it reworks the natural-language draft)
+    t.apply_caption_tick("Refine", 7, 98)
+    assert t._stage_count_labels["describe"].text() == "7 / 98"
+    # unknown phases are ignored, authoritative counts clear the live highlight
+    t.apply_caption_tick("Nonsense", 1, 2)
+    t.set_stage_counts(98, 98, 98, 98)
+    assert t._stage_chips["describe"].objectName() == "af_stage_chip"
+    assert t._stage_count_labels["combine"].text() == "98 / 98"
+
+
+def test_run_progress_shows_live_steps_on_front():
+    t = HomeTab()
+    t.apply_run_progress({"kind": "progress", "step": 143, "total": 800})
+    assert t._train_progress._counter.text() == "143 / 800"
+    t.apply_run_progress({"kind": "reset"})
+    assert t._train_progress._counter.text() == ""

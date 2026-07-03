@@ -317,6 +317,12 @@ class MainWindow(QMainWindow):
         self._dataset_tab.dataset_loaded.connect(lambda *_: self._refresh_rail())
         self._dataset_tab.characters_changed.connect(self._refresh_rail)
         self._dataset_tab.caption_finished.connect(self._refresh_rail)
+        # Home's stage chips: per-caption ticks while an engine runs, authoritative
+        # sidecar counts the moment each step lands.
+        self._dataset_tab.caption_tick.connect(self._home_tab.apply_caption_tick)
+        self._dataset_tab.caption_finished.connect(
+            lambda: self._home_tab.set_stage_counts(
+                *self._dataset_tab.caption_stage_counts()))
         self._characters_tab.characters_changed.connect(self._refresh_rail)
         self._train_tab.subject_type_changed.connect(self._refresh_rail)
         # Live OPTIMIZER tile: the Train Presets modal floats over Home, so reflect
@@ -581,7 +587,7 @@ class MainWindow(QMainWindow):
             "target_steps": self._train_tab.get_target_steps(),
             "style_anchor": self._train_tab._dataset_style_anchor(),
             # live pillar readouts (Home condenses these into the two step cards)
-            "caption_counts": self._dataset_tab.caption_counts(),
+            "caption_stage_counts": self._dataset_tab.caption_stage_counts(),
             "optimizer_label": self._train_tab.optimizer_label(),
             "net_dim": self._train_tab._dim_spin.value(),
             "net_alpha": self._train_tab._alpha_spin.value(),

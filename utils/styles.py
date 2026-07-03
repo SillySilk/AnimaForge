@@ -288,6 +288,7 @@ QLabel {{ color: #c6c6ce; background-color: transparent; }}
 #af_eyebrow_mute {{ color: #9a9aa2; font-family: {F_UI}; font-size: 11px;
     letter-spacing: 2px; background-color: transparent; }}
 #af_display_gold {{ color: #d4af37; font-family: {F_DISPLAY}; font-size: 32px; background-color: transparent; }}
+#af_display_gold_xl {{ color: #d4af37; font-family: {F_DISPLAY}; font-size: 52px; background-color: transparent; }}
 #af_display_gold4 {{ color: #f4d160; font-family: {F_DISPLAY}; font-size: 23px; background-color: transparent; }}
 #af_marker {{ color: #cfc4a6; font-family: {F_MARKER}; font-size: 15px; background-color: transparent; }}
 #af_marker_gold {{ color: #d4972b; font-family: {F_MARKER}; font-size: 13px; background-color: transparent; }}
@@ -305,6 +306,8 @@ QLabel {{ color: #c6c6ce; background-color: transparent; }}
 #ready_row_err {{ color: #d9534f; }}
 
 /* forge redesign surfaces */
+/* plain QWidget containers inside a card must not repaint the page backdrop over it */
+#af_transparent {{ background-color: transparent; }}
 #af_card {{ background-color: #141312; border: 1px solid #2a2a1e; border-radius: 10px; }}
 #af_card_hi {{ background-color: #141312; border: 1px solid #d4af37; border-radius: 10px; }}
 #af_well {{ background-color: #100f0d; border: 1px solid #3a3a3f; border-radius: 5px; }}
@@ -313,6 +316,12 @@ QLabel {{ color: #c6c6ce; background-color: transparent; }}
 #af_pillar_accent {{ background-color: #8a5a12; max-height: 2px; min-height: 2px; }}
 #af_chip {{ background-color: #100f0d; border: 1px solid #2a2a1e; border-radius: 5px;
     color: #e8e0c8; font-family: {F_UI}; font-size: 11px; letter-spacing: 1px; padding: 8px 6px; }}
+/* caption pillar stage chips — name + live done/total count; _live lights the running stage */
+#af_stage_chip {{ background-color: #100f0d; border: 1px solid #2a2a1e; border-radius: 5px; }}
+#af_stage_chip_live {{ background-color: #161208; border: 1px solid #d4af37; border-radius: 5px; }}
+#af_chip_name {{ color: #e8e0c8; font-family: {F_UI}; font-size: 11px; letter-spacing: 1px;
+    background-color: transparent; }}
+#af_chip_count {{ color: #f4d160; font-family: {F_DISPLAY}; font-size: 18px; background-color: transparent; }}
 
 /* ---- Slider (forge gold) ---- */
 QSlider::groove:horizontal {{ height: 4px; background: #2a2a1e; border-radius: 2px; }}

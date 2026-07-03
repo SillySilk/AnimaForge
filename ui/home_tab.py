@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui.forge_modal import ForgeModal
+from ui.run_progress import RunProgress
 
 
 class _LmsPing(QThread):
@@ -298,6 +299,7 @@ class HomeTab(QWidget):
         grid.addWidget(self._field_label("QUALITY PREFIX (OPTIONAL)"), 0, 2)
 
         name_row = QWidget()
+        name_row.setObjectName("af_transparent")
         nr = QHBoxLayout(name_row)
         nr.setContentsMargins(0, 0, 0, 0)
         nr.setSpacing(8)
@@ -393,8 +395,8 @@ class HomeTab(QWidget):
         cl.setContentsMargins(22, 0, 22, 22)
         cl.setSpacing(0)
         cl.addWidget(self._pillar_accent())
-        cl.addSpacing(18)
-        cl.addWidget(self._pillar_head("STEP 01", "Caption",
+        cl.addSpacing(16)
+        cl.addWidget(self._pillar_head("Caption",
                                        action_label="Options",
                                        on_action=self._open_caption_modal))
         # (Train pillar's action is also "Options" now — "Presets" is reserved for
@@ -404,18 +406,8 @@ class HomeTab(QWidget):
         marker.setWordWrap(True)
         cl.addWidget(marker)
         cl.addSpacing(14)
-        cl.addLayout(self._chip_row(["Auto-Tag", "Describe", "Combine"]))
-        cl.addSpacing(14)
-        # live status line (N / M captioned)
-        status_row = QHBoxLayout()
-        sl = QLabel("STATUS")
-        sl.setObjectName("af_eyebrow_mute")
-        status_row.addWidget(sl)
-        status_row.addStretch()
-        self._caption_status = QLabel("— not captioned")
-        self._caption_status.setObjectName("af_stat_value")
-        status_row.addWidget(self._caption_status)
-        cl.addLayout(status_row)
+        # stage chips carry their own live done/total counts (per-caption during a run)
+        cl.addLayout(self._stage_chip_row())
         cl.addStretch()
         # primary action; the mass of options lives in the Options modal
         self._run_caption_btn = QPushButton("📝  Run Captioning")
@@ -453,8 +445,8 @@ class HomeTab(QWidget):
         tl.setContentsMargins(22, 0, 22, 22)
         tl.setSpacing(0)
         tl.addWidget(self._pillar_accent())
-        tl.addSpacing(18)
-        tl.addWidget(self._pillar_head("STEP 02", "Train",
+        tl.addSpacing(16)
+        tl.addWidget(self._pillar_head("Train",
                                        action_label="Options",
                                        on_action=self._open_train_modal))
         marker2 = QLabel("Anima-tuned settings, already dialed in. Just pull the lever.")
@@ -469,6 +461,12 @@ class HomeTab(QWidget):
         self._network_line.setObjectName("af_eyebrow_mute")
         tl.addWidget(self._network_line)
         tl.addStretch()
+        # live run readout — real-time steps (143 / 800 · 17%) without leaving the front;
+        # the Forge It pipeline's Detecting/Captioning phases narrate here too
+        self._train_progress = RunProgress()
+        self._train_progress.setObjectName("af_transparent")
+        tl.addWidget(self._train_progress)
+        tl.addSpacing(10)
         # primary action; the mass of settings lives in the Presets modal. Stop rides
         # alongside (the front owns ALL run controls — it went missing in the Bench
         # redesign) and lights up only while a run is live.
@@ -510,19 +508,16 @@ class HomeTab(QWidget):
         acc.setFixedHeight(2)
         return acc
 
-    def _pillar_head(self, step: str, title: str, action_label=None, on_action=None) -> QWidget:
+    def _pillar_head(self, title: str, action_label=None, on_action=None) -> QWidget:
+        # No "STEP 0x" eyebrow — the gold "then →" connector carries the ordering;
+        # the title itself fills the head at display size.
         head = QWidget()
+        head.setObjectName("af_transparent")  # don't band the card with the page bg
         h = QHBoxLayout(head)
         h.setContentsMargins(0, 0, 0, 6)
-        col = QVBoxLayout()
-        col.setSpacing(4)
-        eb = QLabel(step)
-        eb.setObjectName("af_eyebrow_flame")
-        col.addWidget(eb)
         t = QLabel(title)
-        t.setObjectName("af_display_gold")
-        col.addWidget(t)
-        h.addLayout(col)
+        t.setObjectName("af_display_gold_xl")
+        h.addWidget(t)
         h.addStretch()
         if action_label and on_action is not None:
             btn = QPushButton("⚙  " + action_label)
@@ -534,19 +529,65 @@ class HomeTab(QWidget):
             h.addWidget(btn, 0, Qt.AlignTop)
         return head
 
-    def _chip_row(self, labels) -> QHBoxLayout:
+    # Caption pillar stages, in run order. Each maps to the sidecar its engine writes.
+    _STAGE_DEFS = [("tag", "AUTO-TAG"), ("describe", "DESCRIBE"), ("combine", "COMBINE")]
+    # parse_progress phases → stage chip. Refine reworks the natural-language draft,
+    # so its ticks show on DESCRIBE.
+    _PHASE_TO_STAGE = {"Tag": "tag", "Describe": "describe", "Refine": "describe"}
+
+    def _stage_chip_row(self) -> QHBoxLayout:
         row = QHBoxLayout()
         row.setSpacing(8)
-        for i, text in enumerate(labels):
-            chip = QLabel(text.upper())
-            chip.setObjectName("af_chip")
-            chip.setAlignment(Qt.AlignCenter)
+        self._stage_chips = {}
+        self._stage_count_labels = {}
+        for i, (key, name) in enumerate(self._STAGE_DEFS):
+            chip = QFrame()
+            chip.setObjectName("af_stage_chip")
+            cv = QVBoxLayout(chip)
+            cv.setContentsMargins(8, 7, 8, 7)
+            cv.setSpacing(2)
+            nm = QLabel(name)
+            nm.setObjectName("af_chip_name")
+            nm.setAlignment(Qt.AlignCenter)
+            cv.addWidget(nm)
+            count = QLabel("—")
+            count.setObjectName("af_chip_count")
+            count.setAlignment(Qt.AlignCenter)
+            cv.addWidget(count)
+            self._stage_chips[key] = chip
+            self._stage_count_labels[key] = count
             row.addWidget(chip, 1)
-            if i < len(labels) - 1:
+            if i < len(self._STAGE_DEFS) - 1:
                 arr = QLabel("→")
                 arr.setStyleSheet("color:#8a5a12;")
                 row.addWidget(arr)
         return row
+
+    @staticmethod
+    def _stage_count_text(done: int, total: int) -> str:
+        return f"{done} / {total}" if total else "—"
+
+    def set_stage_counts(self, tags: int, nl: int, txt: int, total: int):
+        """Authoritative per-stage counts from the sidecar scan (at rest / step end)."""
+        for key, done in (("tag", tags), ("describe", nl), ("combine", txt)):
+            self._stage_count_labels[key].setText(self._stage_count_text(done, total))
+        self._set_live_stage(None)
+
+    def apply_caption_tick(self, phase: str, done: int, total: int):
+        """Per-caption progress from a running engine — updates its chip in real time."""
+        key = self._PHASE_TO_STAGE.get(phase)
+        if key is None:
+            return
+        self._stage_count_labels[key].setText(self._stage_count_text(done, total))
+        self._set_live_stage(key)
+
+    def _set_live_stage(self, live_key):
+        for key, chip in self._stage_chips.items():
+            name = "af_stage_chip_live" if key == live_key else "af_stage_chip"
+            if chip.objectName() != name:
+                chip.setObjectName(name)
+                chip.style().unpolish(chip)
+                chip.style().polish(chip)
 
     def _stat_tiles(self) -> QHBoxLayout:
         row = QHBoxLayout()
@@ -579,12 +620,6 @@ class HomeTab(QWidget):
         return row
 
     # ---- live readouts (fed by MainWindow.refresh) ----
-    def set_caption_status(self, done: int, total: int):
-        if total:
-            self._caption_status.setText(f"{done} / {total} captioned")
-        else:
-            self._caption_status.setText("— not captioned")
-
     def set_train_summary(self, steps=None, optimizer=None, dim=None, alpha=None, res=None):
         if steps is not None:
             self._tile_values["steps"].setText(str(steps))
@@ -876,9 +911,8 @@ class HomeTab(QWidget):
         self._set_anchor_visible(bool(visible))
 
     def apply_run_progress(self, payload):
-        # The mounted Train control panel carries the live RunProgress; Home mirrors it there,
-        # so this remains a no-op-safe hook for MainWindow's existing wiring.
-        pass
+        """Mirror the run's live progress onto the Train pillar's front-page readout."""
+        self._train_progress.apply(payload or {})
 
     def set_training_active(self, active: bool):
         """Mirror the run state onto the front-page Start/Stop pair."""
@@ -944,8 +978,8 @@ class HomeTab(QWidget):
         self._sync_cockpit(context)
         self._update_ready_pill(context)
         # live pillar readouts
-        done, total = context.get("caption_counts", (0, 0))
-        self.set_caption_status(done, total)
+        tags, nl, txt, total = context.get("caption_stage_counts", (0, 0, 0, 0))
+        self.set_stage_counts(tags, nl, txt, total)
         self.set_train_summary(
             steps=context.get("target_steps"),
             optimizer=context.get("optimizer_label") or "Prodigy",
