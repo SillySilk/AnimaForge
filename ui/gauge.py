@@ -14,6 +14,8 @@ from PySide6.QtCore import Qt, QRectF, QPointF
 from PySide6.QtGui import QPainter, QPen, QColor, QFont
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QFrame
 
+from utils.fonts import primary_family
+
 _TRACK = QColor("#2a2a1e")
 _GOLD = QColor("#d4af37")
 _GOLD_HI = QColor("#f4d160")
@@ -73,7 +75,7 @@ class Gauge(QWidget):
 
         # value readout (inside the arc)
         p.setPen(_CREAM)
-        vf = QFont("Special Elite")
+        vf = QFont(primary_family("type"))
         vf.setPixelSize(15)
         vf.setBold(True)
         p.setFont(vf)
@@ -82,7 +84,7 @@ class Gauge(QWidget):
 
         # label (+ optional note) under the dial
         p.setPen(_MUTE)
-        lf = QFont("Special Elite")
+        lf = QFont(primary_family("type"))
         lf.setPixelSize(10)
         p.setFont(lf)
         text = self._label + (f"  ·  {self._note}" if self._note else "")

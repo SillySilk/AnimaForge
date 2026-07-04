@@ -33,3 +33,15 @@ def test_epoch_and_speed_fractions():
     assert d.epoch._value_text == "5 / 10" and abs(d.epoch._frac - 0.5) < 1e-6
     d.set_speed(2.0, ceiling=4.0)
     assert abs(d.speed._frac - 0.5) < 1e-6
+
+
+def test_gauge_paint_uses_resolved_family(monkeypatch):
+    from ui import gauge as gauge_mod
+    calls = []
+    monkeypatch.setattr(
+        gauge_mod, "primary_family",
+        lambda role: (calls.append(role), "Segoe UI")[1],
+    )
+    d = DialRow()
+    d.epoch.grab()  # offscreen render forces a paintEvent
+    assert calls and all(r == "type" for r in calls)
