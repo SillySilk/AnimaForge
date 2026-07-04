@@ -19,6 +19,8 @@ import re
 
 from PySide6.QtGui import QFontDatabase
 
+from utils.styles import F_UI as UI_STACK
+
 _FONT_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "fonts"
 )
@@ -60,9 +62,6 @@ def load_app_fonts() -> dict[str, str]:
     return FAMILIES
 
 
-# System-UI stack: what functional text always uses (see utils.styles._F_UI) and
-# what "system" mode collapses the decorative roles to.
-UI_STACK = '"Segoe UI", "Malgun Gothic", "Segoe UI Symbol", sans-serif'
 
 # The role -> stack map currently IN EFFECT after mode resolution. Updated by
 # apply_app_font(); empty means "forge" (fall through to FAMILIES).

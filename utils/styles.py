@@ -27,7 +27,7 @@ _FALLBACK_FAMILIES = {
 # face, not the decorative set — user feedback: the display faces were hard to read
 # in dense panels, and on Korean Windows the CJK fallback was ugly. "Malgun Gothic"
 # rides in every stack so Korean glyphs render cleanly via Qt's per-glyph fallback.
-_F_UI = '"Segoe UI", "Malgun Gothic", "Segoe UI Symbol", sans-serif'
+F_UI = '"Segoe UI", "Malgun Gothic", "Segoe UI Symbol", sans-serif'
 
 
 def build_stylesheet(families: dict | None = None) -> str:
@@ -43,7 +43,6 @@ def build_stylesheet(families: dict | None = None) -> str:
     F_MARKER = fam["marker"]    # Permanent Marker — scrawled taglines
     F_TYPE = fam["type"]        # Special Elite — decorative eyebrows + nav (character)
     F_BODY = fam["body"]        # Crimson Pro — long-form body copy only
-    F_UI = _F_UI                # system UI — everything functional (readability)
 
     return f"""
 QMainWindow {{ background-color: #0a0a0b; color: #c6c6ce; }}
