@@ -92,6 +92,10 @@ DEFAULTS = {
     # so progress images don't render in Anima's plain "unrefined base" style. Editable in
     # Setup; clear it to preview raw LoRA output. Lowercase, score_* keeps its underscore.
     "sample_quality_prefix": "masterpiece, best quality, score_7, safe",
+    # UI font preference (decorative roles only — functional text always stays
+    # on the system UI stack). mode: "forge" (bundled faces) | "system" | "custom".
+    "ui_font_mode": "forge",
+    "ui_font_family": "",   # family name; used only when mode == "custom"
 }
 
 # Note: fp8_scaled is intentionally absent — anima_train_network.py hard-disables it

@@ -217,3 +217,17 @@ def test_prepare_sample_args_explicit_empty_falls_back_to_trigger(tmp_path):
     a.prepare_sample_args(str(tmp_path), "demo", trigger_word="mychar", prompts=[])
     lines = (tmp_path / "configs" / "demo_sample.txt").read_text(encoding="utf-8").strip().splitlines()
     assert lines == ["mychar"]
+
+
+def test_ui_font_defaults(tmp_path):
+    a = _appsettings(tmp_path)
+    assert a.get("ui_font_mode") == "forge"
+    assert a.get("ui_font_family") == ""
+
+
+def test_ui_font_roundtrip(tmp_path):
+    a = _appsettings(tmp_path)
+    a.set("ui_font_mode", "custom")
+    a.set("ui_font_family", "Arial")
+    assert a.get("ui_font_mode") == "custom"
+    assert a.get("ui_font_family") == "Arial"
