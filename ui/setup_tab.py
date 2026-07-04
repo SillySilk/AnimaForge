@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QDoubleSpinBox,
     QFileDialog,
+    QFontComboBox,
     QFrame,
     QGroupBox,
     QHBoxLayout,
@@ -986,6 +987,19 @@ class SetupTab(QWidget):
         r2.addWidget(self._def_order_combo)
         r2.addStretch()
         v.addLayout(r2)
+        # UI font — swaps the four decorative faces (headlines/nav/taglines/body)
+        # for readability in non-Latin locales. Functional text always stays on
+        # the system UI stack, so a bad pick is always recoverable here.
+        r3 = QHBoxLayout()
+        r3.addWidget(QLabel("UI font:"))
+        self._font_mode_combo = QComboBox()
+        self._font_mode_combo.addItems(["Forge fonts (default)", "System font", "Custom…"])
+        r3.addWidget(self._font_mode_combo)
+        self._font_family_combo = QFontComboBox()
+        self._font_family_combo.setVisible(False)
+        r3.addWidget(self._font_family_combo)
+        r3.addStretch()
+        v.addLayout(r3)
         return g
 
     def _bind_app_widgets(self):
@@ -1014,6 +1028,15 @@ class SetupTab(QWidget):
         self._def_alpha_spin.setValue(a.get("default_network_alpha"))
         self._def_steps_spin.setValue(a.get("default_target_steps"))
         self._def_order_combo.setCurrentIndex(0 if a.get("default_caption_order") == "nl_first" else 1)
+        _font_modes = ("forge", "system", "custom")
+        mode = a.get("ui_font_mode")
+        self._font_mode_combo.setCurrentIndex(
+            _font_modes.index(mode) if mode in _font_modes else 0)
+        fam_name = a.get("ui_font_family")
+        if fam_name:
+            from PySide6.QtGui import QFont
+            self._font_family_combo.setCurrentFont(QFont(fam_name))
+        self._font_family_combo.setVisible(mode == "custom")
         # Save on change (connected AFTER loading so load doesn't trigger writes)
         self._scan_edit.textChanged.connect(lambda t: a.set("model_scan_dir", t))
         self._forge_url_edit.textChanged.connect(lambda t: a.set("forge_api_url", t))
@@ -1040,6 +1063,24 @@ class SetupTab(QWidget):
         self._def_steps_spin.valueChanged.connect(lambda val: a.set("default_target_steps", val))
         self._def_order_combo.currentIndexChanged.connect(
             lambda i: a.set("default_caption_order", "nl_first" if i == 0 else "tags_first"))
+        self._font_mode_combo.currentIndexChanged.connect(self._on_font_mode_changed)
+        self._font_family_combo.currentFontChanged.connect(self._on_font_family_changed)
+
+    def _on_font_mode_changed(self, idx: int) -> None:
+        from utils.fonts import apply_app_font
+        self._app.set("ui_font_mode", ("forge", "system", "custom")[idx])
+        self._font_family_combo.setVisible(idx == 2)
+        if idx == 2 and not self._app.get("ui_font_family"):
+            # Seed from whatever the combo shows so custom mode is never "empty".
+            self._app.set("ui_font_family",
+                          self._font_family_combo.currentFont().family())
+        apply_app_font()
+
+    def _on_font_family_changed(self, font) -> None:
+        from utils.fonts import apply_app_font
+        self._app.set("ui_font_family", font.family())
+        if self._app.get("ui_font_mode") == "custom":
+            apply_app_font()
 
     # ------------------------------------------------------------------
     # Settings persistence
