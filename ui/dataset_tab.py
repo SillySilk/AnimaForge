@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QSettings, QTimer, Signal
-from PySide6.QtGui import QPixmap, QImage
+from PySide6.QtCore import Qt, QSettings, QSize, QTimer, Signal
+from PySide6.QtGui import QPixmap, QImage, QIcon
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -153,16 +153,21 @@ class ImageCard(QWidget):
 
         # Trash can rides the thumbnail's top-right corner — always visible (the old
         # spot beside the filename was easy to miss; deleting a double must be one
-        # obvious click).
-        self._delete_btn = QPushButton("🗑", self._thumb_label)
+        # obvious click). Drawn icon, not the 🗑 emoji: none of the app's font stacks
+        # (Segoe UI / Malgun Gothic / Segoe UI Symbol) carry that glyph, so Qt rendered
+        # a plain tofu square instead of a can.
+        from utils.styles import asset_url
+        self._delete_btn = QPushButton("", self._thumb_label)
+        self._delete_btn.setIcon(QIcon(asset_url("trash.png")))
+        self._delete_btn.setIconSize(QSize(15, 15))
         self._delete_btn.setFixedSize(26, 26)
         self._delete_btn.setToolTip("Delete this image and its caption files")
         self._delete_btn.setCursor(Qt.PointingHandCursor)
         self._delete_btn.move(THUMB_SIZE - 26 - 7, 7)
         self._delete_btn.setStyleSheet(
             "QPushButton { background-color: rgba(12,11,10,0.82); border: 1px solid #3a3a1f;"
-            " border-radius: 13px; color: #c88a80; font-size: 13px; }"
-            "QPushButton:hover { border: 1px solid #e05050; color: #ff6a5c;"
+            " border-radius: 13px; }"
+            "QPushButton:hover { border: 1px solid #e05050;"
             " background-color: rgba(42,20,16,0.92); }")
         self._delete_btn.clicked.connect(self._on_delete_clicked)
 

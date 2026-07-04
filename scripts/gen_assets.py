@@ -265,6 +265,26 @@ def make_nav_icon(path: Path, kind: str) -> Path:
     return path
 
 
+def make_trash_icon(path: Path, color=GOLD) -> Path:
+    """A small drawn trash-can glyph (lid + can + ribs), for delete buttons that
+    otherwise show the 🗑 emoji as button text — a glyph Segoe UI/Symbol/Malgun
+    Gothic (the app's font stack) don't carry, so Qt falls back to a tofu box."""
+    size = (32, 32)
+    img = Image.new("RGBA", size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(img, "RGBA")
+    c = color + (255,)
+    # lid + handle
+    d.rectangle([7, 8, 25, 11], fill=c)
+    d.rectangle([13, 4, 19, 8], fill=c)
+    # can body (slightly tapered)
+    d.polygon([(9, 12), (23, 12), (21, 27), (11, 27)], outline=c, width=2)
+    # ribs
+    for x in (13, 16, 19):
+        d.line([(x, 15), (x, 24)], fill=c, width=2)
+    img.save(path)
+    return path
+
+
 def generate_all(assets_dir: Path) -> list[Path]:
     assets_dir = Path(assets_dir)
     (assets_dir / "nav").mkdir(parents=True, exist_ok=True)
@@ -277,6 +297,7 @@ def generate_all(assets_dir: Path) -> list[Path]:
     out.append(make_hero(assets_dir / "hero_forge.png"))
     out.append(make_embers(assets_dir / "bg_embers.png"))
     out.append(make_panel_metal(assets_dir / "panel_metal.png"))
+    out.append(make_trash_icon(assets_dir / "trash.png"))
     for kind in ("home", "setup", "dataset", "characters", "train", "batch", "presets"):
         out.append(make_nav_icon(assets_dir / "nav" / f"{kind}.png", kind))
     return out

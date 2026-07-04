@@ -101,12 +101,17 @@ def calculate_training_params(image_count: int, target_steps: int = TARGET_STEPS
         repeats_float = (target_steps * batch_size) / (image_count * epochs)
         repeats = max(1, math.ceil(repeats_float))
 
-        total_steps = (image_count * repeats * epochs) // batch_size
+        # steps_per_epoch first, then total_steps = steps_per_epoch * epochs — not a
+        # separately-floored product. The dataloader drops a partial batch every epoch,
+        # so that's the real per-epoch step count sd-scripts will run; deriving total_steps
+        # any other way can under/overcount it by a full epoch's worth of steps, which
+        # threw off the preview tick-mark schedule (it assumed total/epochs == this value).
+        steps_per_epoch = (image_count * repeats) // batch_size
+        total_steps = steps_per_epoch * epochs
         distance = abs(total_steps - target_steps)
 
         if best_result is None or distance < best_distance:
             best_distance = distance
-            steps_per_epoch = (image_count * repeats) // batch_size
             best_result = {
                 "epochs": epochs,
                 "repeats": repeats,

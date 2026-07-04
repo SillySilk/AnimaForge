@@ -14,6 +14,7 @@ from pathlib import Path
 
 _EPOCH = re.compile(r"_e(\d{4,})_")
 _STEP = re.compile(r"_(\d{4,})_")
+_PROMPT_INDEX = re.compile(r"_e?\d{4,}_(\d{1,3})_")
 
 
 def round_key(filename: str):
@@ -28,6 +29,26 @@ def round_key(filename: str):
         n = int(m.group(1))
         return (0, n), ("start" if n == 0 else f"step {n}")
     return None
+
+
+def prompt_index(filename: str) -> int | None:
+    """The 0-based line index into the sample-prompts file this image was rendered
+    from (the ``{i:02d}`` slot in sd-scripts' filename), or None if it can't be found."""
+    m = _PROMPT_INDEX.search(Path(filename).name)
+    return int(m.group(1)) if m else None
+
+
+def prompt_for_file(filename: str, prompts_file: str) -> str | None:
+    """The prompt text that produced `filename`, read from the run's sample-prompts
+    file, or None if the index or the file itself isn't available."""
+    idx = prompt_index(filename)
+    if idx is None:
+        return None
+    try:
+        lines = [ln for ln in Path(prompts_file).read_text(encoding="utf-8").splitlines() if ln.strip()]
+    except OSError:
+        return None
+    return lines[idx] if 0 <= idx < len(lines) else None
 
 
 def group_by_round(files: list[str]) -> list[tuple[str, list[str]]]:

@@ -2,7 +2,8 @@ import os
 import re
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, Qt, Signal, QTimer, QProcess, QProcessEnvironment
+from PySide6.QtCore import QSettings, QSize, Qt, Signal, QTimer, QProcess, QProcessEnvironment
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -733,7 +734,10 @@ class SetupTab(QWidget):
         row = QHBoxLayout()
         add_btn = QPushButton("➕ New Preset…")
         add_btn.clicked.connect(self._new_preset_dialog)
-        del_btn = QPushButton("🗑 Delete selected")
+        from utils.styles import asset_url
+        del_btn = QPushButton(" Delete selected")
+        del_btn.setIcon(QIcon(asset_url("trash.png")))
+        del_btn.setIconSize(QSize(14, 14))
         del_btn.clicked.connect(self._delete_selected_preset)
         row.addWidget(add_btn)
         row.addWidget(del_btn)

@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer, Signal, Slot
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtCore import Qt, QSize, QTimer, Signal, Slot
+from PySide6.QtGui import QColor, QIcon, QPainter
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -40,6 +40,10 @@ from ui.gauge import DialRow
 from ui.run_progress import RunProgress
 
 import re as _re
+
+# Live-preview grid width: fewer, larger (and, with the "Show prompt" label under each,
+# portrait-shaped) tiles rather than a dense wall of small squares.
+PREVIEW_COLS = 3
 
 
 def countdown_continue_warning(parent, title: str, text: str, seconds: int = 10) -> bool:
@@ -123,56 +127,66 @@ class TickBar(QWidget):
     """A thin strip under the progress bar marking the steps where a preview will render.
 
     Ticks already passed (a preview should exist) are drawn brighter than upcoming ones.
+
+    Tick positions are stored as fractions of the run (0..1), each tied to an epoch
+    number, rather than absolute step numbers. sd-scripts is the sole authority on the
+    real step count (its dataloader drops a partial batch each epoch); the estimate
+    computed before Start is only a planning guess. Keeping fractions and rescaling them
+    against whatever total is currently known (the pre-run estimate, then the live total
+    parsed from the trainer's own tqdm output once training starts) keeps the ticks and
+    their epoch labels accurate instead of frozen against a stale estimate.
     """
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._positions = []   # step numbers where samples are generated
+        self._fractions = []   # (fraction 0..1, epoch) pairs where samples are generated
         self._total = 0
         self._current = 0
-        self._spe = 0.0        # steps per epoch (to label the next tick with its epoch)
         self.setFixedHeight(30)
         self.setToolTip("Preview images render at these points during training. "
                         "The red mark is the next upcoming set.")
 
-    def set_schedule(self, positions, total: int, steps_per_epoch: float = 0.0):
-        self._positions = sorted(p for p in positions if 0 <= p <= max(total, 1))
-        self._total = max(int(total), 1)
-        self._spe = float(steps_per_epoch or 0.0)
+    def set_schedule(self, fractions):
+        """fractions: iterable of (fraction 0..1, epoch:int) tuples, one per preview."""
+        self._fractions = sorted((max(0.0, min(1.0, f)), e) for f, e in fractions)
+        self.update()
+
+    def set_total(self, total: int):
+        """The current best-known total step count — the pre-run estimate, or (once
+        training starts logging) the real total sd-scripts reports."""
+        self._total = max(int(total or 0), 1)
         self.update()
 
     def set_progress(self, step: int):
         self._current = step
         self.update()
 
-    def _epoch_for(self, pos: int) -> int:
-        return round(pos / self._spe) if self._spe else 0
-
     def paintEvent(self, event):
-        if not self._positions or self._total <= 0:
+        if not self._fractions or self._total <= 0:
             return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
         w = self.width()
-        upcoming = [p for p in self._positions if p > self._current]
-        nxt = min(upcoming) if upcoming else None
+        positions = [(round(f * self._total), ep) for f, ep in self._fractions]
+        upcoming = [p for p in positions if p[0] > self._current]
+        nxt = min(upcoming, key=lambda p: p[0]) if upcoming else None
         # passed / future ticks (thin)
-        for pos in self._positions:
-            if pos == nxt:
+        for pos, _ep in positions:
+            if nxt is not None and pos == nxt[0]:
                 continue
             x = max(1, min(w - 1, int(w * (pos / self._total))))
             painter.setPen(QColor("#d4af37") if pos <= self._current else QColor("#3a3a1f"))
             painter.drawLine(x, 2, x, 13)
         # the next upcoming set — a taller red/flame mark with a tiny label underneath
         if nxt is not None:
-            x = max(1, min(w - 1, int(w * (nxt / self._total))))
+            pos, ep = nxt
+            x = max(1, min(w - 1, int(w * (pos / self._total))))
             painter.setPen(QColor("#ff7a18"))
             painter.drawLine(x, 0, x, 15)
             painter.setPen(QColor("#ff9a5c"))
             f = painter.font()
             f.setPixelSize(9)
             painter.setFont(f)
-            ep = self._epoch_for(nxt)
             label = f"next preview · epoch {ep}" if ep else "next preview"
             tw = painter.fontMetrics().horizontalAdvance(label)
             lx = min(max(0, x - tw // 2), max(0, w - tw))
@@ -468,7 +482,10 @@ class TrainTab(QWidget):
         self._sets_combo.setMinimumWidth(160)
         load_row.addWidget(self._sets_combo, 1)
         self._load_set_btn = QPushButton("📂 Load")
-        self._delete_set_btn = QPushButton("🗑 Delete")
+        from utils.styles import asset_url
+        self._delete_set_btn = QPushButton(" Delete")
+        self._delete_set_btn.setIcon(QIcon(asset_url("trash.png")))
+        self._delete_set_btn.setIconSize(QSize(14, 14))
         load_row.addWidget(self._load_set_btn)
         load_row.addWidget(self._delete_set_btn)
         sets_layout.addLayout(load_row)
@@ -872,22 +889,13 @@ class TrainTab(QWidget):
         right_layout.addWidget(self._dials)
 
         # Live sample preview (filled from {output_dir}/sample during training).
-        # Per the handoff: a 4-wide grid bounded to ~2 visible rows, scroll for older sets.
-        # Preview header: title + display-mode toggle (flat newest-first grid vs
-        # labeled per-epoch rows for side-by-side checkpoint comparison). A view
-        # switch on a preview surface — displays state, drives nothing.
+        # Grouped into one labeled, portrait-tiled row per epoch — newest on top — so
+        # the earliest epoch that already looks right is obvious at a glance.
         preview_head = QHBoxLayout()
         preview_title = QLabel("Live Preview")
         preview_title.setStyleSheet("font-size: 12px; font-weight: 600; color: #8a8a93;")
         preview_head.addWidget(preview_title)
         preview_head.addStretch()
-        self._compare_toggle = QCheckBox("Compare epochs")
-        self._compare_toggle.setToolTip(
-            "Group previews by epoch, newest on top — spot the earliest epoch that "
-            "already looks right and stop there.")
-        self._compare_toggle.toggled.connect(
-            lambda _on: self._render_preview(getattr(self, "_preview_files", []) or []))
-        preview_head.addWidget(self._compare_toggle)
         right_layout.addLayout(preview_head)
         self._preview_container = QWidget()
         self._preview_grid = QGridLayout(self._preview_container)
@@ -897,11 +905,11 @@ class TrainTab(QWidget):
         self._preview_grid.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         self._preview_hint = QLabel("Preview images appear here as training reaches each tick mark above.")
         self._preview_hint.setStyleSheet("font-size: 11px; color: #8a8a93; font-style: italic;")
-        self._preview_grid.addWidget(self._preview_hint, 0, 0, 1, 4)
+        self._preview_grid.addWidget(self._preview_hint, 0, 0, 1, PREVIEW_COLS)
         self._preview_scroll = QScrollArea()
         self._preview_scroll.setWidgetResizable(True)
         self._preview_scroll.setWidget(self._preview_container)
-        self._preview_scroll.setFixedHeight(366)  # two rows of ~168px thumbs + gap
+        self._preview_scroll.setFixedHeight(430)  # one labeled epoch row of portrait tiles + gap
         self._preview_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._preview_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         right_layout.addWidget(self._preview_scroll)
@@ -1392,28 +1400,26 @@ class TrainTab(QWidget):
             return ""
 
     def _sample_positions(self):
-        """Return the step numbers at which preview images will render, for the tick bar."""
+        """Return (fraction, epoch) pairs at which preview images will render, for the
+        tick bar. Fractions of the run (not absolute step numbers) so the tick bar can
+        rescale itself against whatever total is currently known — see TickBar."""
         params = self._training_params
-        total = params.get("total_steps", 0)
         epochs = params.get("epochs", 0)
-        if not (total and epochs) or not self._sample_enable_check.isChecked():
-            return [], total
+        if not epochs or not self._sample_enable_check.isChecked():
+            return []
         every = max(1, self._sample_every_spin.value())
-        steps_per_epoch = total / epochs
-        positions = []
+        fractions = []
         if self._app_settings and self._app_settings.get("sample_at_first"):
-            positions.append(0)
+            fractions.append((0.0, 0))
         e = every
         while e <= epochs:
-            positions.append(round(e * steps_per_epoch))
+            fractions.append((e / epochs, e))
             e += every
-        return positions, total
+        return fractions
 
     def _update_sample_schedule(self):
-        positions, total = self._sample_positions()
-        p = self._training_params
-        spe = (p.get("total_steps", 0) / p["epochs"]) if p.get("epochs") else 0.0
-        self._tickbar.set_schedule(positions, total, spe)
+        self._tickbar.set_schedule(self._sample_positions())
+        self._tickbar.set_total(self._training_params.get("total_steps", 0))
 
     def _refresh_resume_option(self):
         from core.state_utils import find_saved_state
@@ -1774,53 +1780,68 @@ class TrainTab(QWidget):
             if w is not None and w is not self._preview_hint:
                 w.deleteLater()
         if not files:
-            self._preview_grid.addWidget(self._preview_hint, 0, 0, 1, 4)
+            self._preview_grid.addWidget(self._preview_hint, 0, 0, 1, PREVIEW_COLS)
             self._preview_hint.show()
             return
         self._preview_hint.hide()
-        # Size the four columns to the viewport so a row of 4 fits exactly — never overflowing
-        # off the right. Newest first (top-left); the scroll shows exactly two rows (current
-        # epoch + the one before) and older sets require scrolling (no peek of the 3rd row).
-        gap, cols = 8, 4
+        # Size the columns to the viewport so a row fits exactly — never overflowing off
+        # the right. Portrait tiles: the image keeps its native (square) aspect, with a
+        # "Show prompt" label below it, so each tile reads taller than it is wide.
+        gap, cols = 8, PREVIEW_COLS
         vw = self._preview_scroll.viewport().width()
         col_w = max(80, (vw - (cols - 1) * gap - 4) // cols)
 
-        def _add_thumb(path, row, col):
+        def _make_tile(path):
             pm = QPixmap(path)
             if pm.isNull():
-                return False
+                return None
             scaled = pm.scaled(col_w, col_w, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             thumb = _ClickableThumb(path)
             thumb.setPixmap(scaled)
             thumb.setFixedSize(scaled.size())
             thumb.setToolTip(path)
             thumb.clicked.connect(self._show_image)
-            self._preview_grid.addWidget(thumb, row, col)
-            return True
+            prompt_btn = QPushButton("Show prompt")
+            prompt_btn.setObjectName("preview_prompt_link")
+            prompt_btn.setCursor(Qt.PointingHandCursor)
+            prompt_btn.setFlat(True)
+            prompt_btn.setStyleSheet(
+                "QPushButton#preview_prompt_link { color: #8a8a93; font-size: 10px; "
+                "text-decoration: underline; border: none; background: transparent; padding-top: 2px; }"
+                "QPushButton#preview_prompt_link:hover { color: #d4af37; }")
+            prompt_btn.clicked.connect(lambda _checked=False, p=path: self._show_prompt_for(p))
+            tile = QWidget()
+            tile_layout = QVBoxLayout(tile)
+            tile_layout.setContentsMargins(0, 0, 0, 0)
+            tile_layout.setSpacing(2)
+            tile_layout.addWidget(thumb, alignment=Qt.AlignHCenter)
+            tile_layout.addWidget(prompt_btn)
+            return tile
 
-        if self._compare_toggle.isChecked():
-            # Checkpoint comparison: one labeled band per epoch/step round, newest on
-            # top — scan down a column to watch one prompt evolve and pick the
-            # earliest epoch that already looks right.
-            from core.samples import group_by_round
-            row = 0
-            for label, group in group_by_round(files):
-                band = QLabel(label.upper())
-                band.setStyleSheet("color: #f4d160; font-size: 11px; font-weight: 700; "
-                                   "letter-spacing: 1px; padding-top: 6px;")
-                self._preview_grid.addWidget(band, row, 0, 1, cols)
+        # One labeled, divided row per epoch/step round, newest on top — scan down a
+        # column to watch one prompt evolve and pick the earliest epoch that already
+        # looks right. The pre-training render (no steps taken yet) is round "epoch 0".
+        from core.samples import group_by_round
+        row = 0
+        for label, group in group_by_round(files):
+            if row > 0:
+                divider = QFrame()
+                divider.setFrameShape(QFrame.HLine)
+                divider.setStyleSheet("background-color: #2a2a1e; max-height: 1px; border: none;")
+                self._preview_grid.addWidget(divider, row, 0, 1, cols)
                 row += 1
-                shown = 0
-                for path in group:
-                    if _add_thumb(path, row + shown // cols, shown % cols):
-                        shown += 1
-                row += max(1, (shown + cols - 1) // cols)
-        else:
+            band = QLabel(label.upper())
+            band.setStyleSheet("color: #f4d160; font-size: 11px; font-weight: 700; "
+                               "letter-spacing: 1px; padding-top: 4px;")
+            self._preview_grid.addWidget(band, row, 0, 1, cols)
+            row += 1
             shown = 0
-            for path in files:
-                if _add_thumb(path, shown // cols, shown % cols):
+            for path in group:
+                tile = _make_tile(path)
+                if tile is not None:
+                    self._preview_grid.addWidget(tile, row + shown // cols, shown % cols)
                     shown += 1
-        self._preview_scroll.setFixedHeight(2 * col_w + gap + 4)
+            row += max(1, (shown + cols - 1) // cols)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -1842,6 +1863,17 @@ class TrainTab(QWidget):
         sa.setWidget(lbl)
         lay.addWidget(sa)
         dlg.exec()
+
+    def _show_prompt_for(self, path: str):
+        """Look up and display the exact prompt that rendered the sample at `path`,
+        read from this run's {lora_name}_sample.txt (the file sd-scripts was pointed at)."""
+        from core.samples import prompt_for_file
+        lora_name = self._lora_name_edit.text().strip()
+        prompts_file = str(Path(self._run_dir()) / "configs" / f"{lora_name}_sample.txt")
+        prompt = prompt_for_file(path, prompts_file)
+        if prompt is None:
+            prompt = "Prompt not found (the run's sample-prompts file may have moved or changed)."
+        QMessageBox.information(self, "Sample prompt", prompt)
 
     # ------------------------------------------------------------------
     # Forge pipe
@@ -2060,6 +2092,10 @@ class TrainTab(QWidget):
     def _on_log_line(self, line: str):
         shown = self._denoiser.filter(line)
         if shown is not None:
+            metrics = parse_tqdm(line)
+            if metrics.get("total"):
+                pct = int(100 * metrics.get("step", 0) / metrics["total"])
+                shown = f"{shown}  ({pct}% done)"
             self._log_edit.append(shown)
             sb = self._log_edit.verticalScrollBar()
             sb.setValue(sb.maximum())
@@ -2097,6 +2133,7 @@ class TrainTab(QWidget):
     @Slot(int)
     def _on_progress_updated(self, step: int):
         total = self._trainer.total_steps
+        self._tickbar.set_total(total)  # sd-scripts' own reported total is authoritative
         self._tickbar.set_progress(step)
         if step >= 1 and not self._stepping:
             self._stepping = True
