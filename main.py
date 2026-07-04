@@ -12,7 +12,6 @@ from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon
 from PySide6.QtCore import Qt
 
-from utils.styles import build_stylesheet
 from utils.fonts import load_app_fonts
 from ui.main_window import MainWindow
 
@@ -36,10 +35,11 @@ def main():
     if os.path.exists(_icon):
         app.setWindowIcon(QIcon(_icon))
 
-    # Register the bundled forge fonts, then apply the dark stylesheet with the
-    # resolved families injected.
-    families = load_app_fonts()
-    app.setStyleSheet(build_stylesheet(families))
+    # Register the bundled forge fonts, then apply the stylesheet with the user's
+    # font preference resolved (forge faces by default; see utils/fonts.py).
+    from utils.fonts import apply_app_font
+    load_app_fonts()
+    apply_app_font(app)
 
     window = MainWindow()
     window.show()

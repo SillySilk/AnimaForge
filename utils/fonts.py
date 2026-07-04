@@ -15,6 +15,7 @@ not always advertise the family name you expect).
 from __future__ import annotations
 
 import os
+import re
 
 from PySide6.QtGui import QFontDatabase
 
@@ -59,6 +60,58 @@ def load_app_fonts() -> dict[str, str]:
     return FAMILIES
 
 
+# System-UI stack: what functional text always uses (see utils.styles._F_UI) and
+# what "system" mode collapses the decorative roles to.
+UI_STACK = '"Segoe UI", "Malgun Gothic", "Segoe UI Symbol", sans-serif'
+
+# The role -> stack map currently IN EFFECT after mode resolution. Updated by
+# apply_app_font(); empty means "forge" (fall through to FAMILIES).
+ACTIVE_FAMILIES: dict[str, str] = {}
+
+
+def resolve_families(mode: str | None = None, custom_family: str | None = None) -> dict[str, str]:
+    """Role -> QSS stack honoring the user's font preference.
+
+    Pass ``mode``/``custom_family`` explicitly (tests), or leave ``None`` to read
+    the persisted setting. Unknown modes and custom-without-a-family resolve to
+    forge (the bundled faces) so a corrupt setting can never blank the UI.
+    """
+    if mode is None:
+        from core.settings import AppSettings
+        s = AppSettings()
+        mode = s.get("ui_font_mode")
+        custom_family = s.get("ui_font_family")
+    if mode == "system":
+        return {role: UI_STACK for role in _FONTS}
+    if mode == "custom" and (custom_family or "").strip():
+        fam = custom_family.strip().replace('"', "")
+        stack = f'"{fam}", "Segoe UI Symbol", "Malgun Gothic", sans-serif'
+        return {role: stack for role in _FONTS}
+    return dict(FAMILIES)
+
+
+def apply_app_font(app=None) -> dict[str, str]:
+    """Re-resolve the font preference and re-apply the app stylesheet, live."""
+    from PySide6.QtWidgets import QApplication
+
+    from utils.styles import build_stylesheet
+
+    ACTIVE_FAMILIES.clear()
+    ACTIVE_FAMILIES.update(resolve_families())
+    target = app or QApplication.instance()
+    if target is not None:
+        target.setStyleSheet(build_stylesheet(ACTIVE_FAMILIES))
+    return ACTIVE_FAMILIES
+
+
 def family(role: str) -> str:
     """QSS font-family stack for a role ('display'/'marker'/'type'/'body')."""
-    return FAMILIES.get(role, "sans-serif")
+    stack = ACTIVE_FAMILIES.get(role) or FAMILIES.get(role)
+    return stack or "sans-serif"
+
+
+def primary_family(role: str) -> str:
+    """First family name (unquoted) of the active stack — for QFont() consumers."""
+    stack = family(role)
+    m = re.match(r'\s*"([^"]+)"', stack)
+    return m.group(1) if m else stack.split(",")[0].strip()
