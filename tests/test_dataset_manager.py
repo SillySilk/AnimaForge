@@ -172,6 +172,50 @@ def test_fill_empty_captions_noop_without_trigger(tmp_path):
     assert not (tmp_path / "a.txt").exists()
 
 
+# ---- undersized-image guard (bucketing division-by-zero, pre-training) ----
+
+def _png(tmp_path, name, w, h):
+    from PIL import Image
+    p = tmp_path / name
+    Image.new("RGB", (w, h), (128, 128, 128)).save(p)
+    return p
+
+
+def test_find_undersized_images_flags_short_side_under_step(tmp_path):
+    # A side < bucket_reso_steps (64) makes kohya floor that dim to 0 and then
+    # divide by it -> "division by zero" when aspect-ratio bucketing is on.
+    from core.dataset_manager import find_undersized_images
+    _png(tmp_path, "tiny.png", 48, 48)     # both sides too small
+    _png(tmp_path, "strip.png", 1024, 40)  # thin banner: short side 40
+    _png(tmp_path, "edge_ok.png", 64, 900)  # exactly 64 -> safe
+    _png(tmp_path, "good.png", 896, 1152)  # normal
+    (tmp_path / "notes.txt").write_text("stray", encoding="utf-8")
+
+    found = find_undersized_images(str(tmp_path))
+    # returns (path, width, height), sorted by filename, only the offenders
+    assert [(Path(p).name, w, h) for p, w, h in found] == [
+        ("strip.png", 1024, 40),
+        ("tiny.png", 48, 48),
+    ]
+
+
+def test_find_undersized_images_boundary_and_param(tmp_path):
+    from core.dataset_manager import find_undersized_images
+    _png(tmp_path, "at_64.png", 64, 200)   # == step: safe
+    _png(tmp_path, "below.png", 63, 200)   # one under: flagged
+    names = lambda res: [Path(p).name for p, _, _ in res]
+    assert names(find_undersized_images(str(tmp_path))) == ["below.png"]
+    # honors a custom minimum
+    assert names(find_undersized_images(str(tmp_path), min_side=128)) == [
+        "at_64.png", "below.png",
+    ]
+
+
+def test_find_undersized_images_missing_dir(tmp_path):
+    from core.dataset_manager import find_undersized_images
+    assert find_undersized_images(str(tmp_path / "nope")) == []
+
+
 def test_duplicate_stem_names_flags_extension_twins():
     from core.dataset_manager import duplicate_stem_names
     dupes = duplicate_stem_names([

@@ -270,6 +270,41 @@ def fill_empty_captions(folder_path: str, trigger_word: str) -> int:
     return written
 
 
+def find_undersized_images(folder_path: str, min_side: int = 64) -> list:
+    """Images with a side smaller than ``min_side`` px — they break bucketing.
+
+    With aspect-ratio bucketing on (``bucket_no_upscale``), sd-scripts floors each
+    bucket dimension to a multiple of ``bucket_reso_steps`` (64). Any image whose
+    short side is under that floors to 0, and the next line divides by it →
+    ``ZeroDivisionError: division by zero``, which kills the run at dataset-prep time
+    with a bare exit code 1. A stray thumbnail/icon or a thin strip is the usual
+    culprit. Callers gate a bucketed run on this and name the offenders.
+
+    Returns ``[(path, width, height), ...]`` sorted by filename; unreadable images
+    are skipped (a corrupt image is a different failure). ``[]`` if the folder is
+    missing. (An image whose short side is >= min_side but which is huge with an
+    extreme aspect ratio can still trip the same math; that needs ~256:1 and is left
+    to the trainer's own error.)
+    """
+    from PIL import Image
+
+    folder = Path(folder_path)
+    if not folder.is_dir():
+        return []
+    undersized = []
+    for f in sorted(folder.iterdir(), key=lambda f: f.name.lower()):
+        if not (f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS):
+            continue
+        try:
+            with Image.open(f) as im:
+                w, h = im.size
+        except Exception:
+            continue  # unreadable/corrupt — not this guard's job
+        if min(w, h) < min_side:
+            undersized.append((str(f), w, h))
+    return undersized
+
+
 def latest_files(folder_path: str, n: int = 6) -> list:
     """Return image paths in a folder, newest by mtime first. Up to n, or all if n is None.
     [] if folder missing."""

@@ -160,6 +160,19 @@ class BatchRunner(QObject):
                 prompts=resolve_sample_prompts(run)))
             from core import lowvram
             lv = lowvram.get_current() or {}  # active only if acknowledged this session
+            # Aspect-ratio bucketing divides by zero on images with a side under 64 px
+            # (sd-scripts floors the bucket to a multiple of 64). Drop bucketing for this
+            # run rather than let it die at exit code 1 mid-queue.
+            enable_bucket = run.enable_bucket
+            if enable_bucket:
+                from core.dataset_manager import find_undersized_images
+                small = find_undersized_images(run.dataset_folder)
+                if small:
+                    enable_bucket = False
+                    self.log_line.emit(
+                        f"[Batch] bucketing disabled for '{run.lora_name}': {len(small)} "
+                        "image(s) have a side under 64 px (would crash bucketing) — "
+                        "center-cropping instead.")
             cfg, _ = generate_configs(
                 output_dir=run_dir,
                 micro_batch=lv.get("micro_batch"),
@@ -178,7 +191,7 @@ class BatchRunner(QObject):
                 network_dim=run.network_dim,
                 network_alpha=run.network_alpha,
                 train_text_encoder=run.train_text_encoder,
-                enable_bucket=run.enable_bucket,
+                enable_bucket=enable_bucket,
                 save_state=run.save_state,
                 save_every_n_steps=run.save_every_n_steps,
                 network_weights=(run.network_weights or None),

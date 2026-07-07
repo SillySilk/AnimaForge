@@ -1569,6 +1569,9 @@ class TrainTab(QWidget):
         if not self._check_empty_captions(interactive=confirm):
             return
 
+        if not self._check_undersized_images(interactive=confirm):
+            return
+
         if confirm and not self._confirm_preflight():
             return
 
@@ -1670,6 +1673,53 @@ class TrainTab(QWidget):
             n = dataset_manager.fill_empty_captions(self._dataset_path, trigger)
             self.status_message.emit(
                 f"Filled {n} empty caption(s) with the trigger word “{trigger}”.")
+        return True
+
+    def _check_undersized_images(self, interactive: bool = True) -> bool:
+        """Guard against images with a side under 64 px, which make aspect-ratio
+        bucketing divide by zero and kill the run at exit code 1 during dataset prep.
+
+        Only relevant when bucketing is on (bucketing-off center-crops and never hits
+        the zero-division path). Interactive: name the offenders and offer a one-click
+        "turn bucketing off and continue", or cancel to fix the dataset. Unattended:
+        auto-disable bucketing so a walk-away run still produces a LoRA. Returns True
+        to proceed with the run.
+        """
+        if not self._bucket_check.isChecked():
+            return True
+        from core import dataset_manager
+        small = dataset_manager.find_undersized_images(self._dataset_path)
+        if not small:
+            return True
+        listing = "\n".join(f"  • {Path(p).name} — {w}×{h}" for p, w, h in small[:8])
+        if len(small) > 8:
+            listing += f"\n  • …and {len(small) - 8} more"
+        if not interactive:
+            self._bucket_check.setChecked(False)
+            self.status_message.emit(
+                f"Bucketing auto-disabled: {len(small)} image(s) under 64 px would crash it "
+                "— those will be center-cropped instead.")
+            return True
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle("Images Too Small for Bucketing")
+        box.setText(
+            f"{len(small)} image(s) have a side under 64 px, which makes aspect-ratio "
+            "bucketing fail with a “division by zero” error.")
+        box.setInformativeText(
+            "Bucketing can't build a bucket smaller than 64 px, so the run would stop "
+            "immediately (exit code 1).\n\n" + listing +
+            "\n\nTurn bucketing off (those images get center-cropped instead) and "
+            "continue, or cancel and remove/enlarge the small images first.")
+        box.addButton("Turn off bucketing & continue", QMessageBox.AcceptRole)
+        cancel_btn = box.addButton("Cancel", QMessageBox.RejectRole)
+        box.setDefaultButton(cancel_btn)
+        box.exec()
+        if box.clickedButton() is cancel_btn:
+            return False
+        self._bucket_check.setChecked(False)
+        self.status_message.emit(
+            "Bucketing turned off — small images will be center-cropped.")
         return True
 
     def _confirm_preflight(self) -> bool:
