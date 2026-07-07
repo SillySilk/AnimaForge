@@ -45,6 +45,23 @@ import test_home_run_split as m33
 import test_caption_progress as m34
 import test_dataset_tab_captioning as m35
 import test_batch_status as m36
+import test_headless as m37
+
+
+class MonkeyPatch:
+    """Just enough of pytest's monkeypatch fixture: setattr with undo."""
+
+    def __init__(self):
+        self._undo = []
+
+    def setattr(self, target, name, value):
+        self._undo.append((target, name, getattr(target, name)))
+        setattr(target, name, value)
+
+    def undo(self):
+        for target, name, old in reversed(self._undo):
+            setattr(target, name, old)
+        self._undo.clear()
 
 
 def run_module(mod):
@@ -55,24 +72,31 @@ def run_module(mod):
         if fn.__module__ != mod.__name__:
             continue
         params = inspect.signature(fn).parameters
+        kwargs = {}
+        mp = None
+        if "monkeypatch" in params:
+            mp = kwargs["monkeypatch"] = MonkeyPatch()
         try:
             if "tmp_path" in params:
                 with tempfile.TemporaryDirectory() as d:
-                    fn(Path(d))
+                    fn(Path(d), **kwargs)
             else:
-                fn()
+                fn(**kwargs)
             print(f"  PASS {mod.__name__}.{name}")
             passed += 1
         except Exception:
             print(f"  FAIL {mod.__name__}.{name}")
             traceback.print_exc()
             failed += 1
+        finally:
+            if mp is not None:
+                mp.undo()
     return passed, failed
 
 
 if __name__ == "__main__":
     total_p = total_f = 0
-    for mod in (m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m20, m21, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36):
+    for mod in (m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m20, m21, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37):
         print(f"== {mod.__name__} ==")
         p, f = run_module(mod)
         total_p += p

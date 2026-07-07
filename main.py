@@ -1,3 +1,4 @@
+import argparse
 import sys
 import os
 import warnings
@@ -8,14 +9,6 @@ warnings.filterwarnings("ignore", message=".*impl_abstract.*", category=FutureWa
 # Ensure the project root is on the Python path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from PySide6.QtWidgets import QApplication
-from PySide6.QtGui import QIcon
-from PySide6.QtCore import Qt
-
-from utils.fonts import load_app_fonts
-from ui.main_window import MainWindow
-
-
 def build_app(argv=None):
     """Construct the QApplication and MainWindow exactly as the app boots — fonts,
     stylesheet, font preference, settings migration, icon — but do NOT show() or exec().
@@ -23,6 +16,14 @@ def build_app(argv=None):
     Returns (app, window). Shared by main() and tooling (e.g. scripts/capture_samples.py)
     so screenshots and headless drivers use the identical look the real app renders.
     """
+    # GUI-only imports live here so --run-batch (core.headless) never pays
+    # for, or depends on, the ui stack.
+    from PySide6.QtWidgets import QApplication
+    from PySide6.QtGui import QIcon
+
+    from utils.fonts import load_app_fonts
+    from ui.main_window import MainWindow
+
     # Enable high-DPI scaling on Windows
     os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
 
@@ -52,6 +53,17 @@ def build_app(argv=None):
 
 
 def main():
+    if "--run-batch" in sys.argv[1:]:
+        parser = argparse.ArgumentParser(prog="AnimaForge headless")
+        parser.add_argument("--run-batch", action="store_true")
+        parser.add_argument("--queue", default=None,
+                            help="queue file (default: batch_queue.json)")
+        parser.add_argument("--status", default=None,
+                            help="status file (default: <output dir>/batch_status.json)")
+        args = parser.parse_args()
+        from core.headless import run_headless
+        sys.exit(run_headless(args.queue, args.status))
+
     app, window = build_app()
     window.show()
     sys.exit(app.exec())
