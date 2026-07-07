@@ -28,7 +28,13 @@ def run_headless(queue_path: str | None = None, status_path: str | None = None) 
     runner = BatchRunner()
     writer = StatusWriter(runner, runs, status_path or default_status_path())
 
-    runner.log_line.connect(lambda line: print(line, flush=True))
+    def _safe_print(line: str) -> None:
+        # sd-scripts logs Japanese; a cp1252 console must never crash the
+        # passthrough (UnicodeEncodeError spam observed live 2026-07-07).
+        enc = getattr(sys.stdout, "encoding", None) or "utf-8"
+        print(line.encode(enc, errors="replace").decode(enc), flush=True)
+
+    runner.log_line.connect(_safe_print)
     runner.run_finished.connect(lambda _i, _ok: save_queue(queue_path, runs))
 
     done = {"flag": False}
