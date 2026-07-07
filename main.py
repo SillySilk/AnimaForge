@@ -16,11 +16,17 @@ from utils.fonts import load_app_fonts
 from ui.main_window import MainWindow
 
 
-def main():
+def build_app(argv=None):
+    """Construct the QApplication and MainWindow exactly as the app boots — fonts,
+    stylesheet, font preference, settings migration, icon — but do NOT show() or exec().
+
+    Returns (app, window). Shared by main() and tooling (e.g. scripts/capture_samples.py)
+    so screenshots and headless drivers use the identical look the real app renders.
+    """
     # Enable high-DPI scaling on Windows
     os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
 
-    app = QApplication(sys.argv)
+    app = QApplication(sys.argv if argv is None else argv)
     app.setApplicationName("AnimaForge")
     app.setApplicationDisplayName("Anima Forge LoRA Trainer")
     app.setOrganizationName("AnimaForge")
@@ -42,8 +48,12 @@ def main():
     apply_app_font(app)
 
     window = MainWindow()
-    window.show()
+    return app, window
 
+
+def main():
+    app, window = build_app()
+    window.show()
     sys.exit(app.exec())
 
 

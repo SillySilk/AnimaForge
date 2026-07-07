@@ -44,6 +44,11 @@ desktop.ini
 # Release tooling — private/dev only, never shipped to the public storefront
 publish-release.bat
 scripts/publish_release.py
+capture-samples.bat
+build-release.bat
+scripts/capture_samples.py
+scripts/build_release.py
+tests/test_capture_samples.py
 
 # ── Maintainer-only (kept local; not part of the public app) ───────
 .claude/
