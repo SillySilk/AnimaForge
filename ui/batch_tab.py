@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.batch import BatchRunner, save_queue, load_queue, RUNNING, DONE, FAILED
+from core.batch_status import StatusWriter, default_status_path
 
 QUEUE_PATH = str(Path(__file__).resolve().parents[1] / "batch_queue.json")
 
@@ -34,6 +35,10 @@ class BatchTab(QWidget):
         self._runner.run_finished.connect(self._on_run_finished)
         self._runner.batch_finished.connect(self._on_batch_finished)
         self._runner.log_line.connect(self._on_log)
+        # Side output for external supervisors (Comic Studio); GUI-run batches
+        # emit the same batch_status.json the headless runner does.
+        self._status_writer = StatusWriter(self._runner, self._runs,
+                                           default_status_path())
         self._build_ui()
         self._refresh_queue()
 
