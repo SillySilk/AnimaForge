@@ -18,7 +18,7 @@ def test_apply_run_definition_populates_widgets():
         lora_name="Demo", dataset_folder="C:/ds", image_count=7,
         optimizer="prodigy", learning_rate=0.0001, network_dim=24,
         network_alpha=12, target_steps=1500, sample_enabled=True,
-        sample_prompts=["x", "y"], sample_every=3, subject_type="style",
+        sample_prompts=["x", "y"], subject_type="style",
     )
     t = TrainTab()
     t.apply_run_definition(rd)
@@ -29,7 +29,6 @@ def test_apply_run_definition_populates_widgets():
     assert t._target_steps_spin.value() == 1500
     assert t._sample_enable_check.isChecked() is True
     assert t._sample_prompts_edit.toPlainText() == "x\ny"
-    assert t._sample_every_spin.value() == 3
     assert t._subject_combo.currentIndex() == 2
     assert t._train_text_encoder is False
 
@@ -156,8 +155,8 @@ def test_build_run_definition_fills_empty_prompts_from_captions(tmp_path: Path):
 
     rd, msg = t.build_run_definition()
     assert rd is not None, msg
-    # preview count (default 4) random verbatim captions from the dataset
-    assert len(rd.sample_prompts) == t._preview_count_spin.value() == 4
+    # preview count (hardwired SAMPLE_COUNT) random verbatim captions from the dataset
+    assert len(rd.sample_prompts) == 3
     assert all(p in {"a red fox in snow", "a knight at dusk", "a cat on a mat",
                      "a girl in a forest", "a ship at sea", "a tower under stars"}
                for p in rd.sample_prompts)

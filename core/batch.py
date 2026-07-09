@@ -43,8 +43,6 @@ class RunDefinition:
     # Full-restore extras (so a loaded set repopulates the Train tab exactly)
     sample_enabled: bool = False
     sample_prompts: list = field(default_factory=list)
-    sample_every: int = 1
-    sample_count: int = 4
     subject_type: str = ""
     # Environment
     sdscripts_path: str = ""
@@ -68,14 +66,15 @@ def resolve_sample_prompts(run: RunDefinition):
     """The sample prompts a queued run should actually render with.
 
     Prefer the run's own snapshot; when it's empty (e.g. the set was queued before the
-    dataset was captioned), draw `sample_count` random verbatim captions from the run's
+    dataset was captioned), draw SAMPLE_COUNT random verbatim captions from the run's
     dataset at execution time. Returns a list (possibly empty for a captionless dataset).
     """
     prompts = [p.strip() for p in (run.sample_prompts or []) if p and p.strip()]
     if prompts:
         return prompts
     from core.sample_prompts import grab_caption_blocks
-    return grab_caption_blocks(run.dataset_folder, run.sample_count or 4)
+    from core.settings import SAMPLE_COUNT
+    return grab_caption_blocks(run.dataset_folder, SAMPLE_COUNT)
 
 
 def save_queue(path: str, runs) -> None:

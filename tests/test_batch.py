@@ -24,14 +24,12 @@ def test_rundefinition_new_fields_default_and_roundtrip():
     rd = _rd()
     assert rd.sample_enabled is False
     assert rd.sample_prompts == []
-    assert rd.sample_every == 1
     assert rd.subject_type == ""
     rd2 = _rd(sample_enabled=True, sample_prompts=["a", "b"],
-              sample_every=3, subject_type="character")
+              subject_type="character")
     back = RunDefinition.from_dict(rd2.to_dict())
     assert back.sample_enabled is True
     assert back.sample_prompts == ["a", "b"]
-    assert back.sample_every == 3
     assert back.subject_type == "character"
 
 
@@ -54,13 +52,15 @@ def test_load_missing_returns_empty(tmp_path):
     assert load_queue(str(tmp_path / "nope.json")) == []
 
 
-def test_run_definition_sample_count_roundtrip():
-    from core.batch import RunDefinition
-    rd = RunDefinition(lora_name="x", dataset_folder="d", image_count=5, sample_count=7)
-    rd2 = RunDefinition.from_dict(rd.to_dict())
-    assert rd2.sample_count == 7
-    # old sets without the key default to 4
-    assert RunDefinition.from_dict({"lora_name": "y", "dataset_folder": "d", "image_count": 1}).sample_count == 4
+def test_run_definition_drops_legacy_sample_keys():
+    """Old sets/*.json carry sample_every: 2 and sample_count: 4. Both are dropped."""
+    rd = RunDefinition.from_dict({
+        "lora_name": "y", "dataset_folder": "d", "image_count": 1,
+        "sample_every": 2, "sample_count": 4,
+    })
+    assert not hasattr(rd, "sample_every")
+    assert not hasattr(rd, "sample_count")
+    assert "sample_every" not in rd.to_dict()
 
 
 def test_resolve_sample_prompts_prefers_snapshot():

@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.config_generator import generate_configs, get_config_summary
+from core.settings import SAMPLE_COUNT, SAMPLE_EVERY_N_EPOCHS
 from core.step_calculator import (
     calculate_training_params,
     format_calculation_string,
@@ -337,9 +338,6 @@ class TrainTab(QWidget):
         self._ckpt_steps_spin.setValue(app_settings.get("save_every_n_steps"))
         self._sample_enable_check.setChecked(app_settings.get("sample_enable"))
         self._sample_prompts_edit.setPlainText(app_settings.get("sample_prompts"))
-        self._sample_every_spin.setValue(app_settings.get("sample_every_n_epochs"))
-        self._preview_count_spin.setValue(app_settings.get("sample_count"))
-        self._update_gen_button_label()
         # Persist edits back to settings (connected after load so loading doesn't write)
         a = app_settings
         self._ckpt_steps_spin.valueChanged.connect(lambda v: a.set("save_every_n_steps", v))
@@ -347,8 +345,6 @@ class TrainTab(QWidget):
         self._sample_enable_check.toggled.connect(self._update_sample_schedule)
         self._sample_prompts_edit.textChanged.connect(
             lambda: a.set("sample_prompts", self._sample_prompts_edit.toPlainText()))
-        self._sample_every_spin.valueChanged.connect(lambda v: a.set("sample_every_n_epochs", v))
-        self._preview_count_spin.valueChanged.connect(lambda v: a.set("sample_count", v))
         self._update_sample_schedule()
 
     def set_lmstudio_config(self, url: str, model: str):
@@ -635,16 +631,10 @@ class TrainTab(QWidget):
         sample_layout.addWidget(self._sample_prompts_edit)
 
         sample_btn_row = QHBoxLayout()
-        sample_btn_row.addWidget(QLabel("Preview images:"))
-        # Hard-gated at 4 — the preview grid is a fixed 4-wide row per epoch (two rows shown).
-        self._preview_count_spin = QSpinBox()
-        self._preview_count_spin.setRange(4, 4)
-        self._preview_count_spin.setValue(4)
-        self._preview_count_spin.setEnabled(False)
-        self._preview_count_spin.setToolTip("Fixed at 4 — one row of four preview images per epoch.")
-        self._preview_count_spin.valueChanged.connect(self._update_gen_button_label)
-        sample_btn_row.addWidget(self._preview_count_spin)
-        self._gen_prompts_btn = QPushButton("🎲 Grab 4 random captions")
+        count_lbl = QLabel(f"{SAMPLE_COUNT} preview images per epoch.")
+        count_lbl.setStyleSheet("color: #8a8a93; font-size: 11px;")
+        sample_btn_row.addWidget(count_lbl)
+        self._gen_prompts_btn = QPushButton(f"🎲 Grab {SAMPLE_COUNT} random captions")
         self._gen_prompts_btn.setToolTip(
             "Fill the box with that many of the dataset's actual captions, chosen at random, "
             "so previews render from prompts that look exactly like the training data. "
@@ -654,17 +644,6 @@ class TrainTab(QWidget):
         sample_btn_row.addWidget(self._gen_prompts_btn)
         sample_btn_row.addStretch()
         sample_layout.addLayout(sample_btn_row)
-
-        every_row = QHBoxLayout()
-        every_row.addWidget(QLabel("Render every"))
-        self._sample_every_spin = QSpinBox()
-        self._sample_every_spin.setRange(1, 50)
-        self._sample_every_spin.setValue(1)
-        self._sample_every_spin.valueChanged.connect(self._update_sample_schedule)
-        every_row.addWidget(self._sample_every_spin)
-        every_row.addWidget(QLabel("epoch(s)"))
-        every_row.addStretch()
-        sample_layout.addLayout(every_row)
 
         # Step calculator
         calc_grp = QGroupBox("Step Calculator")
@@ -1129,8 +1108,6 @@ class TrainTab(QWidget):
             embed_metadata=self._metadata_check.isChecked(),
             sample_enabled=self._sample_enable_check.isChecked(),
             sample_prompts=[ln for ln in self._sample_prompts_edit.toPlainText().splitlines() if ln.strip()],
-            sample_every=self._sample_every_spin.value(),
-            sample_count=self._preview_count_spin.value(),
             subject_type=self._lora_type_for_subject(),
             sdscripts_path=self._setup_path,
             dit_path=self._dit_path,
@@ -1156,9 +1133,6 @@ class TrainTab(QWidget):
         self._metadata_check.setChecked(rd.embed_metadata)
         self._sample_enable_check.setChecked(rd.sample_enabled)
         self._sample_prompts_edit.setPlainText("\n".join(rd.sample_prompts or []))
-        self._sample_every_spin.setValue(rd.sample_every or 1)
-        self._preview_count_spin.setValue(getattr(rd, "sample_count", 4) or 4)
-        self._update_gen_button_label()
         idx = {"character": 0, "concept": 1, "style": 2}.get(rd.subject_type, 0)
         self._subject_combo.setCurrentIndex(idx)
         # Internal dataset/trigger state used by config generation
@@ -1343,7 +1317,7 @@ class TrainTab(QWidget):
     def _fill_sample_prompts(self, folder_path: str):
         """Drop N random verbatim caption blocks (N = preview count) into the box."""
         from core.sample_prompts import grab_caption_blocks
-        n = self._preview_count_spin.value()
+        n = SAMPLE_COUNT
         blocks = grab_caption_blocks(folder_path, n)
         if not blocks:
             return
@@ -1385,10 +1359,6 @@ class TrainTab(QWidget):
             return
         self._fill_sample_prompts(self._dataset_path)
 
-    def _update_gen_button_label(self, *_):
-        self._gen_prompts_btn.setText(
-            f"🎲 Grab {self._preview_count_spin.value()} random captions")
-
     def _dataset_style_anchor(self):
         """The style activation word (@-anchor) for the loaded dataset, if any."""
         if not self._dataset_path:
@@ -1407,7 +1377,7 @@ class TrainTab(QWidget):
         epochs = params.get("epochs", 0)
         if not epochs or not self._sample_enable_check.isChecked():
             return []
-        every = max(1, self._sample_every_spin.value())
+        every = SAMPLE_EVERY_N_EPOCHS
         fractions = []
         if self._app_settings and self._app_settings.get("sample_at_first"):
             fractions.append((0.0, 0))
@@ -1742,8 +1712,7 @@ class TrainTab(QWidget):
         previews = f"{Path(run_dir) / 'sample'}"
         if self._app_settings is not None:
             if self._app_settings.get("sample_enable"):
-                every = self._app_settings.get("sample_every_n_epochs")
-                previews += "  (every epoch)" if every <= 1 else f"  (every {every} epochs)"
+                previews += "  (every epoch)"
             else:
                 previews += "  (disabled)"
         info = (
