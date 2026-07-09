@@ -705,11 +705,17 @@ class MainWindow(QMainWindow):
             self._status_bar.showMessage("Quick Run: captioning dataset…")
             if not self._dataset_tab.start_auto_caption():
                 self._qr_phases = []
-                self._home_tab.apply_run_progress({"kind": "error", "label": "Caption error"})
-                QMessageBox.warning(
-                    self, "Cannot caption",
-                    "Could not start captioning. Check the sd-scripts path (Settings) and "
-                    "that the dataset folder has images.")
+                if self._dataset_tab.start_cancelled_by_user():
+                    # The user clicked Cancel in the existing-captions dialog — not an
+                    # error, so no popup and no "Caption error" label.
+                    self._home_tab.apply_run_progress({"kind": "reset"})
+                    self._status_bar.showMessage("Quick Run: captioning cancelled.")
+                else:
+                    self._home_tab.apply_run_progress({"kind": "error", "label": "Caption error"})
+                    QMessageBox.warning(
+                        self, "Cannot caption",
+                        "Could not start captioning. Check the sd-scripts path (Settings) and "
+                        "that the dataset folder has images.")
             # else: wait for auto_caption_finished → _qr_caption_done
         elif phase == quick_run.TRAIN:
             self._qr_phases.pop(0)

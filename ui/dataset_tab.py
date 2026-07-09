@@ -37,7 +37,7 @@ from core.dataset_manager import (
 from core.tagger import TaggerProcess
 from core.joycaption import JoyCaptionProcess
 from core.llm_refine import LLMRefineProcess
-from core.settings import SETTINGS_ORG, SETTINGS_APP
+from core.settings import SETTINGS_ORG, SETTINGS_APP, AppSettings
 from ui.image_editor import ImageEditorDialog
 
 # (display label, repo_id, use_onnx)
@@ -78,6 +78,21 @@ def read_tagger_defaults():
         s.value("tagger_threshold", 0.35, type=float),
         s.value("tagger_overwrite", False, type=bool),
     )
+
+
+def conflict_text(state) -> str:
+    """The warning line for a folder that already holds captions. Pure — no Qt.
+
+    `state.foreign` sharpens the wording only when it is non-zero: when every
+    existing caption is AnimaForge's own work (foreign == 0), "not written by
+    AnimaForge" would be alarmist and wrong.
+    """
+    n = len(state.captioned)
+    todo = len(state.partial) + len(state.untouched)
+    lead = f"⚠ {n} image{'s' if n != 1 else ''} already have captions"
+    if state.foreign:
+        lead += f" — {state.foreign} of them were not written by AnimaForge"
+    return f"{lead}.\nRunning will overwrite them. Keeping them captions {todo} instead."
 
 
 class CaptionEdit(QTextEdit):
@@ -368,6 +383,7 @@ class DatasetTab(QWidget):
         self._runner.stage_done.connect(self._on_stage_done)
         self._runner.finished.connect(self._on_caption_finished)
         self._auto_mode = False   # True while the Home pipeline runs the chain headless
+        self._start_cancelled = False  # True when the user cancelled the conflict dialog
         self._active_chain = None  # job.chain of the in-flight runner run -> phase_text()
         self._build_ui()
         self._load_llm_prefs()
@@ -1070,6 +1086,7 @@ class DatasetTab(QWidget):
         QMessageBox.information(self, "Combine Complete", summary)
 
     def _process_clicked(self):
+        self._start_cancelled = False
         if not self._dataset_ready():
             return
         if not self._sdscripts_path:
@@ -1079,32 +1096,47 @@ class DatasetTab(QWidget):
             QMessageBox.information(self, "Busy", "A captioning process is already running.")
             return
         chain = self._build_process_chain()
-        box = QMessageBox(self)
-        box.setWindowTitle("Run all steps")
-        box.setIcon(QMessageBox.Question)
-        box.setText(
+        header = (
             f"Run all {len(chain)} steps on {len(self._image_data)} images?\n\n"
             f"{self._chain_arrow_text(chain)}\n(using your saved settings)"
         )
-        box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-        box.setDefaultButton(QMessageBox.Yes)
-        if box.exec() != QMessageBox.Yes:
-            return
-        # OVERWRITE == what the chain has always done: it rewrites every .txt. A later
-        # task swaps this literal for a Keep/Overwrite/Ask resolution.
+        state = cp.scan(self._folder_path)
+        if cp.has_conflict(state) and AppSettings().get("caption_existing_policy") == cp.ASK:
+            # Fold the existing-captions warning into this same confirm instead of
+            # stacking a second dialog on top of it — _resolve_policy's dialog IS the
+            # "run all N steps?" confirm when there is something at risk to decide.
+            policy = self._resolve_policy(header)
+            if policy is None:
+                return
+        else:
+            box = QMessageBox(self)
+            box.setWindowTitle("Run all steps")
+            box.setIcon(QMessageBox.Question)
+            box.setText(header)
+            box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            box.setDefaultButton(QMessageBox.Yes)
+            if box.exec() != QMessageBox.Yes:
+                return
+            policy = self._resolve_policy()   # no conflict, or already decided — silent
         self._auto_mode = False
-        self._start_runner_or_warn(self._build_caption_job(cp.OVERWRITE))
+        self._start_runner_or_warn(self._build_caption_job(policy))
 
     def start_auto_caption(self) -> bool:
         """Headless Process run for the Home pipeline — no confirm dialog, no completion
         popup. Emits auto_caption_finished(success) when the chain ends. Returns False
-        if it could not start (caller should surface its own error)."""
+        if it could not start (caller should surface its own error) or if the user
+        cancelled the existing-captions dialog — start_cancelled_by_user() tells the two
+        apart so the caller doesn't misreport a cancel as a real failure."""
+        self._start_cancelled = False
         if not self._folder_path or len(self._image_data) == 0 or not self._sdscripts_path:
             return False
         if self._captioning_busy():
             return False
+        policy = self._resolve_policy()
+        if policy is None:
+            return False   # user cancelled; start_cancelled_by_user() now True
         self._auto_mode = True
-        return self._start_runner_or_warn(self._build_caption_job(cp.OVERWRITE))
+        return self._start_runner_or_warn(self._build_caption_job(policy))
 
     def _captioning_busy(self) -> bool:
         """True if any caption engine is live — the runner chain OR a manual step button.
@@ -1112,6 +1144,58 @@ class DatasetTab(QWidget):
         own for the chain); both must be idle before a new run starts."""
         return (self._runner.is_running() or self._llm.is_running()
                 or self._joycaption.is_running() or self._tagger.is_running())
+
+    def _resolve_policy(self, header: str = ""):
+        """The policy this run should use — OVERWRITE or KEEP — or None if the user
+        cancelled. Shows the existing-captions dialog only when the saved setting is
+        ASK *and* the scan finds captions already on disk to protect; otherwise resolves
+        silently (no dialog).
+
+        `header`, when given, is folded into the SAME dialog as a preamble (the manual
+        Process button's "Run all N steps?" question) rather than stacking a second
+        confirm — pass nothing for the headless Home pipeline, which never asked that
+        question in the first place.
+        """
+        state = cp.scan(self._folder_path)
+        if not cp.has_conflict(state):
+            return cp.OVERWRITE          # nothing to destroy; do the full chain
+        app = AppSettings()
+        policy = app.get("caption_existing_policy")
+        if policy != cp.ASK:
+            return policy
+        box = QMessageBox(self)
+        box.setWindowTitle("Existing captions found")
+        box.setIcon(QMessageBox.Warning)
+        text = conflict_text(state)
+        box.setText(f"{header}\n\n{text}" if header else text)
+        keep_btn = box.addButton(
+            f"Keep existing (caption {len(state.partial) + len(state.untouched)})",
+            QMessageBox.AcceptRole)
+        over_btn = box.addButton(f"Overwrite all {state.total}", QMessageBox.DestructiveRole)
+        box.addButton("Cancel", QMessageBox.RejectRole)
+        remember = QCheckBox("Remember my choice")
+        box.setCheckBox(remember)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is keep_btn:
+            chosen = cp.KEEP
+        elif clicked is over_btn:
+            chosen = cp.OVERWRITE
+        else:
+            self._start_cancelled = True
+            return None
+        if remember.isChecked():
+            app.set("caption_existing_policy", chosen)
+        return chosen
+
+    def start_cancelled_by_user(self) -> bool:
+        """True when the most recent start attempt (_process_clicked or
+        start_auto_caption) ended because the user clicked Cancel in the
+        existing-captions dialog, as opposed to a genuine refusal (busy, no
+        sd-scripts path, empty dataset). Read by main_window._qr_advance so it can
+        tell an honest cancel apart from a real error on start_auto_caption() -> False.
+        """
+        return self._start_cancelled
 
     def _build_caption_job(self, policy: str) -> CaptionJob:
         """Snapshot the live per-run settings into a headless CaptionJob for the runner.

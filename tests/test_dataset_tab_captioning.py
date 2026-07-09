@@ -271,3 +271,263 @@ def test_delete_button_on_thumbnail_and_double_badge():
     assert "aria_03.jpg" in c._dup_badge.toolTip()
     c.mark_duplicate([])
     assert c._dup_badge.isHidden()
+
+
+# ----------------------------------------------------------------------------
+# Task 6: existing-captions conflict resolution (conflict_text + _resolve_policy)
+# ----------------------------------------------------------------------------
+
+def test_conflict_text_names_foreign_captions():
+    from ui.dataset_tab import conflict_text
+    from core.caption_policy import FolderCaptionState
+    st = FolderCaptionState(total=80, captioned=["a"] * 47, partial=[],
+                            untouched=["u"] * 33, foreign=47)
+    msg = conflict_text(st)
+    assert "47" in msg
+    assert "not written by AnimaForge" in msg
+
+
+def test_conflict_text_omits_foreign_wording_when_captions_are_ours():
+    from ui.dataset_tab import conflict_text
+    from core.caption_policy import FolderCaptionState
+    st = FolderCaptionState(total=80, captioned=["a"] * 47, partial=[],
+                            untouched=["u"] * 33, foreign=0)
+    msg = conflict_text(st)
+    assert "47" in msg
+    assert "not written by AnimaForge" not in msg
+
+
+def _write_conflicting_folder(tmp_path):
+    """A folder with one already-captioned image and one untouched image —
+    enough to trip cp.has_conflict() while still exercising the Keep-count wording."""
+    (tmp_path / "a.png").write_bytes(b"x")
+    (tmp_path / "a.txt").write_text("an existing caption", encoding="utf-8")
+    (tmp_path / "b.png").write_bytes(b"x")
+
+
+def _button_with_role(box, role):
+    for b in box.buttons():
+        if box.buttonRole(b) == role:
+            return b
+    raise AssertionError(f"no button with role {role!r} on this QMessageBox")
+
+
+def _fake_exec_clicking(role, remember=False):
+    """A QMessageBox.exec replacement: instead of blocking on a real modal loop,
+    it programmatically clicks the button with the given role (optionally ticking
+    the 'Remember my choice' checkbox first) so _resolve_policy's post-exec()
+    box.clickedButton() read reflects that choice — no real event loop needed."""
+    def _exec(self):
+        if remember:
+            cb = self.checkBox()
+            assert cb is not None, "no 'Remember my choice' checkbox on this box"
+            cb.setChecked(True)
+        _button_with_role(self, role).click()
+        return None
+    return _exec
+
+
+def test_resolve_policy_no_conflict_returns_overwrite_without_dialog(tmp_path, monkeypatch):
+    import ui.dataset_tab as dt_mod
+    from core import caption_policy as cp
+
+    def _boom(self):
+        raise AssertionError("dialog must not be shown when there is no conflict")
+    monkeypatch.setattr(dt_mod.QMessageBox, "exec", _boom)
+
+    t = dt_mod.DatasetTab()
+    t._folder_path = str(tmp_path)   # empty folder -> nothing captioned -> no conflict
+    assert t._resolve_policy() == cp.OVERWRITE
+
+
+def test_resolve_policy_conflict_with_keep_setting_returns_keep_without_dialog(tmp_path, monkeypatch):
+    import ui.dataset_tab as dt_mod
+    from core import caption_policy as cp
+    from core.settings import AppSettings
+    _write_conflicting_folder(tmp_path)
+
+    def _boom(self):
+        raise AssertionError("dialog must not be shown when the policy is already decided")
+    monkeypatch.setattr(dt_mod.QMessageBox, "exec", _boom)
+
+    app = AppSettings()
+    prev = app.get("caption_existing_policy")
+    try:
+        app.set("caption_existing_policy", cp.KEEP)
+        t = dt_mod.DatasetTab()
+        t._folder_path = str(tmp_path)
+        assert t._resolve_policy() == cp.KEEP
+    finally:
+        app.set("caption_existing_policy", prev)
+
+
+def test_resolve_policy_conflict_ask_keep_button_returns_keep(tmp_path, monkeypatch):
+    import ui.dataset_tab as dt_mod
+    from core import caption_policy as cp
+    from core.settings import AppSettings
+    _write_conflicting_folder(tmp_path)
+    monkeypatch.setattr(dt_mod.QMessageBox, "exec",
+                        _fake_exec_clicking(dt_mod.QMessageBox.AcceptRole))
+
+    app = AppSettings()
+    prev = app.get("caption_existing_policy")
+    try:
+        app.set("caption_existing_policy", cp.ASK)
+        t = dt_mod.DatasetTab()
+        t._folder_path = str(tmp_path)
+        assert t._resolve_policy() == cp.KEEP
+        assert t.start_cancelled_by_user() is False
+    finally:
+        app.set("caption_existing_policy", prev)
+
+
+def test_resolve_policy_conflict_ask_overwrite_button_returns_overwrite(tmp_path, monkeypatch):
+    import ui.dataset_tab as dt_mod
+    from core import caption_policy as cp
+    from core.settings import AppSettings
+    _write_conflicting_folder(tmp_path)
+    monkeypatch.setattr(dt_mod.QMessageBox, "exec",
+                        _fake_exec_clicking(dt_mod.QMessageBox.DestructiveRole))
+
+    app = AppSettings()
+    prev = app.get("caption_existing_policy")
+    try:
+        app.set("caption_existing_policy", cp.ASK)
+        t = dt_mod.DatasetTab()
+        t._folder_path = str(tmp_path)
+        assert t._resolve_policy() == cp.OVERWRITE
+        assert t.start_cancelled_by_user() is False
+    finally:
+        app.set("caption_existing_policy", prev)
+
+
+def test_resolve_policy_conflict_ask_cancel_returns_none(tmp_path, monkeypatch):
+    import ui.dataset_tab as dt_mod
+    from core import caption_policy as cp
+    from core.settings import AppSettings
+    _write_conflicting_folder(tmp_path)
+    monkeypatch.setattr(dt_mod.QMessageBox, "exec",
+                        _fake_exec_clicking(dt_mod.QMessageBox.RejectRole))
+
+    app = AppSettings()
+    prev = app.get("caption_existing_policy")
+    try:
+        app.set("caption_existing_policy", cp.ASK)
+        t = dt_mod.DatasetTab()
+        t._folder_path = str(tmp_path)
+        assert t._resolve_policy() is None
+        assert t.start_cancelled_by_user() is True
+    finally:
+        app.set("caption_existing_policy", prev)
+
+
+def test_resolve_policy_remember_choice_writes_setting(tmp_path, monkeypatch):
+    import ui.dataset_tab as dt_mod
+    from core import caption_policy as cp
+    from core.settings import AppSettings
+    _write_conflicting_folder(tmp_path)
+    monkeypatch.setattr(dt_mod.QMessageBox, "exec",
+                        _fake_exec_clicking(dt_mod.QMessageBox.DestructiveRole, remember=True))
+
+    app = AppSettings()
+    prev = app.get("caption_existing_policy")
+    try:
+        app.set("caption_existing_policy", cp.ASK)
+        t = dt_mod.DatasetTab()
+        t._folder_path = str(tmp_path)
+        assert t._resolve_policy() == cp.OVERWRITE
+        assert AppSettings().get("caption_existing_policy") == cp.OVERWRITE
+    finally:
+        app.set("caption_existing_policy", prev)
+
+
+def test_resolve_policy_unchecked_remember_does_not_write_setting(tmp_path, monkeypatch):
+    import ui.dataset_tab as dt_mod
+    from core import caption_policy as cp
+    from core.settings import AppSettings
+    _write_conflicting_folder(tmp_path)
+    monkeypatch.setattr(dt_mod.QMessageBox, "exec",
+                        _fake_exec_clicking(dt_mod.QMessageBox.DestructiveRole, remember=False))
+
+    app = AppSettings()
+    prev = app.get("caption_existing_policy")
+    try:
+        app.set("caption_existing_policy", cp.ASK)
+        t = dt_mod.DatasetTab()
+        t._folder_path = str(tmp_path)
+        assert t._resolve_policy() == cp.OVERWRITE
+        assert AppSettings().get("caption_existing_policy") == cp.ASK   # unchanged
+    finally:
+        app.set("caption_existing_policy", prev)
+
+
+def test_process_clicked_folds_conflict_into_one_dialog_not_two(tmp_path, monkeypatch):
+    # The core "fold, don't stack" requirement: a conflict+ASK run shows exactly one
+    # QMessageBox.exec() call (Keep/Overwrite/Cancel), never a separate plain
+    # "Run all N steps?" confirm shown first or after.
+    import ui.dataset_tab as dt_mod
+    from core import caption_policy as cp
+    from core.settings import AppSettings
+    _write_conflicting_folder(tmp_path)
+
+    exec_calls = []
+
+    def _fake_exec(self):
+        exec_calls.append(self)
+        _button_with_role(self, dt_mod.QMessageBox.RejectRole).click()
+        return None
+    monkeypatch.setattr(dt_mod.QMessageBox, "exec", _fake_exec)
+
+    app = AppSettings()
+    prev = app.get("caption_existing_policy")
+    try:
+        app.set("caption_existing_policy", cp.ASK)
+        t = dt_mod.DatasetTab()
+        t._folder_path = str(tmp_path)
+        t._sdscripts_path = "C:/sd"
+        t._image_data = [
+            {"image_path": str(tmp_path / "a.png"), "txt_path": str(tmp_path / "a.txt"), "caption": "an existing caption"},
+            {"image_path": str(tmp_path / "b.png"), "txt_path": str(tmp_path / "b.txt"), "caption": ""},
+        ]
+        started = []
+        monkeypatch.setattr(t, "_start_runner_or_warn", lambda job: started.append(job) or True)
+        t._process_clicked()
+        assert len(exec_calls) == 1     # exactly one dialog, not stacked
+        assert started == []            # Cancel -> nothing started
+        assert t._auto_mode is False
+    finally:
+        app.set("caption_existing_policy", prev)
+
+
+def test_start_auto_caption_cancelled_returns_false_and_sets_flag(tmp_path, monkeypatch):
+    import ui.dataset_tab as dt_mod
+    from core import caption_policy as cp
+    from core.settings import AppSettings
+    _write_conflicting_folder(tmp_path)
+    monkeypatch.setattr(dt_mod.QMessageBox, "exec",
+                        _fake_exec_clicking(dt_mod.QMessageBox.RejectRole))
+
+    app = AppSettings()
+    prev = app.get("caption_existing_policy")
+    try:
+        app.set("caption_existing_policy", cp.ASK)
+        t = dt_mod.DatasetTab()
+        t._folder_path = str(tmp_path)
+        t._sdscripts_path = "C:/sd"
+        t._image_data = [{"image_path": str(tmp_path / "a.png"),
+                           "txt_path": str(tmp_path / "a.txt"), "caption": "an existing caption"}]
+        assert t.start_auto_caption() is False
+        assert t.start_cancelled_by_user() is True
+    finally:
+        app.set("caption_existing_policy", prev)
+
+
+def test_start_auto_caption_genuine_refusal_leaves_cancelled_flag_false(tmp_path):
+    import ui.dataset_tab as dt_mod
+    t = dt_mod.DatasetTab()
+    t._folder_path = str(tmp_path)
+    t._sdscripts_path = ""   # no sd-scripts path configured -> genuine refusal, not a cancel
+    t._image_data = [{"image_path": str(tmp_path / "a.png"),
+                       "txt_path": str(tmp_path / "a.txt"), "caption": ""}]
+    assert t.start_auto_caption() is False
+    assert t.start_cancelled_by_user() is False
