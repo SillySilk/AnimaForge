@@ -162,6 +162,99 @@ def test_captioned_milestone_fires_on_pre_combine_stage(tmp_path):
     assert stages == ["captioned"]      # combine itself does not re-emit
 
 
+def test_captioned_milestone_fires_on_refine_when_refine_is_in_the_chain(tmp_path):
+    # Finding 3: the refine-less chain test above happens to have "describe" as the
+    # pre-combine stage, so an implementation that hardcoded stage == "describe" would
+    # still pass it. Exercise the refine chain, where the pre-combine stage is "refine".
+    from ui.dataset_tab import DatasetTab
+    from core.caption_runner import CaptionJob
+    t = DatasetTab()
+    t._folder_path = str(tmp_path)
+    t._runner._job = CaptionJob(
+        dataset_folder=str(tmp_path), sdscripts_path="C:/sd",
+        chain=["tag", "describe", "refine", "combine"])
+    stages = []
+    t.caption_stage_done.connect(stages.append)
+    t._runner.stage_done.emit("tag")
+    assert stages == []
+    t._runner.stage_done.emit("describe")
+    assert stages == []             # describe is NOT pre-combine here -- refine is
+    t._runner.stage_done.emit("refine")
+    assert stages == ["captioned"]  # refine precedes combine -> milestone
+    t._runner.stage_done.emit("combine")
+    assert stages == ["captioned"]  # combine itself does not re-emit
+
+
+def test_full_chain_emits_stage_done_exactly_twice_in_order(tmp_path):
+    # End-to-end: a full successful chain fires caption_stage_done exactly twice,
+    # "captioned" then "processed" -- never more, never reordered.
+    from ui.dataset_tab import DatasetTab
+    from core.caption_runner import CaptionJob
+    t = DatasetTab()
+    t._folder_path = str(tmp_path)
+    t._auto_mode = True   # skip the "Process complete" QMessageBox popup
+    t._runner._job = CaptionJob(
+        dataset_folder=str(tmp_path), sdscripts_path="C:/sd",
+        chain=["tag", "describe", "combine"])
+    stages = []
+    t.caption_stage_done.connect(stages.append)
+    t._runner.stage_done.emit("tag")
+    t._runner.stage_done.emit("describe")
+    t._runner.stage_done.emit("combine")
+    t._runner.finished.emit(True)
+    assert stages == ["captioned", "processed"]
+
+
+def test_manual_describe_is_blocked_while_the_runner_chain_is_active(tmp_path, monkeypatch):
+    # Finding 1 (CRITICAL): CaptionRunner owns its own Tagger/JoyCaption/LLM processes, so
+    # the tab's own procs are idle during a chain. A guard that only checks the tab's procs
+    # would let a second JoyCaption launch against the same folder mid-chain.
+    import ui.dataset_tab as dt_mod
+    t = dt_mod.DatasetTab()
+    t._folder_path = str(tmp_path)
+    t._sdscripts_path = "C:/sd"
+    t._image_data = [{"image_path": str(tmp_path / "a.png"), "txt_path": str(tmp_path / "a.txt"),
+                       "caption": ""}]
+    monkeypatch.setattr(t._runner, "is_running", lambda: True)
+    monkeypatch.setattr(dt_mod.QMessageBox, "information", staticmethod(lambda *a, **k: None))
+    # Auto-accept the "Generate natural-language captions...?" confirmation so a guard hole
+    # actually reaches _start_describe() instead of silently stopping at the confirm dialog.
+    monkeypatch.setattr(dt_mod.QMessageBox, "exec", lambda self: dt_mod.QMessageBox.Yes)
+    launched = []
+    monkeypatch.setattr(t, "_start_describe", lambda: launched.append("describe"))
+    t._describe_joycaption()
+    assert launched == []          # blocked
+
+
+def test_manual_refine_is_blocked_while_the_runner_chain_is_active(tmp_path, monkeypatch):
+    import ui.dataset_tab as dt_mod
+    t = dt_mod.DatasetTab()
+    t._folder_path = str(tmp_path)
+    t._sdscripts_path = "C:/sd"
+    monkeypatch.setattr(t._runner, "is_running", lambda: True)
+    monkeypatch.setattr(dt_mod.QMessageBox, "information", staticmethod(lambda *a, **k: None))
+    launched = []
+    monkeypatch.setattr(t._llm, "start", lambda *a, **k: launched.append("refine"))
+    t._start_refine()
+    assert launched == []          # blocked
+
+
+def test_manual_tagger_dialog_is_blocked_while_the_runner_chain_is_active(tmp_path, monkeypatch):
+    import ui.dataset_tab as dt_mod
+    t = dt_mod.DatasetTab()
+    t._folder_path = str(tmp_path)
+    t._sdscripts_path = "C:/sd"
+    monkeypatch.setattr(t._runner, "is_running", lambda: True)
+    monkeypatch.setattr(dt_mod.QMessageBox, "information", staticmethod(lambda *a, **k: None))
+    # Auto-accept the "Auto-Tag with WD14 Tagger" config dialog so a guard hole actually
+    # reaches self._tagger.start(...) instead of silently stopping at the config dialog.
+    monkeypatch.setattr(dt_mod.QDialog, "exec", lambda self: dt_mod.QDialog.Accepted)
+    launched = []
+    monkeypatch.setattr(t._tagger, "start", lambda *a, **k: launched.append("tag"))
+    t._open_tagger_dialog()
+    assert launched == []          # blocked
+
+
 def test_delete_button_on_thumbnail_and_double_badge():
     c = _card()
     # trash can overlays the thumbnail (top-right), always visible

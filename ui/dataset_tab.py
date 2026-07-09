@@ -54,6 +54,9 @@ WORKFLOW_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif")
 
 PROCESS_STEPS = ["tag", "describe", "refine", "combine"]
 STEP_NAMES = {"tag": "Tag", "describe": "Describe", "refine": "Refine", "combine": "Combine"}
+# CaptionRunner.tick's phase string (see core/caption_progress.py::_PHASES) back to the
+# step key phase_text() expects.
+_PHASE_TO_STEP = {v: k for k, v in STEP_NAMES.items()}
 
 
 def phase_text(step_key: str, chain=None) -> str:
@@ -365,6 +368,7 @@ class DatasetTab(QWidget):
         self._runner.stage_done.connect(self._on_stage_done)
         self._runner.finished.connect(self._on_caption_finished)
         self._auto_mode = False   # True while the Home pipeline runs the chain headless
+        self._active_chain = None  # job.chain of the in-flight runner run -> phase_text()
         self._build_ui()
         self._load_llm_prefs()
         self._refresh_refine_reflection()
@@ -1143,9 +1147,16 @@ class DatasetTab(QWidget):
     def _begin_runner_ui(self):
         """Enter runner-chain mode: enable Stop, show live progress + log. Unlike
         _begin_caption there is NO whole-folder rebuild timer — combine is a runner stage
-        scoped to its own only= list, so a whole-folder combine here would double it."""
+        scoped to its own only= list, so a whole-folder combine here would double it.
+
+        Also disables the Individual-Steps buttons (belt and suspenders): the guards in
+        _describe_joycaption / _start_refine / _open_tagger_dialog already block a manual
+        launch via _captioning_busy(), but disabling the buttons keeps them from even being
+        clickable while the runner chain owns the folder."""
         self._caption_stopped = False
         self._stop_caption_btn.setEnabled(True)
+        for b in (self._autotag_btn, self._describe_btn, self._llm_btn, self._combine_btn):
+            b.setEnabled(False)
         self._caption_bar.setRange(0, 1)
         self._caption_bar.setValue(0)
         self._caption_file.setText("")
@@ -1156,8 +1167,14 @@ class DatasetTab(QWidget):
 
     def _end_runner_ui(self):
         """Leave runner-chain mode. No _rebuild_txt_from_sidecars() here — the runner has
-        already combined into .txt; a whole-folder rebuild is the double-combine hazard."""
+        already combined into .txt; a whole-folder rebuild is the double-combine hazard.
+
+        Called on every path out of a runner chain — success, mid-chain failure, and user
+        Stop all collapse into CaptionRunner.finished(bool) -> _on_caption_finished, which
+        calls this unconditionally — so the Individual-Steps buttons re-enable here too."""
         self._stop_caption_btn.setEnabled(False)
+        for b in (self._autotag_btn, self._describe_btn, self._llm_btn, self._combine_btn):
+            b.setEnabled(True)
         self._live_progress.setVisible(False)
         self._clear_processing_frame()
 
@@ -1166,6 +1183,7 @@ class DatasetTab(QWidget):
         start (False) or an invalid chain (ValueError — unreachable via _build_process_chain,
         guarded defensively) the UI is restored and False returned, so start_auto_caption
         never raises into main_window._qr_advance (which shows its own error on False)."""
+        self._active_chain = job.chain
         self._process_btn.setEnabled(False)
         self._begin_runner_ui()
         try:
@@ -1189,7 +1207,8 @@ class DatasetTab(QWidget):
     def _on_runner_tick(self, phase: str, done: int, total: int, filename: str):
         """Adapt the runner's 4-arg tick to the tab's 3-arg caption_tick and drive the local
         live UI (bar, current-file label, processing highlight)."""
-        self._phase_label.setText(phase)
+        step_key = _PHASE_TO_STEP.get(phase)
+        self._phase_label.setText(phase_text(step_key, self._active_chain) if step_key else phase)
         self._caption_bar.setRange(0, total)
         self._caption_bar.setValue(done)
         self._caption_file.setText(filename)
@@ -1253,7 +1272,7 @@ class DatasetTab(QWidget):
         if not self._sdscripts_path:
             QMessageBox.warning(self, "No sd-scripts", "Set the sd-scripts path in the Setup tab first.")
             return
-        if self._joycaption.is_running() or self._tagger.is_running():
+        if self._captioning_busy():
             QMessageBox.information(self, "Busy", "A captioning process is already running.")
             return
         msg = QMessageBox(self)
@@ -1347,7 +1366,7 @@ class DatasetTab(QWidget):
 
     def _start_refine(self):
         """Start the LLM refine pass using saved settings (no dialog). Reused by Process."""
-        if self._llm.is_running() or self._joycaption.is_running() or self._tagger.is_running():
+        if self._captioning_busy():
             QMessageBox.information(self, "Busy", "A captioning process is already running.")
             return
         s = QSettings(SETTINGS_ORG, SETTINGS_APP)
@@ -1587,7 +1606,7 @@ class DatasetTab(QWidget):
         if not self._sdscripts_path:
             QMessageBox.warning(self, "No sd-scripts", "Set the sd-scripts path in the Setup tab first.")
             return
-        if self._tagger.is_running():
+        if self._captioning_busy():
             QMessageBox.information(self, "Tagger Running", "Auto-tagger is already running.")
             return
 
