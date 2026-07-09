@@ -972,7 +972,7 @@ class HomeTab(QWidget):
         self._anchor_edit.blockSignals(False)
 
     def refresh(self, context):
-        from core import sets
+        from core import run_manifest, sets
         self._last_ctx = dict(context)
         for label, state in self._readiness_rows(context):
             self._set_row(label, state)
@@ -995,7 +995,10 @@ class HomeTab(QWidget):
             dim=context.get("net_dim"), alpha=context.get("net_alpha"),
             res=context.get("net_res"))
         try:
-            self._recover_btn.setVisible(sets.interrupted_run() is not None)
+            rd = run_manifest.find_resumable(context.get("output", ""))
+            if rd is None:
+                rd = sets.interrupted_run()
+            self._recover_btn.setVisible(rd is not None)
         except Exception:
             self._recover_btn.setVisible(False)
 

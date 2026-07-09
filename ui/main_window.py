@@ -75,9 +75,15 @@ class MainWindow(QMainWindow):
         self._sync_environment_to_train()
         self._train_tab.apply_defaults(self._setup_tab.get_app_settings())
 
-        # Offer to recover a run that was interrupted (crash/kill) last session
-        from core import sets
-        rd = sets.interrupted_run()
+        # Offer to recover a run that was interrupted (crash/kill) last session.
+        # The per-run output/<lora>/run.json manifest is tried first (it survives a
+        # copied/moved output folder or a second run started on top of an old one);
+        # sets.interrupted_run()'s single global marker is the fallback for installs
+        # that predate the manifest.
+        from core import run_manifest, sets
+        rd = run_manifest.find_resumable(self._setup_tab.get_output_dir())
+        if rd is None:
+            rd = sets.interrupted_run()
         if rd is not None:
             self._train_tab.show_recovery_banner(rd)
 
@@ -776,8 +782,10 @@ class MainWindow(QMainWindow):
         self._status_bar.showMessage(msg, 8000)
 
     def _on_home_recover(self):
-        from core import sets
-        rd = sets.interrupted_run()
+        from core import run_manifest, sets
+        rd = run_manifest.find_resumable(self._setup_tab.get_output_dir())
+        if rd is None:
+            rd = sets.interrupted_run()
         if rd is not None:
             self._switch_tab(4)
             self._train_tab.show_recovery_banner(rd)

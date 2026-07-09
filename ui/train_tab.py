@@ -231,6 +231,8 @@ class TrainTab(QWidget):
         self._last_preview = []
         self._denoiser = LogDenoiser()
         self._stepping = False
+        # Throttle for run_manifest.update()'s global_step write — see _on_progress_updated.
+        self._manifest_step = 0
         self._preview_timer = QTimer(self)
         self._preview_timer.setInterval(3000)
         self._preview_timer.timeout.connect(self._poll_sample_dir)
@@ -1590,10 +1592,11 @@ class TrainTab(QWidget):
                         return
 
         # Record the active run so a crash can be recovered on next launch
-        from core import sets
+        from core import run_manifest, sets
         rd, _ = self.build_run_definition()
         if rd is not None:
             sets.mark_run_active(rd)
+            run_manifest.write_start(self._run_dir(), rd)
 
         self._trainer.start(self._config_path, self._setup_path)
 
@@ -2068,6 +2071,7 @@ class TrainTab(QWidget):
         self.training_active.emit(True)
         self._rp(kind="phase", label="Preparing…")
         self._stepping = False
+        self._manifest_step = 0
         self._denoiser = LogDenoiser()
         self.status_message.emit("Training started…")
         self._last_preview = []
@@ -2080,6 +2084,11 @@ class TrainTab(QWidget):
         self.training_active.emit(False)
         self._preview_timer.stop()
         self._poll_sample_dir()  # catch the final sample set
+        from core import run_manifest
+        # A user Stop must read as "interrupted" (resumable), never "failed" --
+        # find_resumable() only ever looks for running/interrupted status.
+        run_manifest.mark(
+            self._run_dir(), run_manifest.DONE if success else run_manifest.INTERRUPTED)
         if success:
             from core import sets
             sets.clear_active_run()
@@ -2158,6 +2167,14 @@ class TrainTab(QWidget):
             self._stepping = True
             self._rp(kind="phase", label="Training")
         self._rp(kind="progress", step=step, total=total)
+        # Throttled run_manifest write: this signal fires every step, and a multi-
+        # thousand-step run would otherwise hammer the disk. Write at most once every
+        # 50 steps, plus always on the terminal step so the manifest isn't stale.
+        at_terminal = bool(total) and step >= total
+        if step - self._manifest_step >= 50 or at_terminal:
+            from core import run_manifest
+            run_manifest.update(self._run_dir(), global_step=step)
+            self._manifest_step = step
         # step < 1 (the initial 0/total parse): leave the current phase label in place
 
     # ------------------------------------------------------------------
