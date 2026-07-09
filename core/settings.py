@@ -9,6 +9,8 @@ from pathlib import Path
 
 from PySide6.QtCore import QSettings
 
+from core.caption_policy import ASK
+
 SETTINGS_ORG = "AnimaForge"
 SETTINGS_APP = "AnimaForge"
 
@@ -77,7 +79,7 @@ DEFAULTS = {
     # "ask" (default) prompts; "overwrite" clobbers; "keep" treats a captioned
     # image as done and skips it entirely. Batch resolves "ask" up front, once,
     # for the whole queue; headless has no GUI and degrades "ask" to "keep".
-    "caption_existing_policy": "ask",
+    "caption_existing_policy": ASK,
     "default_train_text_encoder": False,
     # Advanced training (Anima-honored only)
     "weighting_scheme": "sigmoid",

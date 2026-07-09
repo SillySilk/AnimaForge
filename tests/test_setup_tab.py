@@ -56,3 +56,17 @@ def test_policy_radio_reflects_and_writes_the_setting():
         assert s.get_app_settings().get("caption_existing_policy") == OVERWRITE
     finally:
         s._app.set("caption_existing_policy", prev_policy)
+
+
+def test_setup_tab_survives_an_unrecognized_policy_in_the_store():
+    """SetupTab is built unconditionally at app start; a corrupted preference must not
+    take the whole app down with a KeyError."""
+    from core.caption_policy import ASK
+    app = SetupTab().get_app_settings()
+    prev = app.get("caption_existing_policy")
+    try:
+        app.set("caption_existing_policy", "nonsense-value")
+        t = SetupTab()                       # must not raise
+        assert t._policy_buttons[ASK].isChecked()
+    finally:
+        app.set("caption_existing_policy", prev)

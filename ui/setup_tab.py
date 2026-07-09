@@ -1043,7 +1043,9 @@ class SetupTab(QWidget):
             from PySide6.QtGui import QFont
             self._font_family_combo.setCurrentFont(QFont(fam_name))
         self._font_family_combo.setVisible(mode == "custom")
-        self._policy_buttons[a.get("caption_existing_policy")].setChecked(True)
+        from core.caption_policy import ASK
+        policy = a.get("caption_existing_policy")
+        self._policy_buttons.get(policy, self._policy_buttons[ASK]).setChecked(True)
         # Save on change (connected AFTER loading so load doesn't trigger writes)
         self._scan_edit.textChanged.connect(lambda t: a.set("model_scan_dir", t))
         self._forge_url_edit.textChanged.connect(lambda t: a.set("forge_api_url", t))
