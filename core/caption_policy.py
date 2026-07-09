@@ -10,13 +10,11 @@ reaches any runner, so `images_for()` rejects it rather than guessing.
 from dataclasses import dataclass
 from pathlib import Path
 
-from core.dataset_manager import NL_EXT, TAGS_EXT
+from core.dataset_manager import NL_EXT, SUPPORTED_EXTENSIONS, TAGS_EXT
 
 ASK = "ask"
 OVERWRITE = "overwrite"
 KEEP = "keep"
-
-IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 
 
 @dataclass(frozen=True)
@@ -31,7 +29,7 @@ class FolderCaptionState:
 def _nonempty(p: Path) -> bool:
     try:
         return bool(p.read_text(encoding="utf-8").strip())
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return False
 
 
@@ -39,14 +37,16 @@ def scan(folder: str, manifest_images=None) -> FolderCaptionState:
     """Bucket every image in `folder`. `manifest_images` is the caption manifest's
     per-image dict (filename -> stage dict); None means no manifest, so every
     existing caption is foreign."""
-    d = Path(folder or "")
+    if not folder:
+        return FolderCaptionState(0, [], [], [], 0)
+    d = Path(folder)
     if not d.is_dir():
         return FolderCaptionState(0, [], [], [], 0)
     captioned, partial, untouched = [], [], []
     foreign = 0
     known = manifest_images or {}
     for img in sorted(p for p in d.iterdir()
-                      if p.is_file() and p.suffix.lower() in IMAGE_EXTS):
+                      if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS):
         if _nonempty(img.with_suffix(".txt")):
             captioned.append(str(img))
             if img.name not in known:
