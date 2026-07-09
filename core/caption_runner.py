@@ -20,6 +20,9 @@ from core.llm_refine import LLMRefineProcess
 from core.tagger import TaggerProcess
 
 
+VALID_STAGES = ("tag", "describe", "refine", "combine")
+
+
 def _default_chain():
     return ["tag", "describe", "combine"]
 
@@ -53,6 +56,11 @@ class CaptionJob:
 def plan_stages(job: CaptionJob, state) -> list:
     """[(stage, images)] in chain order. Stages with no images are dropped, so a
     fully-captioned folder under KEEP plans nothing at all."""
+    for stage in job.chain:
+        if stage not in VALID_STAGES:
+            raise ValueError(
+                f"unknown caption stage {stage!r} in job.chain — must be one of "
+                f"{VALID_STAGES}")
     images = cp.images_for(state, job.policy)
     if not images:
         return []
@@ -100,14 +108,20 @@ class CaptionRunner(QObject):
         return True
 
     def stop(self):
+        """Abort the chain. Emits finished(False) exactly once, whether or not a
+        subprocess is currently alive. Tearing state down BEFORE terminating the
+        processes matters: QProcess.finished fires synchronously inside
+        waitForFinished(), re-entering _step_done, which must find _running False
+        and no-op rather than emit a second finished()."""
+        if not self._running:
+            return
+        self._running = False
+        self._stages = []
         for proc in (self._tagger, self._joy, self._llm):
             if proc.is_running():
                 proc.stop()
-        self._stages = []
-        self._running = False
-        if self._only_file:
-            Path(self._only_file).unlink(missing_ok=True)
-            self._only_file = None
+        self._cleanup_only_file()
+        self.finished.emit(False)
 
     # ------------------------------------------------------------------
 
@@ -117,6 +131,12 @@ class CaptionRunner(QObject):
             f.write("\n".join(images))
         self._only_file = path
         return path
+
+    def _cleanup_only_file(self):
+        """Remove the temp --only file, if any. Safe to call more than once."""
+        if self._only_file:
+            Path(self._only_file).unlink(missing_ok=True)
+            self._only_file = None
 
     def _on_log(self, line: str):
         self.log_line.emit(line)
@@ -161,9 +181,7 @@ class CaptionRunner(QObject):
         if not self._running or not self._stages or self._stages[0][0] != stage:
             return
         _stage, images = self._stages.pop(0)
-        if self._only_file:
-            Path(self._only_file).unlink(missing_ok=True)
-            self._only_file = None
+        self._cleanup_only_file()
         if not ok:
             self._running = False
             self.log_line.emit(f"[Caption] {stage} failed — stopping. Completed steps are kept.")
