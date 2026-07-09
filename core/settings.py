@@ -73,6 +73,11 @@ DEFAULTS = {
     # (SOFT_CAP_STEPS) so large datasets can train longer. The floor still applies.
     "default_uncap_steps": False,
     "default_caption_order": "nl_first",
+    # What captioning does when the dataset folder already holds .txt captions.
+    # "ask" (default) prompts; "overwrite" clobbers; "keep" treats a captioned
+    # image as done and skips it entirely. Batch resolves "ask" up front, once,
+    # for the whole queue; headless has no GUI and degrades "ask" to "keep".
+    "caption_existing_policy": "ask",
     "default_train_text_encoder": False,
     # Advanced training (Anima-honored only)
     "weighting_scheme": "sigmoid",

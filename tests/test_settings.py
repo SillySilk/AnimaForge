@@ -248,3 +248,11 @@ def test_ui_font_roundtrip(tmp_path):
     a.set("ui_font_family", "Arial")
     assert a.get("ui_font_mode") == "custom"
     assert a.get("ui_font_family") == "Arial"
+
+
+def test_caption_existing_policy_defaults_to_ask(tmp_path):
+    from core.caption_policy import ASK, KEEP
+    a = _appsettings(tmp_path)
+    assert a.get("caption_existing_policy") == ASK
+    a.set("caption_existing_policy", KEEP)
+    assert a.get("caption_existing_policy") == KEEP

@@ -44,3 +44,15 @@ def test_font_mode_combo_saves_and_toggles_family_combo():
     finally:
         s._app.set("ui_font_mode", prev_mode)
         s._app.set("ui_font_family", prev_family)
+
+
+def test_policy_radio_reflects_and_writes_the_setting():
+    from core.caption_policy import ASK, OVERWRITE
+    s = SetupTab()
+    prev_policy = s._app.get("caption_existing_policy")
+    try:
+        assert s._policy_buttons[ASK].isChecked()
+        s._policy_buttons[OVERWRITE].setChecked(True)
+        assert s.get_app_settings().get("caption_existing_policy") == OVERWRITE
+    finally:
+        s._app.set("caption_existing_policy", prev_policy)

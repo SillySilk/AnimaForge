@@ -993,6 +993,22 @@ class SetupTab(QWidget):
         r3.addWidget(self._font_family_combo)
         r3.addStretch()
         v.addLayout(r3)
+        from PySide6.QtWidgets import QButtonGroup, QRadioButton
+        from core.caption_policy import ASK, KEEP, OVERWRITE
+        pol = QVBoxLayout()
+        pol.addWidget(QLabel("When a dataset already has captions:"))
+        self._policy_group = QButtonGroup(self)
+        self._policy_buttons = {}
+        for key, text in (
+            (ASK, "Ask me (recommended)"),
+            (KEEP, "Keep them — caption only the images that have none"),
+            (OVERWRITE, "Overwrite them without asking"),
+        ):
+            rb = QRadioButton(text)
+            self._policy_group.addButton(rb)
+            self._policy_buttons[key] = rb
+            pol.addWidget(rb)
+        v.addLayout(pol)
         return g
 
     def _bind_app_widgets(self):
@@ -1027,6 +1043,7 @@ class SetupTab(QWidget):
             from PySide6.QtGui import QFont
             self._font_family_combo.setCurrentFont(QFont(fam_name))
         self._font_family_combo.setVisible(mode == "custom")
+        self._policy_buttons[a.get("caption_existing_policy")].setChecked(True)
         # Save on change (connected AFTER loading so load doesn't trigger writes)
         self._scan_edit.textChanged.connect(lambda t: a.set("model_scan_dir", t))
         self._forge_url_edit.textChanged.connect(lambda t: a.set("forge_api_url", t))
@@ -1051,6 +1068,9 @@ class SetupTab(QWidget):
             lambda i: a.set("default_caption_order", "nl_first" if i == 0 else "tags_first"))
         self._font_mode_combo.currentIndexChanged.connect(self._on_font_mode_changed)
         self._font_family_combo.currentFontChanged.connect(self._on_font_family_changed)
+        for key, rb in self._policy_buttons.items():
+            rb.toggled.connect(
+                lambda checked, k=key: checked and a.set("caption_existing_policy", k))
 
     def _on_font_mode_changed(self, idx: int) -> None:
         from utils.fonts import apply_app_font
