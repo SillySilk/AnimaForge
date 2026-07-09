@@ -16,6 +16,8 @@ ASK = "ask"
 OVERWRITE = "overwrite"
 KEEP = "keep"
 
+_UNSET = object()
+
 
 @dataclass(frozen=True)
 class FolderCaptionState:
@@ -33,10 +35,16 @@ def _nonempty(p: Path) -> bool:
         return False
 
 
-def scan(folder: str, manifest_images=None) -> FolderCaptionState:
-    """Bucket every image in `folder`. `manifest_images` is the caption manifest's
-    per-image dict (filename -> stage dict); None means no manifest, so every
-    existing caption is foreign."""
+def scan(folder: str, manifest_images=_UNSET) -> FolderCaptionState:
+    """Bucket every image in `folder`.
+
+    `manifest_images` is the caption manifest's per-image dict (filename -> stage
+    dict). Omit it to read the folder's own manifest; None means no manifest, so
+    every existing caption is foreign.
+    """
+    if manifest_images is _UNSET:
+        from core.caption_manifest import images_dict
+        manifest_images = images_dict(folder)
     if not folder:
         return FolderCaptionState(0, [], [], [], 0)
     d = Path(folder)
