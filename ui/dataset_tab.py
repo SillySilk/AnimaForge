@@ -92,7 +92,7 @@ def conflict_text(state) -> str:
     lead = f"⚠ {n} image{'s' if n != 1 else ''} already have captions"
     if state.foreign:
         lead += f" — {state.foreign} of them were not written by AnimaForge"
-    return f"{lead}.\nRunning will overwrite them. Keeping them captions {todo} instead."
+    return f"{lead}.\nRunning will overwrite them. Keeping them will caption {todo} instead."
 
 
 class CaptionEdit(QTextEdit):
@@ -1105,7 +1105,7 @@ class DatasetTab(QWidget):
             # Fold the existing-captions warning into this same confirm instead of
             # stacking a second dialog on top of it — _resolve_policy's dialog IS the
             # "run all N steps?" confirm when there is something at risk to decide.
-            policy = self._resolve_policy(header)
+            policy = self._resolve_policy(header, state=state)
             if policy is None:
                 return
         else:
@@ -1117,7 +1117,7 @@ class DatasetTab(QWidget):
             box.setDefaultButton(QMessageBox.Yes)
             if box.exec() != QMessageBox.Yes:
                 return
-            policy = self._resolve_policy()   # no conflict, or already decided — silent
+            policy = self._resolve_policy(state=state)   # no conflict, or already decided — silent
         self._auto_mode = False
         self._start_runner_or_warn(self._build_caption_job(policy))
 
@@ -1145,7 +1145,7 @@ class DatasetTab(QWidget):
         return (self._runner.is_running() or self._llm.is_running()
                 or self._joycaption.is_running() or self._tagger.is_running())
 
-    def _resolve_policy(self, header: str = ""):
+    def _resolve_policy(self, header: str = "", state=None):
         """The policy this run should use — OVERWRITE or KEEP — or None if the user
         cancelled. Shows the existing-captions dialog only when the saved setting is
         ASK *and* the scan finds captions already on disk to protect; otherwise resolves
@@ -1155,8 +1155,13 @@ class DatasetTab(QWidget):
         Process button's "Run all N steps?" question) rather than stacking a second
         confirm — pass nothing for the headless Home pipeline, which never asked that
         question in the first place.
+
+        `state`, when given, is a `cp.scan()` result the caller already computed (e.g.
+        _process_clicked scanning once to pick its dialog branch) so this call doesn't
+        walk the folder and re-read every caption sidecar a second time per click.
         """
-        state = cp.scan(self._folder_path)
+        if state is None:
+            state = cp.scan(self._folder_path)
         if not cp.has_conflict(state):
             return cp.OVERWRITE          # nothing to destroy; do the full chain
         app = AppSettings()

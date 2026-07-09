@@ -122,3 +122,53 @@ def test_trigger_and_prefix_single_source_on_home():
     w._home_tab.prefix_changed.emit("masterpiece")
     assert w._dataset_tab.get_trigger_word() == "mychar"
     assert w._dataset_tab.get_prefix() == "masterpiece"
+
+
+# ----------------------------------------------------------------------------
+# Task 6 fix pass: _qr_advance's CAPTION branch must tell a user Cancel apart
+# from a genuine start_auto_caption() refusal (Finding 1 — this used to be untested).
+# ----------------------------------------------------------------------------
+
+def test_qr_advance_caption_cancelled_by_user_shows_no_warning(monkeypatch):
+    import ui.main_window as mw_mod
+    from core import quick_run
+
+    warn_calls = []
+    monkeypatch.setattr(mw_mod.QMessageBox, "warning",
+                         lambda *a, **k: warn_calls.append((a, k)))
+
+    w = MainWindow()
+    monkeypatch.setattr(w._dataset_tab, "start_auto_caption", lambda: False)
+    monkeypatch.setattr(w._dataset_tab, "start_cancelled_by_user", lambda: True)
+    progress_calls = []
+    monkeypatch.setattr(w._home_tab, "apply_run_progress",
+                        lambda payload: progress_calls.append(payload))
+
+    w._qr_phases = [quick_run.CAPTION, quick_run.TRAIN]
+    w._qr_advance()
+
+    assert warn_calls == []                      # no "Could not start captioning" lie
+    assert w._qr_phases == []                     # the pipeline stops here
+    assert progress_calls[-1] == {"kind": "reset"}  # reset, not an "error" chip
+
+
+def test_qr_advance_caption_genuine_refusal_shows_warning(monkeypatch):
+    import ui.main_window as mw_mod
+    from core import quick_run
+
+    warn_calls = []
+    monkeypatch.setattr(mw_mod.QMessageBox, "warning",
+                         lambda *a, **k: warn_calls.append((a, k)))
+
+    w = MainWindow()
+    monkeypatch.setattr(w._dataset_tab, "start_auto_caption", lambda: False)
+    monkeypatch.setattr(w._dataset_tab, "start_cancelled_by_user", lambda: False)
+    progress_calls = []
+    monkeypatch.setattr(w._home_tab, "apply_run_progress",
+                        lambda payload: progress_calls.append(payload))
+
+    w._qr_phases = [quick_run.CAPTION, quick_run.TRAIN]
+    w._qr_advance()
+
+    assert len(warn_calls) == 1                   # the genuine-refusal warning fires
+    assert progress_calls[-1] == {"kind": "error", "label": "Caption error"}
