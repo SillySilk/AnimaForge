@@ -111,6 +111,57 @@ def test_gallery_click_opens_editor_with_card_captions(monkeypatch):
     assert opened["items"][0]["caption"] == LONG
 
 
+def test_build_caption_job_snapshots_the_live_settings(tmp_path):
+    from ui.dataset_tab import DatasetTab
+    from core.caption_policy import KEEP
+    t = DatasetTab()
+    t._folder_path = str(tmp_path)
+    t._sdscripts_path = "C:/sd"
+    t.set_trigger_word("manbag")
+    t.set_prefix("masterpiece")
+    job = t._build_caption_job(KEEP)
+    assert job.dataset_folder == str(tmp_path)
+    assert job.sdscripts_path == "C:/sd"
+    assert job.trigger == "manbag"
+    assert job.prefix == "masterpiece"
+    assert job.policy == KEEP
+    assert job.chain[0] == "tag" and job.chain[-1] == "combine"
+
+
+def test_caption_tick_adapts_runner_four_arg_to_three():
+    # CaptionRunner.tick carries (phase, done, total, filename); DatasetTab.caption_tick
+    # must re-emit only the first three. If this silently regresses, Home's stage chips
+    # go dark mid-run.
+    from ui.dataset_tab import DatasetTab
+    t = DatasetTab()
+    seen = []
+    t.caption_tick.connect(lambda *a: seen.append(a))
+    t._runner.tick.emit("Tag", 3, 12, "a.png")
+    assert seen == [("Tag", 3, 12)]
+
+
+def test_captioned_milestone_fires_on_pre_combine_stage(tmp_path):
+    # caption_stage_done("captioned") must fire when the last raw pass (the stage right
+    # before "combine") lands — not on "combine" itself, and not on earlier stages.
+    from PIL import Image
+    from ui.dataset_tab import DatasetTab
+    from core.caption_runner import CaptionJob
+    Image.new("RGB", (8, 8), (10, 10, 10)).save(tmp_path / "a.png")
+    t = DatasetTab()
+    t._folder_path = str(tmp_path)
+    t._runner._job = CaptionJob(
+        dataset_folder=str(tmp_path), sdscripts_path="C:/sd",
+        chain=["tag", "describe", "combine"])
+    stages = []
+    t.caption_stage_done.connect(stages.append)
+    t._runner.stage_done.emit("tag")
+    assert stages == []                 # tag is not the pre-combine stage
+    t._runner.stage_done.emit("describe")
+    assert stages == ["captioned"]      # describe precedes combine -> milestone
+    t._runner.stage_done.emit("combine")
+    assert stages == ["captioned"]      # combine itself does not re-emit
+
+
 def test_delete_button_on_thumbnail_and_double_badge():
     c = _card()
     # trash can overlays the thumbnail (top-right), always visible
