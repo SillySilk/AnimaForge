@@ -155,13 +155,16 @@ def combine_caption(nl: str, tags: str, prefix: str = "", order: str = "nl_first
 
 
 def combine_all(folder_path: str, prefix: str = "", order: str = "nl_first",
-                apply_anchors: bool = True) -> tuple:
+                apply_anchors: bool = True, only=None) -> tuple:
     """
     For every image, merge its .nl and .tags sidecars into the training .txt file.
 
     When apply_anchors is True and the folder has an animaforge_characters.json, each image's
     explicitly-assigned character tokens and the dataset @-style anchor are forced into the tag
     portion (deterministic safety net, independent of the LLM pass). Harmless no-op otherwise.
+
+    `only`, if given, is a list of image paths restricting which images get re-combined; other
+    images' .txt files are left untouched. None (default) means every image in the folder.
 
     Returns (written_count, error_count).
     """
@@ -180,6 +183,9 @@ def combine_all(folder_path: str, prefix: str = "", order: str = "nl_first",
         f for f in folder.iterdir()
         if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS
     ]
+    if only is not None:
+        allowed = {Path(p).name for p in only}
+        images = [i for i in images if i.name in allowed]
     for img in images:
         nl = read_sidecar(str(img), NL_EXT)
         tags = read_sidecar(str(img), TAGS_EXT)

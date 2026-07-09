@@ -108,3 +108,35 @@ def test_nonempty_survives_a_non_utf8_sidecar(tmp_path):
     (tmp_path / "a.txt").write_bytes(b"\xff\xfe invalid utf-8")
     st = cp.scan(str(tmp_path))          # must not raise
     assert st.total == 1
+
+
+def test_stage_and_tag_noop_when_nothing_to_do(tmp_path, monkeypatch):
+    import scripts.wd14_tag_run as w
+    called = []
+    monkeypatch.setattr(w.subprocess, "call", lambda *a, **k: called.append(a) or 0)
+    assert w.stage_and_tag(str(tmp_path), [], ["python", "x"]) == 0
+    assert called == []          # the tagger subprocess never launched
+
+
+def test_stage_and_tag_copies_tags_back(tmp_path, monkeypatch):
+    import scripts.wd14_tag_run as w
+    img = tmp_path / "a.png"
+    img.write_bytes(b"\x89PNG\r\n\x1a\n")
+
+    def fake_call(argv):
+        stage = Path(argv[-1])
+        (stage / "a.tags").write_text("1girl, solo", encoding="utf-8")
+        return 0
+
+    monkeypatch.setattr(w.subprocess, "call", fake_call)
+    assert w.stage_and_tag(str(tmp_path), [str(img)], ["python", "x"]) == 0
+    assert (tmp_path / "a.tags").read_text(encoding="utf-8") == "1girl, solo"
+
+
+def test_stage_and_tag_propagates_tagger_failure(tmp_path, monkeypatch):
+    import scripts.wd14_tag_run as w
+    img = tmp_path / "a.png"
+    img.write_bytes(b"\x89PNG\r\n\x1a\n")
+    monkeypatch.setattr(w.subprocess, "call", lambda argv: 1)
+    assert w.stage_and_tag(str(tmp_path), [str(img)], ["python", "x"]) == 1
+    assert not (tmp_path / "a.tags").exists()

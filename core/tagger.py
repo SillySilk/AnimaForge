@@ -20,17 +20,16 @@ class TaggerProcess(QObject):
         image_folder: str,
         model_id: str,
         threshold: float,
-        overwrite: bool,
         use_onnx: bool = False,
         batch_size: int = 8,
+        only_file: str = "",
+        skip_existing: bool = False,
     ):
         if self._process is not None and self._process.state() != QProcess.NotRunning:
             return
 
         from core.env import subprocess_python
         python = subprocess_python(sdscripts_path)
-
-        script = str(Path(sdscripts_path) / "finetune" / "tag_images_by_wd14_tagger.py")
 
         # model_dir: store downloaded models inside sd-scripts to keep them portable
         model_dir = str(Path(sdscripts_path) / "wd14_models")
@@ -43,24 +42,24 @@ class TaggerProcess(QObject):
             model_file = Path(model_dir) / repo_dir / "saved_model.pb"
         needs_download = not model_file.is_file()
 
+        script = str(Path(__file__).resolve().parents[1] / "scripts" / "wd14_tag_run.py")
         args = [
             script,
             image_folder,
+            f"--sdscripts={sdscripts_path}",
             f"--repo_id={model_id}",
             f"--model_dir={model_dir}",
             f"--thresh={threshold:.2f}",
             f"--batch_size={batch_size}",
-            "--caption_extension=.tags",
-            "--remove_underscore",  # Anima wants 'side ponytail' not 'side_ponytail'
         ]
+        if only_file:
+            args.append(f"--only={only_file}")
+        if skip_existing:
+            args.append("--skip-existing")
         if use_onnx:
             args.append("--onnx")
         if needs_download:
             args.append("--force_download")
-        # This sd-scripts build overwrites caption files by default and has no
-        # --overwrite_caption flag; use --append_tags to add to existing tags instead.
-        if not overwrite:
-            args.append("--append_tags")
 
         self._process = QProcess(self)
         apply_no_window(self._process)  # no console window pop-up on Windows

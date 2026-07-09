@@ -1592,7 +1592,7 @@ class DatasetTab(QWidget):
             image_folder=self._folder_path,
             model_id=model_id,
             threshold=threshold,
-            overwrite=overwrite,
+            skip_existing=not overwrite,
             use_onnx=use_onnx,
         )
         self._begin_caption(self._tagger)
@@ -1611,7 +1611,7 @@ class DatasetTab(QWidget):
             image_folder=self._folder_path,
             model_id=model_id,
             threshold=threshold,
-            overwrite=overwrite,
+            skip_existing=not overwrite,
             use_onnx=use_onnx,
         )
         self._begin_caption(self._tagger)

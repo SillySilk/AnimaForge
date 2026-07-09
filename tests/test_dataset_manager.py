@@ -216,6 +216,21 @@ def test_find_undersized_images_missing_dir(tmp_path):
     assert find_undersized_images(str(tmp_path / "nope")) == []
 
 
+def test_combine_all_only_restricts_which_txt_are_written(tmp_path):
+    from core.dataset_manager import combine_all
+    for stem in ("a", "b"):
+        (tmp_path / f"{stem}.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        (tmp_path / f"{stem}.nl").write_text(f"{stem} prose", encoding="utf-8")
+        (tmp_path / f"{stem}.tags").write_text("1girl", encoding="utf-8")
+    (tmp_path / "b.txt").write_text("DO NOT TOUCH", encoding="utf-8")
+
+    written, errors = combine_all(str(tmp_path), only=[str(tmp_path / "a.png")])
+
+    assert written == 1 and errors == 0
+    assert "a prose" in (tmp_path / "a.txt").read_text(encoding="utf-8")
+    assert (tmp_path / "b.txt").read_text(encoding="utf-8") == "DO NOT TOUCH"
+
+
 def test_duplicate_stem_names_flags_extension_twins():
     from core.dataset_manager import duplicate_stem_names
     dupes = duplicate_stem_names([
