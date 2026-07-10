@@ -77,6 +77,66 @@ def test_combine_all_missing_sidecar(tmp_path):
     assert (tmp_path / "b.txt").read_text(encoding="utf-8") == "dog"
 
 
+def test_combine_all_never_destroys_a_txt_it_cannot_rebuild(tmp_path):
+    """An image with NO .nl and NO .tags has no caption body to merge, so the only
+    thing combine_all could write is `prefix, lead` — the trigger and the character
+    token. Writing that over a .txt the user brought in from outside AnimaForge
+    destroys the only copy. Leave it alone.
+
+    Reported against v2.5: images renamed outside the app, captions already on disk
+    as .txt; Dataset -> Validate Names -> Done rewrote every caption to "Name, trigger".
+    """
+    img = tmp_path / "Colleen_001_Character.png"
+    img.write_bytes(b"fake")
+    caption = "a woman with red hair standing in a sunlit kitchen"
+    (tmp_path / "Colleen_001_Character.txt").write_text(caption, encoding="utf-8")
+
+    written, errors = combine_all(str(tmp_path), prefix="Colleen")
+
+    assert errors == 0
+    assert written == 0, "an unrebuildable .txt must not be counted as written"
+    assert (tmp_path / "Colleen_001_Character.txt").read_text(encoding="utf-8") == caption
+
+
+def test_combine_all_writes_prefix_only_when_no_txt_exists(tmp_path):
+    """No sidecars and no .txt: nothing to lose, so an uncaptioned image still gets
+    its trigger word. Preserves the pre-fix behaviour for the case it was right in."""
+    img = tmp_path / "a.png"
+    img.write_bytes(b"fake")
+
+    written, errors = combine_all(str(tmp_path), prefix="trig")
+
+    assert written == 1 and errors == 0
+    assert (tmp_path / "a.txt").read_text(encoding="utf-8") == "trig"
+
+
+def test_combine_all_overwrites_an_empty_txt(tmp_path):
+    """Clear All Captions deletes the .txt and _load_images() recreates it empty.
+    An empty .txt holds nothing the user can lose, so combine may still fill it."""
+    img = tmp_path / "a.png"
+    img.write_bytes(b"fake")
+    (tmp_path / "a.txt").write_text("   \n", encoding="utf-8")
+
+    written, errors = combine_all(str(tmp_path), prefix="trig")
+
+    assert written == 1 and errors == 0
+    assert (tmp_path / "a.txt").read_text(encoding="utf-8") == "trig"
+
+
+def test_combine_all_still_rebuilds_when_only_one_sidecar_is_present(tmp_path):
+    """A single sidecar is a real caption body — the .txt is reproducible from it,
+    so it gets rewritten even though a .txt already exists."""
+    img = tmp_path / "a.png"
+    img.write_bytes(b"fake")
+    write_sidecar(str(img), TAGS_EXT, "dog, outdoors")
+    (tmp_path / "a.txt").write_text("stale", encoding="utf-8")
+
+    written, errors = combine_all(str(tmp_path), prefix="trig")
+
+    assert written == 1 and errors == 0
+    assert (tmp_path / "a.txt").read_text(encoding="utf-8") == "trig, dog, outdoors"
+
+
 def test_combine_all_applies_character_anchors(tmp_path):
     from core import characters as C
     img = tmp_path / "a.png"

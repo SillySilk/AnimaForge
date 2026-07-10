@@ -162,6 +162,21 @@ def combine_caption(nl: str, tags: str, prefix: str = "", order: str = "nl_first
     return ", ".join(parts)
 
 
+def _txt_has_text(image_path) -> bool:
+    """True when the image's .txt exists and holds more than whitespace.
+
+    An unreadable .txt counts as having text: if we can't prove it's empty, we must not
+    clobber it.
+    """
+    p = Path(image_path).with_suffix(".txt")
+    if not p.is_file():
+        return False
+    try:
+        return bool(p.read_text(encoding="utf-8", errors="replace").strip())
+    except OSError:
+        return True
+
+
 def combine_all(folder_path: str, prefix: str = "", order: str = "nl_first",
                 apply_anchors: bool = True, only=None, rules=None) -> tuple:
     """
@@ -177,6 +192,12 @@ def combine_all(folder_path: str, prefix: str = "", order: str = "nl_first",
     `rules`, if given, is passed straight through to combine_caption — applied to the .txt this
     builds, never to the .nl/.tags sidecars on disk, so changing a rule and re-running Combine
     recomputes from pristine sources instead of compounding edits.
+
+    An image with neither sidecar has no caption body to rebuild from, so the only .txt this
+    could produce is `prefix, lead` — the trigger word and the character token. That is never
+    worth overwriting a .txt the user already has, because for captions authored outside
+    AnimaForge the .txt IS the original. Such images are skipped (not counted as written). An
+    absent or blank .txt holds nothing to lose, so it is still filled in.
 
     Returns (written_count, error_count).
     """
@@ -201,6 +222,8 @@ def combine_all(folder_path: str, prefix: str = "", order: str = "nl_first",
     for img in images:
         nl = read_sidecar(str(img), NL_EXT)
         tags = read_sidecar(str(img), TAGS_EXT)
+        if not nl and not tags and _txt_has_text(img):
+            continue
         lead = ""
         if chars is not None:
             from core import characters as _ch
