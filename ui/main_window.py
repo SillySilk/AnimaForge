@@ -113,6 +113,7 @@ class MainWindow(QMainWindow):
     # Updater worker threads → UI (queued back onto the main thread)
     _update_check_done = Signal(str)            # remote version ("" = unreachable)
     _update_apply_done = Signal(str, bool, str)  # (version, requirements_changed, error)
+    _startup_update_ready = Signal(object)       # payload dict from build_update_decision, or None
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -142,6 +143,9 @@ class MainWindow(QMainWindow):
             rd = sets.interrupted_run()
         if rd is not None:
             self._train_tab.show_recovery_banner(rd)
+
+        self._startup_update_ready.connect(self._on_startup_update_ready)
+        self._maybe_check_updates_at_startup()
 
     # ------------------------------------------------------------------
     # UI Construction
@@ -944,6 +948,73 @@ class MainWindow(QMainWindow):
         QMessageBox.information(
             self, "Update Applied",
             f"AnimaForge v{version} is in place.\nRestart AnimaForge to finish.{extra}")
+
+    # ---- self-update (silent startup check) ----
+
+    def _app_root(self):
+        from pathlib import Path
+        return Path(__file__).resolve().parents[1]
+
+    def _maybe_check_updates_at_startup(self):
+        """Off-thread: resolve local commit, compare to main, decide. Silent on any
+        failure. Gated by the Setup toggle and the dev-branch guard."""
+        from core import updater
+        settings = self._setup_tab.get_app_settings()
+        if not settings.get("startup_update_check"):
+            return
+        app_root = self._app_root()
+        if not updater.on_main_branch(app_root):
+            return
+        import threading
+
+        def work():
+            from core.version import __version__
+            local = updater.local_commit(app_root)
+            compare = updater.compare_to_main(local) if local else {"status": "not_found"}
+            remote_version = updater.fetch_remote_version()
+            decision = updater.build_update_decision(
+                compare, remote_version=remote_version, local_version=__version__,
+                skipped_commit=settings.get("skipped_update_commit"))
+            self._startup_update_ready.emit(decision)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_startup_update_ready(self, payload):
+        if not payload:
+            return
+        from core.version import __version__
+        self._ver_label.setText(f"v{__version__} · UPDATE AVAILABLE")
+        dlg = UpdateAvailableDialog(payload, self)
+        dlg.exec()
+        if dlg.dont_show_again and payload.get("head_sha"):
+            self._setup_tab.get_app_settings().set(
+                "skipped_update_commit", payload["head_sha"])
+        if dlg.do_update:
+            self._start_update_download(payload.get("head_sha"))
+
+    def _start_update_download(self, head_sha):
+        """Reuse the manual-button download/apply path, stamping the install with the
+        commit we are installing so the next launch reads the right local SHA."""
+        from core.version import __version__
+        self._update_busy = True
+        self._status_bar.showMessage("Downloading update from GitHub…")
+        import tempfile, threading, datetime
+        from pathlib import Path
+        from core import updater as up
+        app_root = self._app_root()
+
+        def work():
+            try:
+                with tempfile.TemporaryDirectory() as td:
+                    new_root = up.download_and_extract(td)
+                    req_changed = up.requirements_changed(new_root, app_root)
+                    up.apply_update(new_root, app_root, commit=head_sha,
+                                    built=datetime.date.today().isoformat())
+                self._update_apply_done.emit(head_sha or "", req_changed, "")
+            except Exception as e:  # noqa: BLE001
+                self._update_apply_done.emit(head_sha or "", False, str(e))
+
+        threading.Thread(target=work, daemon=True).start()
 
     def _on_load_set_requested(self, dataset_folder: str, trigger: str, quality_prefix: str):
         if dataset_folder:
