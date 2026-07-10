@@ -181,6 +181,31 @@ def compare_to_main(local_sha, *, opener=urllib.request.urlopen) -> dict:
         return {"status": "error"}
 
 
+def _payload(head_sha, ahead_by, latest_subject, remote_version, local_version):
+    version = remote_version if (remote_version and is_newer(remote_version, local_version)) else None
+    return {"head_sha": head_sha, "ahead_by": ahead_by, "latest_subject": latest_subject,
+            "remote_version": version, "local_version": local_version}
+
+
+def build_update_decision(compare, *, remote_version, local_version, skipped_commit):
+    """Turn a compare result into a popup payload, or None for 'stay silent'.
+
+    'ahead' -> prompt (unless the head commit is the one the user chose to skip).
+    'not_found' (unknown local SHA / no local SHA) -> fall back to a version-only
+    prompt when remote __version__ is newer. Everything else stays silent."""
+    status = compare.get("status")
+    if status == "ahead":
+        if compare.get("head_sha") and compare["head_sha"] == skipped_commit:
+            return None
+        return _payload(compare.get("head_sha"), compare.get("ahead_by"),
+                        compare.get("latest_subject"), remote_version, local_version)
+    if status == "not_found":
+        if remote_version and is_newer(remote_version, local_version):
+            return _payload(None, None, None, remote_version, local_version)
+        return None
+    return None
+
+
 def apply_update(new_root, app_root) -> int:
     """Overlay-copy every file from the extracted repo onto the install.
     Returns the number of files written."""

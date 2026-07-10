@@ -206,3 +206,56 @@ def test_compare_non_integer_ahead_by_is_error():
 def test_compare_non_404_http_error_is_error():
     out = updater.compare_to_main("a" * 40, opener=_fake_opener(http_error=500))
     assert out == {"status": "error"}
+
+
+# ---- build_update_decision ----
+
+def _ahead(head="f" * 40, n=12, subj="fix: x"):
+    return {"status": "ahead", "ahead_by": n, "head_sha": head, "latest_subject": subj}
+
+
+def test_decision_ahead_prompts():
+    d = updater.build_update_decision(
+        _ahead(), remote_version="2.6.0", local_version="2.5.0", skipped_commit="")
+    assert d["head_sha"] == "f" * 40 and d["ahead_by"] == 12
+    assert d["latest_subject"] == "fix: x"
+    assert d["remote_version"] == "2.6.0" and d["local_version"] == "2.5.0"
+
+
+def test_decision_ahead_but_version_not_bumped_hides_version_line():
+    d = updater.build_update_decision(
+        _ahead(), remote_version="2.5.0", local_version="2.5.0", skipped_commit="")
+    assert d is not None and d["remote_version"] is None   # commits behind, no bump
+
+
+def test_decision_skipped_commit_silences():
+    d = updater.build_update_decision(
+        _ahead(head="f" * 40), remote_version="2.6.0", local_version="2.5.0",
+        skipped_commit="f" * 40)
+    assert d is None
+
+
+def test_decision_identical_no_prompt():
+    assert updater.build_update_decision(
+        {"status": "identical"}, remote_version="2.5.0", local_version="2.5.0",
+        skipped_commit="") is None
+
+
+def test_decision_error_status_silent():
+    assert updater.build_update_decision(
+        {"status": "error"}, remote_version="9.9.9", local_version="2.5.0",
+        skipped_commit="") is None
+
+
+def test_decision_not_found_falls_back_to_version():
+    d = updater.build_update_decision(
+        {"status": "not_found"}, remote_version="2.6.0", local_version="2.5.0",
+        skipped_commit="")
+    assert d is not None and d["ahead_by"] is None and d["head_sha"] is None
+    assert d["remote_version"] == "2.6.0"
+
+
+def test_decision_not_found_no_newer_version_silent():
+    assert updater.build_update_decision(
+        {"status": "not_found"}, remote_version="2.5.0", local_version="2.5.0",
+        skipped_commit="") is None
