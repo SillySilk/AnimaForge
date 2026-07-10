@@ -136,3 +136,22 @@ def test_local_commit_falls_back_to_stamp(tmp_path):
 
 def test_local_commit_none_when_nothing(tmp_path):
     assert updater.local_commit(tmp_path) is None
+
+
+# ---- on_main_branch guard ----
+
+def test_on_main_branch_true_without_git(tmp_path):
+    assert updater.on_main_branch(tmp_path) is True
+
+
+def test_on_main_branch_true_when_head_is_main(tmp_path, monkeypatch):
+    (tmp_path / ".git").mkdir()
+    monkeypatch.setattr(updater, "_git_rev", lambda root, ref: "d" * 40)
+    assert updater.on_main_branch(tmp_path) is True
+
+
+def test_on_main_branch_false_when_head_differs(tmp_path, monkeypatch):
+    (tmp_path / ".git").mkdir()
+    monkeypatch.setattr(updater, "_git_rev",
+                        lambda root, ref: ("d" * 40) if ref == "HEAD" else ("e" * 40))
+    assert updater.on_main_branch(tmp_path) is False

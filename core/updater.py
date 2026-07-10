@@ -55,16 +55,20 @@ def read_build_stamp(root):
         return None
 
 
-def _git_head(root):
-    """`git rev-parse HEAD` in root, or None if git/rev unavailable."""
+def _git_rev(root, ref):
+    """`git rev-parse <ref>` in root, or None."""
     try:
         out = subprocess.run(
-            ["git", "-C", str(root), "rev-parse", "HEAD"],
+            ["git", "-C", str(root), "rev-parse", ref],
             capture_output=True, text=True, timeout=TIMEOUT_S)
         sha = out.stdout.strip()
         return sha if out.returncode == 0 and sha else None
     except (OSError, subprocess.SubprocessError):
         return None
+
+
+def _git_head(root):
+    return _git_rev(root, "HEAD")
 
 
 def local_commit(app_root):
@@ -75,6 +79,17 @@ def local_commit(app_root):
         if sha:
             return sha
     return read_build_stamp(root)
+
+
+def on_main_branch(app_root):
+    """True when it's safe to run the startup check: no .git (zip install), or HEAD==main.
+    Keeps the maintainer's own dev-branch checkouts from popping the update dialog."""
+    root = Path(app_root)
+    if not (root / ".git").exists():
+        return True
+    head = _git_rev(root, "HEAD")
+    main = _git_rev(root, BRANCH)
+    return bool(head and main and head == main)
 
 
 def parse_version(s: str) -> tuple:
