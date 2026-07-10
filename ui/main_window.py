@@ -114,6 +114,7 @@ class MainWindow(QMainWindow):
     _update_check_done = Signal(str)            # remote version ("" = unreachable)
     _update_apply_done = Signal(str, bool, str)  # (version, requirements_changed, error)
     _startup_update_ready = Signal(object)       # payload dict from build_update_decision, or None
+    _startup_update_applied = Signal(bool, str)  # (requirements_changed, error) — version-agnostic
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -467,6 +468,7 @@ class MainWindow(QMainWindow):
         self._home_tab.update_check_requested.connect(self._on_update_check)
         self._update_check_done.connect(self._show_update_result)
         self._update_apply_done.connect(self._on_update_applied)
+        self._startup_update_applied.connect(self._on_startup_update_applied)
 
         # Home "Quick Run" cockpit → drive the real tabs (Train owns the relocated widgets)
         self._home_tab.folder_chosen.connect(self._on_home_folder_chosen)
@@ -917,6 +919,7 @@ class MainWindow(QMainWindow):
         self._status_bar.showMessage(f"Downloading v{remote} from GitHub…")
         import tempfile
         import threading
+        import datetime
         from pathlib import Path
         from core import updater as up
         app_root = Path(__file__).resolve().parents[1]
@@ -926,7 +929,9 @@ class MainWindow(QMainWindow):
                 with tempfile.TemporaryDirectory() as td:
                     new_root = up.download_and_extract(td)
                     req_changed = up.requirements_changed(new_root, app_root)
-                    up.apply_update(new_root, app_root)
+                    sha = up.fetch_remote_head()
+                    up.apply_update(new_root, app_root, commit=sha,
+                                    built=datetime.date.today().isoformat())
                 self._update_apply_done.emit(remote, req_changed, "")
             except Exception as e:  # noqa: BLE001 — any failure = install untouched
                 self._update_apply_done.emit(remote, False, str(e))
@@ -948,6 +953,22 @@ class MainWindow(QMainWindow):
         QMessageBox.information(
             self, "Update Applied",
             f"AnimaForge v{version} is in place.\nRestart AnimaForge to finish.{extra}")
+
+    def _on_startup_update_applied(self, req_changed: bool, error: str):
+        self._update_busy = False
+        if error:
+            self._status_bar.clearMessage()
+            QMessageBox.warning(
+                self, "Update Failed",
+                f"The update was not applied: {error}\n\nYour install is unchanged.")
+            return
+        self._status_bar.showMessage("Updated to the latest main — restart to finish.")
+        self._ver_label.setText("UPDATE READY · RESTART")
+        extra = ("\n\nrequirements.txt changed — run install.bat before the next "
+                 "launch." if req_changed else "")
+        QMessageBox.information(
+            self, "Update Applied",
+            f"AnimaForge updated to the latest main.\nRestart AnimaForge to finish.{extra}")
 
     # ---- self-update (silent startup check) ----
 
@@ -1013,9 +1034,9 @@ class MainWindow(QMainWindow):
                     req_changed = up.requirements_changed(new_root, app_root)
                     up.apply_update(new_root, app_root, commit=head_sha,
                                     built=datetime.date.today().isoformat())
-                self._update_apply_done.emit(head_sha or "", req_changed, "")
+                self._startup_update_applied.emit(req_changed, "")
             except Exception as e:  # noqa: BLE001
-                self._update_apply_done.emit(head_sha or "", False, str(e))
+                self._startup_update_applied.emit(False, str(e))
 
         threading.Thread(target=work, daemon=True).start()
 

@@ -26,6 +26,10 @@ RAW_VERSION_URL = f"https://raw.githubusercontent.com/{REPO}/{BRANCH}/core/versi
 ZIPBALL_URL = f"https://github.com/{REPO}/archive/refs/heads/{BRANCH}.zip"
 TIMEOUT_S = 15
 
+# Suppress the console window git would otherwise flash under a pythonw (no-console) launch.
+# The flag only exists on Windows; 0 is the harmless default elsewhere.
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
 _VERSION_RE = re.compile(r"__version__\s*=\s*[\"']([^\"']+)[\"']")
 
 STAMP_NAME = "build_stamp.json"
@@ -61,7 +65,8 @@ def _git_rev(root, ref):
     try:
         out = subprocess.run(
             ["git", "-C", str(root), "rev-parse", ref],
-            capture_output=True, text=True, timeout=TIMEOUT_S)
+            capture_output=True, text=True, timeout=TIMEOUT_S,
+            creationflags=_NO_WINDOW)
         sha = out.stdout.strip()
         return sha if out.returncode == 0 and sha else None
     except (OSError, subprocess.SubprocessError):
@@ -121,6 +126,20 @@ def fetch_remote_version():
             return extract_version(resp.read().decode("utf-8", errors="replace"))
     except (OSError, ValueError):
         return None
+
+
+COMMITS_URL = f"https://api.github.com/repos/{REPO}/commits/{BRANCH}"
+
+
+def fetch_remote_head(*, opener=urllib.request.urlopen):
+    """Main's tip commit SHA, or None on any network/parse failure. Never raises."""
+    try:
+        with opener(COMMITS_URL, timeout=TIMEOUT_S) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+    except (OSError, ValueError):
+        return None
+    sha = data.get("sha") if isinstance(data, dict) else None
+    return sha if isinstance(sha, str) and sha else None
 
 
 def download_and_extract(tmpdir: str) -> Path:

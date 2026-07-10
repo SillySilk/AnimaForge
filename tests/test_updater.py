@@ -225,6 +225,22 @@ def test_compare_non_404_http_error_is_error():
     assert out == {"status": "error"}
 
 
+# ---- fetch_remote_head ----
+
+def test_fetch_remote_head_ok():
+    assert updater.fetch_remote_head(opener=_fake_opener({"sha": "a" * 40})) == "a" * 40
+
+
+def test_fetch_remote_head_non_dict_is_none():
+    assert updater.fetch_remote_head(opener=_fake_opener([1, 2, 3])) is None
+
+
+def test_fetch_remote_head_network_error_is_none():
+    def boom(url, timeout=None):
+        raise OSError("no net")
+    assert updater.fetch_remote_head(opener=boom) is None
+
+
 # ---- build_update_decision ----
 
 def _ahead(head="f" * 40, n=12, subj="fix: x"):
