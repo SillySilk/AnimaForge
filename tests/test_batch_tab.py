@@ -151,16 +151,21 @@ def test_resolve_conflicts_cancel_returns_false_and_does_not_mutate(tmp_path, mo
     t = _make_tab(tmp_path, monkeypatch)
     r1 = _rd(lora_name="conflicted", dataset_folder=str(_folder(tmp_path, "c", captioned=True)),
              caption_policy=cp.ASK)
-    t._runs = [r1]
+    # A non-conflicted run in the same candidate set: Finding 2 -- the scan loop must
+    # not pre-assign OVERWRITE to this one before the dialog's outcome is known either.
+    r2 = _rd(lora_name="clean", dataset_folder=str(_folder(tmp_path, "clean")),
+             caption_policy=cp.ASK)
+    t._runs = [r1, r2]
 
     monkeypatch.setattr(QDialog, "exec", lambda self: QDialog.Rejected)
 
     app, prev = _with_policy(cp.ASK)
     try:
-        assert t._resolve_conflicts([r1]) is False
+        assert t._resolve_conflicts([r1, r2]) is False
     finally:
         app.set("caption_existing_policy", prev)
     assert r1.caption_policy == cp.ASK   # untouched — cancel must not decide for the user
+    assert r2.caption_policy == cp.ASK   # non-conflicted run must stay untouched too
 
 
 # ----------------------------------------------------------------------------
@@ -207,18 +212,22 @@ def test_restart_resolves_conflicts_for_done_runs_too(tmp_path, monkeypatch):
     assert len(restarted) == 1
 
 
-def test_restart_on_empty_queue_does_nothing(tmp_path, monkeypatch):
+def test_restart_on_empty_queue_shows_message_and_does_nothing(tmp_path, monkeypatch):
     t = _make_tab(tmp_path, monkeypatch)
     t._runs = []
 
     def _boom(*a, **kw):
         raise AssertionError("empty queue -> no confirm dialog, no restart call")
     monkeypatch.setattr(QMessageBox, "question", _boom)
+    info_calls = []
+    monkeypatch.setattr(QMessageBox, "information",
+                        lambda *a, **kw: info_calls.append(a) or QMessageBox.Ok)
     restarted = []
     monkeypatch.setattr(t._runner, "restart", lambda *a, **kw: restarted.append(1))
 
     t._restart()
 
+    assert len(info_calls) == 1   # empty queue gets its own honest message, not silence
     assert restarted == []
 
 
@@ -234,3 +243,51 @@ def test_restart_cancel_confirm_does_not_call_restart(tmp_path, monkeypatch):
     t._restart()
 
     assert restarted == []
+
+
+# ----------------------------------------------------------------------------
+# Finding 1 -- _start()/_restart() must actually honor a Cancel from the
+# conflict dialog, not just call _resolve_conflicts() and plow ahead. These
+# drive the real entry points (unlike test_resolve_conflicts_cancel_returns_
+# false_and_does_not_mutate, which calls _resolve_conflicts() directly) so a
+# regression that ignores its return value is caught here.
+# ----------------------------------------------------------------------------
+
+def test_start_cancel_conflict_dialog_never_calls_runner_start(tmp_path, monkeypatch):
+    t = _make_tab(tmp_path, monkeypatch)
+    r1 = _rd(lora_name="conflicted", dataset_folder=str(_folder(tmp_path, "c", captioned=True)),
+             caption_policy=cp.ASK)
+    t._runs = [r1]
+
+    monkeypatch.setattr(QDialog, "exec", lambda self: QDialog.Rejected)
+    started = []
+    monkeypatch.setattr(t._runner, "start", lambda *a, **kw: started.append((a, kw)))
+
+    app, prev = _with_policy(cp.ASK)
+    try:
+        t._start()
+    finally:
+        app.set("caption_existing_policy", prev)
+
+    assert started == []   # Cancel on the conflict dialog must not start the batch
+
+
+def test_restart_cancel_conflict_dialog_never_calls_runner_restart(tmp_path, monkeypatch):
+    t = _make_tab(tmp_path, monkeypatch)
+    r1 = _rd(lora_name="conflicted", dataset_folder=str(_folder(tmp_path, "c", captioned=True)),
+             caption_policy=cp.ASK)
+    t._runs = [r1]
+
+    # Reach the conflict dialog: confirm the "restart everything?" question first.
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **kw: QMessageBox.Yes)
+    monkeypatch.setattr(QDialog, "exec", lambda self: QDialog.Rejected)
+    restarted = []
+    monkeypatch.setattr(t._runner, "restart", lambda *a, **kw: restarted.append((a, kw)))
+
+    app, prev = _with_policy(cp.ASK)
+    try:
+        t._restart()
+    finally:
+        app.set("caption_existing_policy", prev)
+
+    assert restarted == []   # Cancel on the conflict dialog must not restart the batch

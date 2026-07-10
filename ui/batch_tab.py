@@ -247,19 +247,28 @@ class BatchTab(QWidget):
     def _start(self):
         pending = [r for r in self._runs if r.status != DONE]
         if not pending:
-            QMessageBox.information(
-                self, "Nothing to Run",
-                "Every run in the queue is done. Use ↻ Restart from Top to run them again.")
+            if not self._runs:
+                QMessageBox.information(
+                    self, "Nothing to Run",
+                    "The line's empty. Add a set from Home → Add to Batch.")
+            else:
+                QMessageBox.information(
+                    self, "Nothing to Run",
+                    "Every run in the queue is done. Use ↻ Restart from Top to run them again.")
             return
         if not self._resolve_conflicts(pending):
             return
         self._begin(lambda: self._runner.start(self._runs, continue_on_error=True,
-                                               skip_done=True))
+                                               skip_done=True),
+                    f"[Batch] Starting {len(pending)} run(s)…")
 
     def _restart(self):
         if self._guard_running():
             return
         if not self._runs:
+            QMessageBox.information(
+                self, "Nothing to Run",
+                "The line's empty. Add a set from Home → Add to Batch.")
             return
         if QMessageBox.question(
             self, "Restart Batch",
@@ -271,13 +280,16 @@ class BatchTab(QWidget):
         # just the currently-pending ones.
         if not self._resolve_conflicts(list(self._runs)):
             return
-        self._begin(lambda: self._runner.restart(self._runs, continue_on_error=True))
+        self._begin(lambda: self._runner.restart(self._runs, continue_on_error=True),
+                    f"[Batch] Restarting all {len(self._runs)} run(s) from the top…")
 
-    def _begin(self, go):
+    def _begin(self, go, log_line: str = ""):
         self._start_btn.setEnabled(False)
         self._restart_btn.setEnabled(False)
         self._stop_btn.setEnabled(True)
         self._log.clear()
+        if log_line:
+            self._log.append(log_line)
         go()
 
     def _resolve_conflicts(self, candidates) -> bool:
@@ -288,6 +300,11 @@ class BatchTab(QWidget):
         non-DONE subset for _start(), every run for _restart() (restart() resets
         every status to QUEUED, so a previously-DONE run's folder gets scanned
         for conflicts too).
+
+        Runs are never mutated while the dialog's outcome is still unknown: the
+        scan only builds a `(run, policy)` plan, and that plan is applied to the
+        actual runs (and persisted) exactly once, on whichever path returns True.
+        On Cancel, nothing about any run has changed.
         """
         from core import caption_policy as cp
         from core.settings import AppSettings
@@ -295,20 +312,20 @@ class BatchTab(QWidget):
         pending = list(candidates)
         default = AppSettings().get("caption_existing_policy")
         conflicted = []
+        plan = []   # [(run, policy), ...] — not applied until an accepted path
         for run in pending:
             state = cp.scan(run.dataset_folder)
             if cp.has_conflict(state):
                 conflicted.append((run, state))
             else:
-                run.caption_policy = cp.OVERWRITE   # nothing to destroy
+                plan.append((run, cp.OVERWRITE))   # nothing to destroy
 
         if not conflicted:
-            self._persist()
+            self._apply_policy_plan(plan)
             return True
         if default != cp.ASK:
-            for run, _state in conflicted:
-                run.caption_policy = default
-            self._persist()
+            plan.extend((run, default) for run, _state in conflicted)
+            self._apply_policy_plan(plan)
             return True
 
         dlg = QDialog(self)
@@ -348,10 +365,16 @@ class BatchTab(QWidget):
 
         if dlg.exec() != QDialog.Accepted:
             return False
-        for run, _state in conflicted:
-            run.caption_policy = combos[run.lora_name].currentData()
-        self._persist()
+        plan.extend((run, combos[run.lora_name].currentData()) for run, _state in conflicted)
+        self._apply_policy_plan(plan)
         return True
+
+    def _apply_policy_plan(self, plan) -> None:
+        """Apply a `[(run, policy), ...]` plan built by `_resolve_conflicts` and
+        persist. Only ever called on a path that is not a Cancel."""
+        for run, policy in plan:
+            run.caption_policy = policy
+        self._persist()
 
     def _stop(self):
         self._runner.stop()
