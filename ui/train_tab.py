@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QSize, QTimer, Signal, Slot
+from PySide6.QtCore import Qt, QSettings, QSize, QTimer, Signal, Slot
 from PySide6.QtGui import QColor, QIcon, QPainter
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -26,6 +26,8 @@ from PySide6.QtWidgets import (
 )
 
 from core.config_generator import generate_configs, get_config_summary
+from core.settings import SAMPLE_COUNT, SAMPLE_EVERY_N_EPOCHS, SETTINGS_APP, SETTINGS_ORG
+from core.tagger import TAGGER_MODELS, read_tagger_defaults
 from core.step_calculator import (
     calculate_training_params,
     format_calculation_string,
@@ -197,7 +199,7 @@ class TickBar(QWidget):
 class TrainTab(QWidget):
     status_message = Signal(str)  # for main window status bar
     add_to_batch_requested = Signal(object)  # emits a RunDefinition
-    load_set_requested = Signal(str, str)    # (dataset_folder, trigger_word)
+    load_set_requested = Signal(str, str, str)  # (dataset_folder, trigger_word, quality_prefix)
     subject_type_changed = Signal()          # Person/Object/Style changed -> refresh rail
     run_progress = Signal(object)            # RunProgress payload mirrored onto Home
     optimizer_changed = Signal(str)          # preset label for the Home OPTIMIZER tile
@@ -221,6 +223,7 @@ class TrainTab(QWidget):
         self._app_settings = None
         self._lms_url = "http://localhost:1234/v1"
         self._lms_model = ""
+        self._quality_prefix = ""
         # Tracks which dataset folder the sample box was auto-filled for, so a repeated
         # set_dataset for the same folder won't clobber edits.
         self._sample_autofill_folder = None
@@ -230,11 +233,25 @@ class TrainTab(QWidget):
         self._last_preview = []
         self._denoiser = LogDenoiser()
         self._stepping = False
+        # Throttle for run_manifest.update()'s global_step write — see _on_progress_updated.
+        self._manifest_step = 0
         self._preview_timer = QTimer(self)
         self._preview_timer.setInterval(3000)
         self._preview_timer.timeout.connect(self._poll_sample_dir)
+        # Injected by MainWindow so this tab can see the OTHER two GPU-owning surfaces
+        # (Dataset, Batch) without importing them; defaults to a no-op so a standalone
+        # TrainTab() (as in tests) keeps working.
+        self._gpu_busy_check = lambda: None
         self._build_ui()
         self._connect_trainer()
+
+    def set_gpu_busy_check(self, fn):
+        """Injected by MainWindow: returns a human-readable reason the GPU is busy
+        elsewhere, or None. Keeps the tabs from importing one another."""
+        self._gpu_busy_check = fn
+
+    def is_training(self) -> bool:
+        return self._trainer.is_running()
 
     # ------------------------------------------------------------------
     # Public API — called by main window to sync shared state
@@ -259,6 +276,12 @@ class TrainTab(QWidget):
 
     def set_trigger_word(self, trigger: str):
         self._trigger_word = trigger
+
+    def set_quality_prefix(self, prefix: str):
+        """Quality prefix is edited on Home; TrainTab needs its own copy so a queued
+        run's RunDefinition snapshot reflects the prefix actually in force, not
+        whatever the Dataset tab happens to hold hours later when the batch runs."""
+        self._quality_prefix = prefix or ""
 
     # ---- accessors the Home cockpit drives / reads (single source of truth) ----
     def set_lora_name(self, name: str):
@@ -337,9 +360,6 @@ class TrainTab(QWidget):
         self._ckpt_steps_spin.setValue(app_settings.get("save_every_n_steps"))
         self._sample_enable_check.setChecked(app_settings.get("sample_enable"))
         self._sample_prompts_edit.setPlainText(app_settings.get("sample_prompts"))
-        self._sample_every_spin.setValue(app_settings.get("sample_every_n_epochs"))
-        self._preview_count_spin.setValue(app_settings.get("sample_count"))
-        self._update_gen_button_label()
         # Persist edits back to settings (connected after load so loading doesn't write)
         a = app_settings
         self._ckpt_steps_spin.valueChanged.connect(lambda v: a.set("save_every_n_steps", v))
@@ -347,8 +367,6 @@ class TrainTab(QWidget):
         self._sample_enable_check.toggled.connect(self._update_sample_schedule)
         self._sample_prompts_edit.textChanged.connect(
             lambda: a.set("sample_prompts", self._sample_prompts_edit.toPlainText()))
-        self._sample_every_spin.valueChanged.connect(lambda v: a.set("sample_every_n_epochs", v))
-        self._preview_count_spin.valueChanged.connect(lambda v: a.set("sample_count", v))
         self._update_sample_schedule()
 
     def set_lmstudio_config(self, url: str, model: str):
@@ -635,16 +653,10 @@ class TrainTab(QWidget):
         sample_layout.addWidget(self._sample_prompts_edit)
 
         sample_btn_row = QHBoxLayout()
-        sample_btn_row.addWidget(QLabel("Preview images:"))
-        # Hard-gated at 4 — the preview grid is a fixed 4-wide row per epoch (two rows shown).
-        self._preview_count_spin = QSpinBox()
-        self._preview_count_spin.setRange(4, 4)
-        self._preview_count_spin.setValue(4)
-        self._preview_count_spin.setEnabled(False)
-        self._preview_count_spin.setToolTip("Fixed at 4 — one row of four preview images per epoch.")
-        self._preview_count_spin.valueChanged.connect(self._update_gen_button_label)
-        sample_btn_row.addWidget(self._preview_count_spin)
-        self._gen_prompts_btn = QPushButton("🎲 Grab 4 random captions")
+        count_lbl = QLabel(f"{SAMPLE_COUNT} preview images per epoch.")
+        count_lbl.setStyleSheet("color: #8a8a93; font-size: 11px;")
+        sample_btn_row.addWidget(count_lbl)
+        self._gen_prompts_btn = QPushButton(f"🎲 Grab {SAMPLE_COUNT} random captions")
         self._gen_prompts_btn.setToolTip(
             "Fill the box with that many of the dataset's actual captions, chosen at random, "
             "so previews render from prompts that look exactly like the training data. "
@@ -654,17 +666,6 @@ class TrainTab(QWidget):
         sample_btn_row.addWidget(self._gen_prompts_btn)
         sample_btn_row.addStretch()
         sample_layout.addLayout(sample_btn_row)
-
-        every_row = QHBoxLayout()
-        every_row.addWidget(QLabel("Render every"))
-        self._sample_every_spin = QSpinBox()
-        self._sample_every_spin.setRange(1, 50)
-        self._sample_every_spin.setValue(1)
-        self._sample_every_spin.valueChanged.connect(self._update_sample_schedule)
-        every_row.addWidget(self._sample_every_spin)
-        every_row.addWidget(QLabel("epoch(s)"))
-        every_row.addStretch()
-        sample_layout.addLayout(every_row)
 
         # Step calculator
         calc_grp = QGroupBox("Step Calculator")
@@ -751,11 +752,6 @@ class TrainTab(QWidget):
         gen_btn.setObjectName("btn_primary")
         gen_btn.setToolTip("Generate the exact TOML files training will use and view them")
         gen_btn.clicked.connect(self._preview_config)
-
-        add_batch_btn = QPushButton("➕ Add to Batch")
-        add_batch_btn.setToolTip("Snapshot the current setup as a queued run on the Batch tab")
-        add_batch_btn.clicked.connect(self._add_to_batch)
-        btn_layout.addWidget(add_batch_btn)
 
         lowvram_btn = QPushButton("🧰 Low VRAM…")
         lowvram_btn.setToolTip("For small GPUs only — fit training on less VRAM (same quality, slower)")
@@ -1111,6 +1107,11 @@ class TrainTab(QWidget):
         if not valid:
             return None, msg
         self._ensure_sample_prompts()
+        s = QSettings(SETTINGS_ORG, SETTINGS_APP)
+        model_index, threshold, _overwrite = read_tagger_defaults()
+        _label, tagger_model_id, tagger_use_onnx = TAGGER_MODELS[model_index]
+        lora_type = s.value("lora_type", "General", type=str).lower()
+        caption_order = "tags_first" if s.value("combine_order", 0, type=int) == 1 else "nl_first"
         rd = RunDefinition(
             lora_name=self._lora_name_edit.text().strip(),
             dataset_folder=self._dataset_path,
@@ -1129,9 +1130,19 @@ class TrainTab(QWidget):
             embed_metadata=self._metadata_check.isChecked(),
             sample_enabled=self._sample_enable_check.isChecked(),
             sample_prompts=[ln for ln in self._sample_prompts_edit.toPlainText().splitlines() if ln.strip()],
-            sample_every=self._sample_every_spin.value(),
-            sample_count=self._preview_count_spin.value(),
             subject_type=self._lora_type_for_subject(),
+            quality_prefix=self._quality_prefix,
+            caption_order=caption_order,
+            refine_enabled=s.value("lmstudio_refine_in_process", False, type=bool),
+            lms_url=self._lms_url,
+            lms_model=self._lms_model,
+            lms_focus=s.value("lmstudio_focus", "", type=str),
+            lora_type=("" if lora_type == "general" else lora_type),
+            max_tokens=s.value("lmstudio_max_tokens", 1200, type=int),
+            tagger_model_id=tagger_model_id,
+            tagger_threshold=threshold,
+            tagger_use_onnx=tagger_use_onnx,
+            style_anchor=self._dataset_style_anchor(),
             sdscripts_path=self._setup_path,
             dit_path=self._dit_path,
             qwen3_path=self._qwen3_path,
@@ -1156,21 +1167,20 @@ class TrainTab(QWidget):
         self._metadata_check.setChecked(rd.embed_metadata)
         self._sample_enable_check.setChecked(rd.sample_enabled)
         self._sample_prompts_edit.setPlainText("\n".join(rd.sample_prompts or []))
-        self._sample_every_spin.setValue(rd.sample_every or 1)
-        self._preview_count_spin.setValue(getattr(rd, "sample_count", 4) or 4)
-        self._update_gen_button_label()
         idx = {"character": 0, "concept": 1, "style": 2}.get(rd.subject_type, 0)
         self._subject_combo.setCurrentIndex(idx)
         # Internal dataset/trigger state used by config generation
         self._dataset_path = rd.dataset_folder
         self._image_count = rd.image_count
         self._trigger_word = rd.trigger_word
+        self.set_quality_prefix(getattr(rd, "quality_prefix", "") or "")
         if rd.dataset_folder:
             self._dataset_path_edit.setText(rd.dataset_folder)
         self._recalculate()
         self._refresh_resume_option()
-        # Ask MainWindow to load the dataset into the Dataset tab + restore trigger
-        self.load_set_requested.emit(rd.dataset_folder or "", rd.trigger_word or "")
+        # Ask MainWindow to load the dataset into the Dataset tab + restore trigger + prefix
+        self.load_set_requested.emit(
+            rd.dataset_folder or "", rd.trigger_word or "", self._quality_prefix)
 
     def _refresh_sets_combo(self):
         from core import sets
@@ -1228,8 +1238,11 @@ class TrainTab(QWidget):
         ) != QMessageBox.Yes:
             return
         n = sets.restore_captions(folder, name, stage)
-        # Rescan the folder so the Dataset gallery shows the restored captions.
-        self.load_set_requested.emit(folder, "")
+        # Rescan the folder so the Dataset gallery shows the restored captions. This is a
+        # caption-file rescan, not a full set restore, so the trigger word is left alone —
+        # but the prefix is this same named set's own value, not a foreign stale one, so
+        # it's safe (and correct) to pass it through.
+        self.load_set_requested.emit(folder, "", (rd.quality_prefix if rd else "") or "")
         self.status_message.emit(
             f"Restored {n} caption file(s) from '{name}' ({stage}).")
 
@@ -1343,7 +1356,7 @@ class TrainTab(QWidget):
     def _fill_sample_prompts(self, folder_path: str):
         """Drop N random verbatim caption blocks (N = preview count) into the box."""
         from core.sample_prompts import grab_caption_blocks
-        n = self._preview_count_spin.value()
+        n = SAMPLE_COUNT
         blocks = grab_caption_blocks(folder_path, n)
         if not blocks:
             return
@@ -1385,10 +1398,6 @@ class TrainTab(QWidget):
             return
         self._fill_sample_prompts(self._dataset_path)
 
-    def _update_gen_button_label(self, *_):
-        self._gen_prompts_btn.setText(
-            f"🎲 Grab {self._preview_count_spin.value()} random captions")
-
     def _dataset_style_anchor(self):
         """The style activation word (@-anchor) for the loaded dataset, if any."""
         if not self._dataset_path:
@@ -1407,7 +1416,7 @@ class TrainTab(QWidget):
         epochs = params.get("epochs", 0)
         if not epochs or not self._sample_enable_check.isChecked():
             return []
-        every = max(1, self._sample_every_spin.value())
+        every = SAMPLE_EVERY_N_EPOCHS
         fractions = []
         if self._app_settings and self._app_settings.get("sample_at_first"):
             fractions.append((0.0, 0))
@@ -1561,6 +1570,13 @@ class TrainTab(QWidget):
         modal.open()
 
     def _start_training(self, confirm: bool = True):
+        reason = self._gpu_busy_check()
+        if reason:
+            QMessageBox.warning(
+                self, "Cannot Start Training",
+                f"Cannot start — {reason}. Wait for it to finish, or stop it first.")
+            return
+
         valid, msg = self._validate_for_training()
         if not valid:
             QMessageBox.warning(self, "Cannot Start Training", msg)
@@ -1620,10 +1636,11 @@ class TrainTab(QWidget):
                         return
 
         # Record the active run so a crash can be recovered on next launch
-        from core import sets
+        from core import run_manifest, sets
         rd, _ = self.build_run_definition()
         if rd is not None:
             sets.mark_run_active(rd)
+            run_manifest.write_start(self._run_dir(), rd)
 
         self._trainer.start(self._config_path, self._setup_path)
 
@@ -1742,8 +1759,7 @@ class TrainTab(QWidget):
         previews = f"{Path(run_dir) / 'sample'}"
         if self._app_settings is not None:
             if self._app_settings.get("sample_enable"):
-                every = self._app_settings.get("sample_every_n_epochs")
-                previews += "  (every epoch)" if every <= 1 else f"  (every {every} epochs)"
+                previews += "  (every epoch)"
             else:
                 previews += "  (disabled)"
         info = (
@@ -2099,6 +2115,7 @@ class TrainTab(QWidget):
         self.training_active.emit(True)
         self._rp(kind="phase", label="Preparing…")
         self._stepping = False
+        self._manifest_step = 0
         self._denoiser = LogDenoiser()
         self.status_message.emit("Training started…")
         self._last_preview = []
@@ -2111,6 +2128,11 @@ class TrainTab(QWidget):
         self.training_active.emit(False)
         self._preview_timer.stop()
         self._poll_sample_dir()  # catch the final sample set
+        from core import run_manifest
+        # A user Stop must read as "interrupted" (resumable), never "failed" --
+        # find_resumable() only ever looks for running/interrupted status.
+        run_manifest.mark(
+            self._run_dir(), run_manifest.DONE if success else run_manifest.INTERRUPTED)
         if success:
             from core import sets
             sets.clear_active_run()
@@ -2189,6 +2211,14 @@ class TrainTab(QWidget):
             self._stepping = True
             self._rp(kind="phase", label="Training")
         self._rp(kind="progress", step=step, total=total)
+        # Throttled run_manifest write: this signal fires every step, and a multi-
+        # thousand-step run would otherwise hammer the disk. Write at most once every
+        # 50 steps, plus always on the terminal step so the manifest isn't stale.
+        at_terminal = bool(total) and step >= total
+        if step - self._manifest_step >= 50 or at_terminal:
+            from core import run_manifest
+            run_manifest.update(self._run_dir(), global_step=step)
+            self._manifest_step = step
         # step < 1 (the initial 0/total parse): leave the current phase label in place
 
     # ------------------------------------------------------------------

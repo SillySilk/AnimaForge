@@ -31,6 +31,7 @@ class LLMRefineProcess(QObject):
         ext: str = ".nl",
         max_tokens: int = 1200,
         characters_file: str = "",
+        skip_existing: bool = False,
     ):
         if self._process is not None and self._process.state() != QProcess.NotRunning:
             return
@@ -50,6 +51,8 @@ class LLMRefineProcess(QObject):
             args.append(f"--lora_type={lora_type.strip()}")
         if characters_file.strip():
             args.append(f"--characters_file={characters_file.strip()}")
+        if skip_existing:
+            args.append("--skip-existing")
 
         self._process = QProcess(self)
         apply_no_window(self._process)  # no console window pop-up on Windows

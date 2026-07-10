@@ -127,41 +127,51 @@ def test_read_tagger_defaults_fallbacks():
     assert idx == 0 and abs(thr - 0.35) < 1e-6 and ow is False
 
 
-def test_process_chain_runs_steps_in_order():
+def test_process_run_hands_job_to_runner(tmp_path: Path):
+    # The chain sequencing moved into CaptionRunner (covered by test_caption_runner). The
+    # tab's job now is to snapshot settings into a CaptionJob and hand it to the runner.
+    from PIL import Image
+    from core.caption_policy import OVERWRITE
+    _set_refine_in_process(False)
+    Image.new("RGB", (8, 8), (10, 10, 10)).save(tmp_path / "a.png")
     t = DatasetTab()
-    calls = []
-    t._start_tag_with_defaults = lambda: calls.append("tag")
-    t._start_describe = lambda: calls.append("describe")
-    t._start_refine = lambda: calls.append("refine")
-    t._rebuild_txt_from_sidecars = lambda: (3, 0)
-    t._refresh_step_status = lambda: None
-    t._chain_finish_ok = lambda *a: calls.append("done")
-    t._chain = list(__import__("ui.dataset_tab", fromlist=["PROCESS_STEPS"]).PROCESS_STEPS)
-    t._chain_active = True
-    t._chain_start_next()                       # tag
-    t._chain_step_done("tag", True, "x")        # -> describe
-    t._chain_step_done("describe", True, "x")   # -> refine
-    t._chain_step_done("refine", True, "x")     # -> combine (sync) -> done
-    assert calls == ["tag", "describe", "refine", "done"]
-    assert t._chain == [] and t._chain_active is False
+    t._folder_path = str(tmp_path)
+    t._sdscripts_path = "C:/sd"
+    t._image_data = [{"image_path": str(tmp_path / "a.png")}]
+    captured = {}
+    t._runner.start = lambda job: (captured.__setitem__("job", job), True)[1]
+    assert t.start_auto_caption() is True
+    assert captured["job"].chain == ["tag", "describe", "combine"]
+    assert captured["job"].policy == OVERWRITE   # this task always overwrites
+    assert t._auto_mode is True                  # stays set until the runner finishes
 
 
-def test_process_chain_stops_on_failure():
+def test_runner_finished_false_ends_auto_pipeline():
+    # A mid-chain failure or a user Stop both reach the tab as runner.finished(False).
+    # In the Home pipeline it must surface as auto_caption_finished(False), silently.
     t = DatasetTab()
-    failed = []
-    t._chain_fail = lambda key, reason: failed.append(key)
-    t._chain = ["describe", "refine", "combine"]
-    t._chain_active = True
-    t._chain_step_done("describe", False, "LM Studio not reachable")
-    assert failed == ["describe"]
+    t._auto_mode = True
+    got = []
+    t.auto_caption_finished.connect(got.append)
+    t._runner.finished.emit(False)
+    assert got == [False]
+    assert t._auto_mode is False
+    assert t._process_btn.isEnabled()
+    assert t._phase_label.text() == "Idle"
 
 
-def test_chain_cancelled_resets():
+def test_runner_finished_true_emits_processed_and_finishes():
+    # A clean finish emits the 'processed' autosave milestone, then auto_caption_finished(True).
     t = DatasetTab()
-    t._chain = ["refine", "combine"]
-    t._chain_active = True
-    t._chain_cancelled()
-    assert t._chain == [] and t._chain_active is False
+    t._auto_mode = True
+    stages, auto = [], []
+    t.caption_stage_done.connect(stages.append)
+    t.auto_caption_finished.connect(auto.append)
+    t._runner.finished.emit(True)
+    assert stages == ["processed"]
+    assert auto == [True]
+    assert t._auto_mode is False
+    assert t._process_btn.isEnabled()
 
 
 def test_dataset_tab_has_validate_names_button():

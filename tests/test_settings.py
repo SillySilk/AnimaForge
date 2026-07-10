@@ -160,9 +160,26 @@ def test_prepare_sample_args_prepends_trigger_and_style_anchor(tmp_path):
     assert out["sample_prompts"].endswith("demo_sample.txt")
 
 
-def test_prepare_sample_args_count_default(tmp_path):
+def test_sample_cadence_and_count_are_not_settings(tmp_path):
+    """Hardwired constants, not configurable keys. A stale registry value is inert."""
+    import pytest
+    from core.settings import SAMPLE_EVERY_N_EPOCHS, SAMPLE_COUNT
+    assert SAMPLE_EVERY_N_EPOCHS == 1
+    assert SAMPLE_COUNT == 3
     a = _appsettings(tmp_path)
-    assert a.get("sample_count") == 4
+    for key in ("sample_every_n_epochs", "sample_count"):
+        with pytest.raises(KeyError):
+            a.get(key)
+
+
+def test_prepare_sample_args_always_emits_cadence_one(tmp_path):
+    """Even if an old QSettings store still holds 2, the emitted arg is 1."""
+    a = _appsettings(tmp_path)
+    a._s.setValue("sample_every_n_epochs", 2)   # simulate the drifted store
+    a.set("sample_enable", True)
+    a.set("sample_prompts", "a portrait")
+    args = a.prepare_sample_args(str(tmp_path), "lr")
+    assert args["sample_every_n_epochs"] == 1
 
 
 def test_quality_prefix_leads_then_trigger(tmp_path):
@@ -231,3 +248,11 @@ def test_ui_font_roundtrip(tmp_path):
     a.set("ui_font_family", "Arial")
     assert a.get("ui_font_mode") == "custom"
     assert a.get("ui_font_family") == "Arial"
+
+
+def test_caption_existing_policy_defaults_to_ask(tmp_path):
+    from core.caption_policy import ASK, KEEP
+    a = _appsettings(tmp_path)
+    assert a.get("caption_existing_policy") == ASK
+    a.set("caption_existing_policy", KEEP)
+    assert a.get("caption_existing_policy") == KEEP

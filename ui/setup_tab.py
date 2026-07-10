@@ -928,12 +928,6 @@ class SetupTab(QWidget):
         sep.setFrameShape(QFrame.HLine)
         sep.setStyleSheet("color: #2a2a1e;")
         v.addWidget(sep)
-        self._sample_check = QCheckBox("Generate sample images during training")
-        v.addWidget(self._sample_check)
-        v.addWidget(QLabel("Sample prompts (one per line; trigger auto-prepended):"))
-        self._sample_prompts_edit = QTextEdit()
-        self._sample_prompts_edit.setFixedHeight(60)
-        v.addWidget(self._sample_prompts_edit)
         qr = QHBoxLayout()
         qr.addWidget(QLabel("Quality prefix:"))
         self._sample_quality_edit = QLineEdit()
@@ -945,11 +939,6 @@ class SetupTab(QWidget):
         qr.addWidget(self._sample_quality_edit, 1)
         v.addLayout(qr)
         sr = QHBoxLayout()
-        sr.addWidget(QLabel("Every N epochs:"))
-        self._sample_every_spin = QSpinBox()
-        self._sample_every_spin.setRange(1, 50)
-        self._sample_every_spin.setValue(1)
-        sr.addWidget(self._sample_every_spin)
         sr.addWidget(QLabel("Sampler:"))
         self._sample_sampler_edit = QLineEdit()
         self._sample_sampler_edit.setText("euler_a")
@@ -1004,6 +993,22 @@ class SetupTab(QWidget):
         r3.addWidget(self._font_family_combo)
         r3.addStretch()
         v.addLayout(r3)
+        from PySide6.QtWidgets import QButtonGroup, QRadioButton
+        from core.caption_policy import ASK, KEEP, OVERWRITE
+        pol = QVBoxLayout()
+        pol.addWidget(QLabel("When a dataset already has captions:"))
+        self._policy_group = QButtonGroup(self)
+        self._policy_buttons = {}
+        for key, text in (
+            (ASK, "Ask me (recommended)"),
+            (KEEP, "Keep them — caption only the images that have none"),
+            (OVERWRITE, "Overwrite them without asking"),
+        ):
+            rb = QRadioButton(text)
+            self._policy_group.addButton(rb)
+            self._policy_buttons[key] = rb
+            pol.addWidget(rb)
+        v.addLayout(pol)
         return g
 
     def _bind_app_widgets(self):
@@ -1022,10 +1027,7 @@ class SetupTab(QWidget):
         self._netdrop_spin.setValue(a.get("network_dropout"))
         self._flip_check.setChecked(a.get("flip_aug"))
         self._min_vram_spin.setValue(a.get("min_free_vram_mb"))
-        self._sample_check.setChecked(a.get("sample_enable"))
-        self._sample_prompts_edit.setPlainText(a.get("sample_prompts"))
         self._sample_quality_edit.setText(a.get("sample_quality_prefix"))
-        self._sample_every_spin.setValue(a.get("sample_every_n_epochs"))
         self._sample_sampler_edit.setText(a.get("sample_sampler"))
         self._sample_first_check.setChecked(a.get("sample_at_first"))
         self._def_dim_spin.setValue(a.get("default_network_dim"))
@@ -1041,6 +1043,9 @@ class SetupTab(QWidget):
             from PySide6.QtGui import QFont
             self._font_family_combo.setCurrentFont(QFont(fam_name))
         self._font_family_combo.setVisible(mode == "custom")
+        from core.caption_policy import ASK
+        policy = a.get("caption_existing_policy")
+        self._policy_buttons.get(policy, self._policy_buttons[ASK]).setChecked(True)
         # Save on change (connected AFTER loading so load doesn't trigger writes)
         self._scan_edit.textChanged.connect(lambda t: a.set("model_scan_dir", t))
         self._forge_url_edit.textChanged.connect(lambda t: a.set("forge_api_url", t))
@@ -1055,11 +1060,7 @@ class SetupTab(QWidget):
         self._netdrop_spin.valueChanged.connect(lambda val: a.set("network_dropout", val))
         self._flip_check.toggled.connect(lambda b: a.set("flip_aug", b))
         self._min_vram_spin.valueChanged.connect(lambda val: a.set("min_free_vram_mb", val))
-        self._sample_check.toggled.connect(lambda b: a.set("sample_enable", b))
-        self._sample_prompts_edit.textChanged.connect(
-            lambda: a.set("sample_prompts", self._sample_prompts_edit.toPlainText()))
         self._sample_quality_edit.textChanged.connect(lambda t: a.set("sample_quality_prefix", t))
-        self._sample_every_spin.valueChanged.connect(lambda val: a.set("sample_every_n_epochs", val))
         self._sample_sampler_edit.textChanged.connect(lambda t: a.set("sample_sampler", t))
         self._sample_first_check.toggled.connect(lambda b: a.set("sample_at_first", b))
         self._def_dim_spin.valueChanged.connect(lambda val: a.set("default_network_dim", val))
@@ -1069,6 +1070,9 @@ class SetupTab(QWidget):
             lambda i: a.set("default_caption_order", "nl_first" if i == 0 else "tags_first"))
         self._font_mode_combo.currentIndexChanged.connect(self._on_font_mode_changed)
         self._font_family_combo.currentFontChanged.connect(self._on_font_family_changed)
+        for key, rb in self._policy_buttons.items():
+            rb.toggled.connect(
+                lambda checked, k=key: checked and a.set("caption_existing_policy", k))
 
     def _on_font_mode_changed(self, idx: int) -> None:
         from utils.fonts import apply_app_font

@@ -75,9 +75,15 @@ class MainWindow(QMainWindow):
         self._sync_environment_to_train()
         self._train_tab.apply_defaults(self._setup_tab.get_app_settings())
 
-        # Offer to recover a run that was interrupted (crash/kill) last session
-        from core import sets
-        rd = sets.interrupted_run()
+        # Offer to recover a run that was interrupted (crash/kill) last session.
+        # The per-run output/<lora>/run.json manifest is tried first (it survives a
+        # copied/moved output folder or a second run started on top of an old one);
+        # sets.interrupted_run()'s single global marker is the fallback for installs
+        # that predate the manifest.
+        from core import run_manifest, sets
+        rd = run_manifest.find_resumable(self._setup_tab.get_output_dir())
+        if rd is None:
+            rd = sets.interrupted_run()
         if rd is not None:
             self._train_tab.show_recovery_banner(rd)
 
@@ -298,6 +304,26 @@ class MainWindow(QMainWindow):
         self._stack.addWidget(self._train_tab)       # index 4
         self._stack.addWidget(self._batch_tab)       # index 5
 
+        # There is exactly one GPU. DatasetTab captioning, TrainTab training, and
+        # BatchTab's own CaptionRunner + TrainingProcess can each seize it, and none
+        # of them knows about the others. MainWindow is the arbiter: inject a
+        # reason-returning busy check into each tab, naming the OTHER two surfaces
+        # (never itself -- self-collision is already handled by each tab's own
+        # guards) so every start path can refuse instead of colliding on the GPU.
+        def _busy_except(tab):
+            def check():
+                if tab is not self._batch_tab and self._batch_tab.is_running():
+                    return "a batch run is in progress"
+                if tab is not self._dataset_tab and self._dataset_tab._captioning_busy():
+                    return "captioning is in progress"
+                if tab is not self._train_tab and self._train_tab.is_training():
+                    return "training is in progress"
+                return None
+            return check
+
+        for tab in (self._dataset_tab, self._train_tab, self._batch_tab):
+            tab.set_gpu_busy_check(_busy_except(tab))
+
         # ---- Status bar ----
         self._status_bar = QStatusBar()
         self.setStatusBar(self._status_bar)
@@ -354,6 +380,9 @@ class MainWindow(QMainWindow):
         # Add-to-batch from the Train tab populates the Batch queue
         self._train_tab.add_to_batch_requested.connect(self._batch_tab.add_run)
 
+        # Home's "➕ Add to Batch" (Lever band) queues the current cockpit-mirrored run
+        self._home_tab.add_to_batch_requested.connect(self._train_tab.add_current_to_batch)
+
         # Loading a set restores its dataset + trigger into the Dataset tab
         self._train_tab.load_set_requested.connect(self._on_load_set_requested)
 
@@ -384,6 +413,7 @@ class MainWindow(QMainWindow):
         self._home_tab.name_changed.connect(self._train_tab.set_lora_name)
         self._home_tab.trigger_changed.connect(self._on_home_trigger_changed)
         self._home_tab.prefix_changed.connect(self._dataset_tab.set_prefix)
+        self._home_tab.prefix_changed.connect(self._train_tab.set_quality_prefix)
         self._home_tab.type_changed.connect(self._on_home_type_changed)
         self._home_tab.anchor_changed.connect(self._characters_tab.set_style_anchor)
         self._home_tab.run_requested.connect(self._on_home_run)
@@ -705,11 +735,17 @@ class MainWindow(QMainWindow):
             self._status_bar.showMessage("Quick Run: captioning dataset…")
             if not self._dataset_tab.start_auto_caption():
                 self._qr_phases = []
-                self._home_tab.apply_run_progress({"kind": "error", "label": "Caption error"})
-                QMessageBox.warning(
-                    self, "Cannot caption",
-                    "Could not start captioning. Check the sd-scripts path (Settings) and "
-                    "that the dataset folder has images.")
+                if self._dataset_tab.start_cancelled_by_user():
+                    # The user clicked Cancel in the existing-captions dialog — not an
+                    # error, so no popup and no "Caption error" label.
+                    self._home_tab.apply_run_progress({"kind": "reset"})
+                    self._status_bar.showMessage("Quick Run: captioning cancelled.")
+                else:
+                    self._home_tab.apply_run_progress({"kind": "error", "label": "Caption error"})
+                    QMessageBox.warning(
+                        self, "Cannot caption",
+                        "Could not start captioning. Check the sd-scripts path (Settings) and "
+                        "that the dataset folder has images.")
             # else: wait for auto_caption_finished → _qr_caption_done
         elif phase == quick_run.TRAIN:
             self._qr_phases.pop(0)
@@ -770,8 +806,10 @@ class MainWindow(QMainWindow):
         self._status_bar.showMessage(msg, 8000)
 
     def _on_home_recover(self):
-        from core import sets
-        rd = sets.interrupted_run()
+        from core import run_manifest, sets
+        rd = run_manifest.find_resumable(self._setup_tab.get_output_dir())
+        if rd is None:
+            rd = sets.interrupted_run()
         if rd is not None:
             self._switch_tab(4)
             self._train_tab.show_recovery_banner(rd)
@@ -851,15 +889,23 @@ class MainWindow(QMainWindow):
             self, "Update Applied",
             f"AnimaForge v{version} is in place.\nRestart AnimaForge to finish.{extra}")
 
-    def _on_load_set_requested(self, dataset_folder: str, trigger: str):
+    def _on_load_set_requested(self, dataset_folder: str, trigger: str, quality_prefix: str):
         if dataset_folder:
             self._dataset_tab.load_folder_path(dataset_folder)
         if trigger:
             self._dataset_tab.set_trigger_word(trigger)
+        # Unconditional (not `if quality_prefix:`): a loaded set with an empty prefix must
+        # clear whatever the previous dataset left in the field — that's the exact
+        # stale-live-UI bug this restore path exists to prevent. Restore both the visible
+        # Home/Dataset field and TrainTab's own copy so the UI never disagrees with what
+        # a queued run would actually use.
+        self._dataset_tab.set_prefix(quality_prefix)
+        self._train_tab.set_quality_prefix(quality_prefix)
 
     def _on_dataset_loaded(self, folder_path: str, image_count: int):
         self._train_tab.set_dataset(folder_path, image_count)
         self._train_tab.set_trigger_word(self._dataset_tab.get_trigger_word())
+        self._train_tab.set_quality_prefix(self._dataset_tab.get_prefix())
         self._characters_tab.set_dataset(folder_path)
         self._status_bar.showMessage(
             f"Dataset loaded: {image_count} images from {folder_path}"

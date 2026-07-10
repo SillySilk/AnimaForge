@@ -9,6 +9,8 @@ from pathlib import Path
 
 from PySide6.QtCore import QSettings
 
+from core.caption_policy import ASK
+
 SETTINGS_ORG = "AnimaForge"
 SETTINGS_APP = "AnimaForge"
 
@@ -35,6 +37,13 @@ def _migrate_between(old: QSettings, new: QSettings) -> None:
 def migrate_legacy_settings() -> None:
     """One-time migration of the PonyExpress/LoRATrainer store into AnimaForge."""
     _migrate_between(QSettings(LEGACY_ORG, LEGACY_APP), QSettings(SETTINGS_ORG, SETTINGS_APP))
+
+# Preview sampling is hardwired, not configurable. The compare grid is a fixed
+# three-wide row per epoch (ui.train_tab.PREVIEW_COLS), and the earliest-best
+# workflow needs a preview EVERY epoch. Exposing these as settings let a stray
+# value (2) persist into every saved set and re-infect the store on load.
+SAMPLE_EVERY_N_EPOCHS = 1
+SAMPLE_COUNT = 3
 
 DEFAULTS = {
     # Paths
@@ -66,6 +75,11 @@ DEFAULTS = {
     # (SOFT_CAP_STEPS) so large datasets can train longer. The floor still applies.
     "default_uncap_steps": False,
     "default_caption_order": "nl_first",
+    # What captioning does when the dataset folder already holds .txt captions.
+    # "ask" (default) prompts; "overwrite" clobbers; "keep" treats a captioned
+    # image as done and skips it entirely. Batch resolves "ask" up front, once,
+    # for the whole queue; headless has no GUI and degrades "ask" to "keep".
+    "caption_existing_policy": ASK,
     "default_train_text_encoder": False,
     # Advanced training (Anima-honored only)
     "weighting_scheme": "sigmoid",
@@ -84,8 +98,6 @@ DEFAULTS = {
     # at the earliest-best — a sparse default hid progress for whole runs (user feedback).
     "sample_enable": True,
     "sample_prompts": "",
-    "sample_every_n_epochs": 1,
-    "sample_count": 4,
     "sample_sampler": "euler_a",
     "sample_at_first": True,
     # Quality/safety scaffolding prepended to every preview prompt (after the trigger/anchor)
@@ -209,7 +221,7 @@ class AppSettings:
         f.write_text("\n".join(lines) + "\n", encoding="utf-8")
         args = {
             "sample_prompts": str(f.as_posix()),
-            "sample_every_n_epochs": self.get("sample_every_n_epochs"),
+            "sample_every_n_epochs": SAMPLE_EVERY_N_EPOCHS,
             "sample_sampler": self.get("sample_sampler"),
         }
         if self.get("sample_at_first"):

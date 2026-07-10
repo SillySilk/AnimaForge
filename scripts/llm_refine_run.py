@@ -275,6 +275,8 @@ def main():
     p.add_argument("--max_tokens", type=int, default=DEFAULT_MAX_TOKENS)
     p.add_argument("--characters_file", default="")
     p.add_argument("--timeout", type=float, default=180.0)
+    p.add_argument("--skip-existing", dest="skip_existing", action="store_true",
+                   help="leave images that already have a non-empty .txt caption alone")
     args = p.parse_args()
 
     folder = Path(args.image_folder)
@@ -297,6 +299,11 @@ def main():
     done = 0
     for img in images:
         try:
+            if args.skip_existing:
+                txt = img.with_suffix(".txt")
+                if txt.is_file() and txt.read_text(encoding="utf-8").strip():
+                    log(f"[LLM] skip {img.name} (already captioned)")
+                    continue
             draft = ""
             nlp = img.with_suffix(args.ext)
             if nlp.is_file():

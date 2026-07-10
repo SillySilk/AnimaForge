@@ -95,3 +95,37 @@ def test_headless_missing_queue_exits_one_cleanly(tmp_path):
     code = headless.run_headless(str(tmp_path / "nope.json"),
                                  str(tmp_path / "s.json"))
     assert code == 1
+
+
+def test_headless_degrades_ask_policy_to_keep_before_runner_starts(tmp_path, monkeypatch):
+    """'ask' is a UI-only prompt with no GUI here to answer it. Headless must rewrite
+    every 'ask' run to 'keep' BEFORE the runner starts, so a queued 'ask' never blocks
+    and never destroys captions already on disk. A spy on BatchRunner.start captures the
+    policies at the exact moment the runner is invoked."""
+    import core.batch as batch_mod
+
+    seen = {}
+
+    def _spy_start(self, runs, *args, **kwargs):
+        seen["policies"] = [r.caption_policy for r in runs]
+        self.batch_finished.emit()          # end synchronously; run nothing
+
+    monkeypatch.setattr(batch_mod.BatchRunner, "start", _spy_start)
+
+    runs = [
+        RunDefinition(lora_name="lr0", dataset_folder=str(tmp_path), image_count=4,
+                      target_steps=100, output_dir=str(tmp_path / "out"),
+                      caption_policy="ask"),
+        RunDefinition(lora_name="lr1", dataset_folder=str(tmp_path), image_count=4,
+                      target_steps=100, output_dir=str(tmp_path / "out"),
+                      caption_policy="ask"),
+    ]
+    qf = tmp_path / "batch_queue.json"
+    save_queue(str(qf), runs)
+
+    headless.run_headless(str(qf), str(tmp_path / "s.json"))
+
+    assert seen["policies"] == ["keep", "keep"]
+    # The rewrite is persisted back to the queue file too.
+    queue = json.loads(qf.read_text(encoding="utf-8"))
+    assert [r["caption_policy"] for r in queue] == ["keep", "keep"]

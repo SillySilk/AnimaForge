@@ -18,7 +18,7 @@ def test_apply_run_definition_populates_widgets():
         lora_name="Demo", dataset_folder="C:/ds", image_count=7,
         optimizer="prodigy", learning_rate=0.0001, network_dim=24,
         network_alpha=12, target_steps=1500, sample_enabled=True,
-        sample_prompts=["x", "y"], sample_every=3, subject_type="style",
+        sample_prompts=["x", "y"], subject_type="style",
     )
     t = TrainTab()
     t.apply_run_definition(rd)
@@ -29,7 +29,6 @@ def test_apply_run_definition_populates_widgets():
     assert t._target_steps_spin.value() == 1500
     assert t._sample_enable_check.isChecked() is True
     assert t._sample_prompts_edit.toPlainText() == "x\ny"
-    assert t._sample_every_spin.value() == 3
     assert t._subject_combo.currentIndex() == 2
     assert t._train_text_encoder is False
 
@@ -156,8 +155,8 @@ def test_build_run_definition_fills_empty_prompts_from_captions(tmp_path: Path):
 
     rd, msg = t.build_run_definition()
     assert rd is not None, msg
-    # preview count (default 4) random verbatim captions from the dataset
-    assert len(rd.sample_prompts) == t._preview_count_spin.value() == 4
+    # preview count (hardwired SAMPLE_COUNT) random verbatim captions from the dataset
+    assert len(rd.sample_prompts) == 3
     assert all(p in {"a red fox in snow", "a knight at dusk", "a cat on a mat",
                      "a girl in a forest", "a ship at sea", "a tower under stars"}
                for p in rd.sample_prompts)
@@ -182,3 +181,108 @@ def test_build_run_definition_never_clobbers_authored_prompts(tmp_path: Path):
     rd, msg = t.build_run_definition()
     assert rd is not None, msg
     assert rd.sample_prompts == ["my own prompt"]
+
+
+def test_apply_run_definition_restores_the_quality_prefix():
+    """Load Set must not leave the previous dataset's prefix on the run."""
+    t = TrainTab()
+    t.set_quality_prefix("OLD_LIVE_PREFIX")
+    rd = RunDefinition(lora_name="Saved", dataset_folder="C:/ds", image_count=5,
+                       trigger_word="savedtrigger", quality_prefix="SAVED_SET_PREFIX")
+    t.apply_run_definition(rd)
+    assert t._quality_prefix == "SAVED_SET_PREFIX"
+
+
+def test_apply_run_definition_clears_a_stale_prefix_when_the_set_has_none():
+    t = TrainTab()
+    t.set_quality_prefix("LEFTOVER")
+    rd = RunDefinition(lora_name="S", dataset_folder="C:/ds", image_count=5)
+    t.apply_run_definition(rd)
+    assert t._quality_prefix == ""
+
+
+def test_load_set_requested_carries_the_quality_prefix():
+    t = TrainTab()
+    seen = []
+    t.load_set_requested.connect(lambda f, tr, p: seen.append((f, tr, p)))
+    rd = RunDefinition(lora_name="S", dataset_folder="C:/ds", image_count=5,
+                       trigger_word="trig", quality_prefix="masterpiece")
+    t.apply_run_definition(rd)
+    assert seen == [("C:/ds", "trig", "masterpiece")]
+
+
+def test_quality_prefix_survives_an_apply_then_build_round_trip(tmp_path: Path):
+    """The snapshot must survive a load -> save cycle, not just a load."""
+    sd = tmp_path / "sd"; sd.mkdir()
+    dit = tmp_path / "dit.safetensors"; dit.write_bytes(b"x")
+    q = tmp_path / "q.safetensors"; q.write_bytes(b"x")
+    vae = tmp_path / "vae.safetensors"; vae.write_bytes(b"x")
+    out = tmp_path / "out"; out.mkdir()
+    ds = tmp_path / "ds"; ds.mkdir()
+
+    t = TrainTab()
+    t.set_environment(str(sd), str(dit), str(q), str(vae), str(out))
+    rd = RunDefinition(lora_name="Demo", dataset_folder=str(ds), image_count=5,
+                       trigger_word="trig", quality_prefix="masterpiece, best quality")
+    t.apply_run_definition(rd)
+    rd2, msg = t.build_run_definition()
+    assert rd2 is not None, msg
+    assert rd2.quality_prefix == rd.quality_prefix
+
+
+def test_set_quality_prefix_reaches_build_run_definition(tmp_path: Path):
+    """Home owns the quality-prefix control; TrainTab has no widget of its own for it,
+    so set_quality_prefix (wired from Home via MainWindow) must be the only path a
+    queued run's snapshot gets it through."""
+    sd = tmp_path / "sd"; sd.mkdir()
+    dit = tmp_path / "dit.safetensors"; dit.write_bytes(b"x")
+    q = tmp_path / "q.safetensors"; q.write_bytes(b"x")
+    vae = tmp_path / "vae.safetensors"; vae.write_bytes(b"x")
+    out = tmp_path / "out"; out.mkdir()
+    ds = tmp_path / "ds"; ds.mkdir()
+
+    t = TrainTab()
+    assert t._quality_prefix == ""  # default before Home ever sets it
+    t.set_environment(str(sd), str(dit), str(q), str(vae), str(out))
+    t.set_dataset(str(ds), 1)
+    t._lora_name_edit.setText("Demo")
+    t.set_quality_prefix("masterpiece, best quality")
+
+    rd, msg = t.build_run_definition()
+    assert rd is not None, msg
+    assert rd.quality_prefix == "masterpiece, best quality"
+
+
+# ----------------------------------------------------------------------------
+# GPU exclusivity: MainWindow injects set_gpu_busy_check() so Start Training
+# refuses before anything else (config generation, VRAM probe, launch) when a
+# batch or a manual caption chain already owns the single GPU.
+# ----------------------------------------------------------------------------
+
+def test_default_gpu_busy_check_is_none_for_a_standalone_tab():
+    t = TrainTab()
+    assert t._gpu_busy_check() is None
+
+
+def test_start_training_refused_when_gpu_busy_elsewhere(monkeypatch):
+    import ui.train_tab as tt_mod
+    t = TrainTab()
+    t.set_gpu_busy_check(lambda: "a batch run is in progress")
+    monkeypatch.setattr(tt_mod.QMessageBox, "warning", lambda *a, **k: None)
+
+    def _boom(*a, **k):
+        raise AssertionError("must refuse before validating/generating anything else")
+    monkeypatch.setattr(t, "_validate_for_training", _boom)
+    started = []
+    monkeypatch.setattr(t._trainer, "start", lambda *a, **k: started.append((a, k)))
+
+    t._start_training(confirm=False)
+    assert started == []
+
+
+def test_is_training_reflects_trainer_running_state(monkeypatch):
+    t = TrainTab()
+    monkeypatch.setattr(t._trainer, "is_running", lambda: True)
+    assert t.is_training() is True
+    monkeypatch.setattr(t._trainer, "is_running", lambda: False)
+    assert t.is_training() is False

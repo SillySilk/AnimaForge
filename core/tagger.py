@@ -1,9 +1,28 @@
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, Signal
+from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, QSettings, Signal
 
+from core.settings import SETTINGS_APP, SETTINGS_ORG
 from utils.proc import apply_no_window
+
+# (display label, repo_id, use_onnx)
+TAGGER_MODELS = [
+    ("WD SwinV2 Tagger v3 (recommended)", "SmilingWolf/wd-swinv2-tagger-v3",    True),
+    ("WD ViT Tagger v3",                  "SmilingWolf/wd-vit-tagger-v3",        True),
+    ("WD SwinV2 Tagger v2 (Keras)",       "SmilingWolf/wd-v1-4-swinv2-tagger-v2", False),
+    ("WD ViT Tagger v2 (Keras)",          "SmilingWolf/wd-v1-4-vit-tagger-v2",    False),
+]
+
+
+def read_tagger_defaults():
+    """Saved Auto-Tag settings (model index, threshold, overwrite) used by a Process run."""
+    s = QSettings(SETTINGS_ORG, SETTINGS_APP)
+    return (
+        s.value("tagger_model_index", 0, type=int),
+        s.value("tagger_threshold", 0.35, type=float),
+        s.value("tagger_overwrite", False, type=bool),
+    )
 
 
 class TaggerProcess(QObject):
@@ -20,17 +39,16 @@ class TaggerProcess(QObject):
         image_folder: str,
         model_id: str,
         threshold: float,
-        overwrite: bool,
         use_onnx: bool = False,
         batch_size: int = 8,
+        only_file: str = "",
+        skip_existing: bool = False,
     ):
         if self._process is not None and self._process.state() != QProcess.NotRunning:
             return
 
         from core.env import subprocess_python
         python = subprocess_python(sdscripts_path)
-
-        script = str(Path(sdscripts_path) / "finetune" / "tag_images_by_wd14_tagger.py")
 
         # model_dir: store downloaded models inside sd-scripts to keep them portable
         model_dir = str(Path(sdscripts_path) / "wd14_models")
@@ -43,24 +61,24 @@ class TaggerProcess(QObject):
             model_file = Path(model_dir) / repo_dir / "saved_model.pb"
         needs_download = not model_file.is_file()
 
+        script = str(Path(__file__).resolve().parents[1] / "scripts" / "wd14_tag_run.py")
         args = [
             script,
             image_folder,
+            f"--sdscripts={sdscripts_path}",
             f"--repo_id={model_id}",
             f"--model_dir={model_dir}",
             f"--thresh={threshold:.2f}",
             f"--batch_size={batch_size}",
-            "--caption_extension=.tags",
-            "--remove_underscore",  # Anima wants 'side ponytail' not 'side_ponytail'
         ]
+        if only_file:
+            args.append(f"--only={only_file}")
+        if skip_existing:
+            args.append("--skip-existing")
         if use_onnx:
             args.append("--onnx")
         if needs_download:
             args.append("--force_download")
-        # This sd-scripts build overwrites caption files by default and has no
-        # --overwrite_caption flag; use --append_tags to add to existing tags instead.
-        if not overwrite:
-            args.append("--append_tags")
 
         self._process = QProcess(self)
         apply_no_window(self._process)  # no console window pop-up on Windows

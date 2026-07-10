@@ -132,3 +132,11 @@ def test_run_progress_shows_live_steps_on_front():
     assert t._train_progress._counter.text() == "143 / 800"
     t.apply_run_progress({"kind": "reset"})
     assert t._train_progress._counter.text() == ""
+
+
+def test_home_emits_add_to_batch_requested():
+    h = HomeTab()
+    seen = []
+    h.add_to_batch_requested.connect(lambda: seen.append(True))
+    h._add_batch_btn.click()
+    assert seen == [True]

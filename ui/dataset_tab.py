@@ -28,23 +28,17 @@ from PySide6.QtWidgets import (
 )
 
 from core import characters as characters_mod
+from core import caption_policy as cp
 from core.caption_progress import parse_progress
+from core.caption_runner import CaptionJob, CaptionRunner
 from core.dataset_manager import (
     SUPPORTED_EXTENSIONS, apply_prefix, combine_all, save_caption, scan_folder,
 )
-from core.tagger import TaggerProcess
+from core.tagger import TaggerProcess, TAGGER_MODELS, read_tagger_defaults
 from core.joycaption import JoyCaptionProcess
 from core.llm_refine import LLMRefineProcess
-from core.settings import SETTINGS_ORG, SETTINGS_APP
+from core.settings import SETTINGS_ORG, SETTINGS_APP, AppSettings
 from ui.image_editor import ImageEditorDialog
-
-# (display label, repo_id, use_onnx)
-TAGGER_MODELS = [
-    ("WD SwinV2 Tagger v3 (recommended)", "SmilingWolf/wd-swinv2-tagger-v3",    True),
-    ("WD ViT Tagger v3",                  "SmilingWolf/wd-vit-tagger-v3",        True),
-    ("WD SwinV2 Tagger v2 (Keras)",       "SmilingWolf/wd-v1-4-swinv2-tagger-v2", False),
-    ("WD ViT Tagger v2 (Keras)",          "SmilingWolf/wd-v1-4-vit-tagger-v2",    False),
-]
 
 THUMB_SIZE = 220
 GRID_COLS = 4
@@ -52,6 +46,9 @@ WORKFLOW_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif")
 
 PROCESS_STEPS = ["tag", "describe", "refine", "combine"]
 STEP_NAMES = {"tag": "Tag", "describe": "Describe", "refine": "Refine", "combine": "Combine"}
+# CaptionRunner.tick's phase string (see core/caption_progress.py::_PHASES) back to the
+# step key phase_text() expects.
+_PHASE_TO_STEP = {v: k for k, v in STEP_NAMES.items()}
 
 
 def phase_text(step_key: str, chain=None) -> str:
@@ -65,14 +62,19 @@ def phase_text(step_key: str, chain=None) -> str:
     return f"Step {idx + 1}/{len(chain)} · {STEP_NAMES[step_key]}…"
 
 
-def read_tagger_defaults():
-    """Saved Auto-Tag settings (model index, threshold, overwrite) used by a Process run."""
-    s = QSettings(SETTINGS_ORG, SETTINGS_APP)
-    return (
-        s.value("tagger_model_index", 0, type=int),
-        s.value("tagger_threshold", 0.35, type=float),
-        s.value("tagger_overwrite", False, type=bool),
-    )
+def conflict_text(state) -> str:
+    """The warning line for a folder that already holds captions. Pure — no Qt.
+
+    `state.foreign` sharpens the wording only when it is non-zero: when every
+    existing caption is AnimaForge's own work (foreign == 0), "not written by
+    AnimaForge" would be alarmist and wrong.
+    """
+    n = len(state.captioned)
+    todo = len(state.partial) + len(state.untouched)
+    lead = f"⚠ {n} image{'s' if n != 1 else ''} already have captions"
+    if state.foreign:
+        lead += f" — {state.foreign} of them were not written by AnimaForge"
+    return f"{lead}.\nRunning will overwrite them. Keeping them will caption {todo} instead."
 
 
 class CaptionEdit(QTextEdit):
@@ -354,10 +356,21 @@ class DatasetTab(QWidget):
         self._caption_timer.setInterval(2000)
         self._caption_timer.timeout.connect(self._rebuild_txt_from_sidecars)
         self._characters = characters_mod.DatasetCharacters()
-        self._chain = []
-        self._chain_plan = []     # full planned step list for the active run (for phase numbering)
-        self._chain_active = False
+        # The tag -> describe -> refine -> combine chain is owned by CaptionRunner now
+        # (shared headless with BatchRunner). This tab drives it and re-emits its signals;
+        # the manual step buttons above still drive self._tagger/_joycaption/_llm directly.
+        self._runner = CaptionRunner(self)
+        self._runner.log_line.connect(self._on_runner_log)
+        self._runner.tick.connect(self._on_runner_tick)
+        self._runner.stage_done.connect(self._on_stage_done)
+        self._runner.finished.connect(self._on_caption_finished)
         self._auto_mode = False   # True while the Home pipeline runs the chain headless
+        self._start_cancelled = False  # True when the user cancelled the conflict dialog
+        self._active_chain = None  # job.chain of the in-flight runner run -> phase_text()
+        # Injected by MainWindow so this tab can see the OTHER two GPU-owning surfaces
+        # (Batch, Train) without importing them; defaults to a no-op so a standalone
+        # DatasetTab() (every test in this file) keeps working.
+        self._gpu_busy_check = lambda: None
         self._build_ui()
         self._load_llm_prefs()
         self._refresh_refine_reflection()
@@ -1035,9 +1048,16 @@ class DatasetTab(QWidget):
             self._processing_card = None
 
     def _stop_captioning(self):
+        # The chain runs in the CaptionRunner now; a manual step still runs one of this
+        # tab's own procs. Stop whichever is live. runner.stop() emits finished(False),
+        # which routes to _on_caption_finished (the user-Stop branch).
+        if self._runner.is_running():
+            self._caption_stopped = True
+            self._on_runner_log("[Stop] Stopping captioning — finishing the current image…")
+            self._runner.stop()
+            return
         if self._active_caption_proc and self._active_caption_proc.is_running():
             self._caption_stopped = True
-            self._chain = []
             self._on_tagger_log("[Stop] Stopping captioning — finishing the current image…")
             self._active_caption_proc.stop()
 
@@ -1052,121 +1072,304 @@ class DatasetTab(QWidget):
         QMessageBox.information(self, "Combine Complete", summary)
 
     def _process_clicked(self):
+        self._start_cancelled = False
         if not self._dataset_ready():
             return
         if not self._sdscripts_path:
             QMessageBox.warning(self, "No sd-scripts", "Set the sd-scripts path in the Setup tab first.")
             return
-        if self._chain_active or self._llm.is_running() or self._joycaption.is_running() or self._tagger.is_running():
-            QMessageBox.information(self, "Busy", "A captioning process is already running.")
+        if self._captioning_blocked():
+            QMessageBox.information(self, "Busy", self._busy_message())
             return
         chain = self._build_process_chain()
-        box = QMessageBox(self)
-        box.setWindowTitle("Run all steps")
-        box.setIcon(QMessageBox.Question)
-        box.setText(
+        header = (
             f"Run all {len(chain)} steps on {len(self._image_data)} images?\n\n"
             f"{self._chain_arrow_text(chain)}\n(using your saved settings)"
         )
-        box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-        box.setDefaultButton(QMessageBox.Yes)
-        if box.exec() != QMessageBox.Yes:
-            return
-        self._chain = list(chain)
-        self._chain_plan = list(chain)
-        self._chain_active = True
-        self._process_btn.setEnabled(False)
-        self._chain_start_next()
+        state = cp.scan(self._folder_path)
+        if cp.has_conflict(state) and AppSettings().get("caption_existing_policy") == cp.ASK:
+            # Fold the existing-captions warning into this same confirm instead of
+            # stacking a second dialog on top of it — _resolve_policy's dialog IS the
+            # "run all N steps?" confirm when there is something at risk to decide.
+            policy = self._resolve_policy(header, state=state)
+            if policy is None:
+                return
+        else:
+            box = QMessageBox(self)
+            box.setWindowTitle("Run all steps")
+            box.setIcon(QMessageBox.Question)
+            box.setText(header)
+            box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            box.setDefaultButton(QMessageBox.Yes)
+            if box.exec() != QMessageBox.Yes:
+                return
+            policy = self._resolve_policy(state=state)   # no conflict, or already decided — silent
+        self._auto_mode = False
+        self._start_runner_or_warn(self._build_caption_job(policy))
 
     def start_auto_caption(self) -> bool:
         """Headless Process run for the Home pipeline — no confirm dialog, no completion
         popup. Emits auto_caption_finished(success) when the chain ends. Returns False
-        if it could not start (caller should surface its own error)."""
+        if it could not start (caller should surface its own error) or if the user
+        cancelled the existing-captions dialog — start_cancelled_by_user() tells the two
+        apart so the caller doesn't misreport a cancel as a real failure."""
+        self._start_cancelled = False
         if not self._folder_path or len(self._image_data) == 0 or not self._sdscripts_path:
             return False
-        if (self._chain_active or self._llm.is_running()
-                or self._joycaption.is_running() or self._tagger.is_running()):
+        if self._captioning_blocked():
             return False
+        policy = self._resolve_policy()
+        if policy is None:
+            return False   # user cancelled; start_cancelled_by_user() now True
         self._auto_mode = True
+        return self._start_runner_or_warn(self._build_caption_job(policy))
+
+    def set_gpu_busy_check(self, fn):
+        """Injected by MainWindow: returns a human-readable reason the GPU is busy
+        elsewhere, or None. Keeps the tabs from importing one another."""
+        self._gpu_busy_check = fn
+
+    def _captioning_busy(self) -> bool:
+        """True if any of THIS tab's caption engines is live — the runner chain OR a
+        manual step button. Two TaggerProcess objects exist (this tab's for the manual
+        buttons, the runner's own for the chain); both must be idle before a new run
+        starts.
+
+        Deliberately pure (own engines only, no self._gpu_busy_check() fold): MainWindow's
+        cross-tab arbiter calls this exact method to ask "is DatasetTab busy?" on behalf of
+        Train/Batch. Folding the injected check in here would make that query circular —
+        e.g. Batch asking Dataset would transitively re-derive "is Batch itself running?"
+        and Batch would falsely see itself as the reason it's busy. Call sites that need
+        the combined "busy for any reason" answer OR this with self._gpu_busy_check()
+        themselves (see _captioning_blocked())."""
+        return (self._runner.is_running() or self._llm.is_running()
+                or self._joycaption.is_running() or self._tagger.is_running())
+
+    def _captioning_blocked(self) -> bool:
+        """True if a caption start should be refused: this tab's own engines are busy,
+        OR the single GPU is busy elsewhere (a batch run or training; see
+        set_gpu_busy_check). Every start path uses this, not _captioning_busy() alone,
+        so the manual Auto-Tag / Describe / Refine buttons inherit the cross-tab guard
+        the same way _process_clicked and start_auto_caption do."""
+        return self._captioning_busy() or self._gpu_busy_check() is not None
+
+    def _busy_message(self) -> str:
+        """The dialog text for a refused start: names the reason when it's the GPU
+        being busy elsewhere, otherwise the original own-engine wording."""
+        reason = self._gpu_busy_check()
+        if reason:
+            return f"Cannot start — {reason}. Wait for it to finish, or stop it first."
+        return "A captioning process is already running."
+
+    def _resolve_policy(self, header: str = "", state=None):
+        """The policy this run should use — OVERWRITE or KEEP — or None if the user
+        cancelled. Shows the existing-captions dialog only when the saved setting is
+        ASK *and* the scan finds captions already on disk to protect; otherwise resolves
+        silently (no dialog).
+
+        `header`, when given, is folded into the SAME dialog as a preamble (the manual
+        Process button's "Run all N steps?" question) rather than stacking a second
+        confirm — pass nothing for the headless Home pipeline, which never asked that
+        question in the first place.
+
+        `state`, when given, is a `cp.scan()` result the caller already computed (e.g.
+        _process_clicked scanning once to pick its dialog branch) so this call doesn't
+        walk the folder and re-read every caption sidecar a second time per click.
+        """
+        if state is None:
+            state = cp.scan(self._folder_path)
+        if not cp.has_conflict(state):
+            return cp.OVERWRITE          # nothing to destroy; do the full chain
+        app = AppSettings()
+        policy = app.get("caption_existing_policy")
+        if policy != cp.ASK:
+            return policy
+        box = QMessageBox(self)
+        box.setWindowTitle("Existing captions found")
+        box.setIcon(QMessageBox.Warning)
+        text = conflict_text(state)
+        box.setText(f"{header}\n\n{text}" if header else text)
+        keep_btn = box.addButton(
+            f"Keep existing (caption {len(state.partial) + len(state.untouched)})",
+            QMessageBox.AcceptRole)
+        over_btn = box.addButton(f"Overwrite all {state.total}", QMessageBox.DestructiveRole)
+        box.addButton("Cancel", QMessageBox.RejectRole)
+        remember = QCheckBox("Remember my choice")
+        box.setCheckBox(remember)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is keep_btn:
+            chosen = cp.KEEP
+        elif clicked is over_btn:
+            chosen = cp.OVERWRITE
+        else:
+            self._start_cancelled = True
+            return None
+        if remember.isChecked():
+            app.set("caption_existing_policy", chosen)
+        return chosen
+
+    def start_cancelled_by_user(self) -> bool:
+        """True when the most recent start attempt (_process_clicked or
+        start_auto_caption) ended because the user clicked Cancel in the
+        existing-captions dialog, as opposed to a genuine refusal (busy, no
+        sd-scripts path, empty dataset). Read by main_window._qr_advance so it can
+        tell an honest cancel apart from a real error on start_auto_caption() -> False.
+        """
+        return self._start_cancelled
+
+    def _build_caption_job(self, policy: str) -> CaptionJob:
+        """Snapshot the live per-run settings into a headless CaptionJob for the runner.
+
+        combine now runs inside the runner, so `order` is read from the same combine_order
+        QSettings int that _rebuild_txt_from_sidecars uses. trigger + prefix are passed
+        separately (CaptionJob.combine_prefix() joins them, as _rebuild_txt_from_sidecars
+        does)."""
+        s = QSettings(SETTINGS_ORG, SETTINGS_APP)
+        model_index, threshold, _overwrite = read_tagger_defaults()
+        _label, model_id, use_onnx = TAGGER_MODELS[model_index]
+        lora_type = s.value("lora_type", "General", type=str).lower()
+        order = "tags_first" if s.value("combine_order", 0, type=int) == 1 else "nl_first"
+        return CaptionJob(
+            dataset_folder=self._folder_path,
+            sdscripts_path=self._sdscripts_path,
+            trigger=self.get_trigger_word(),
+            prefix=self.get_prefix(),
+            order=order,
+            chain=self._build_process_chain(),
+            policy=policy,
+            lms_url=self._lms_url,
+            lms_model=self._lms_model,
+            lms_focus=s.value("lmstudio_focus", "", type=str),
+            lora_type=("" if lora_type == "general" else lora_type),
+            max_tokens=s.value("lmstudio_max_tokens", 1200, type=int),
+            characters_file=characters_mod.path_for(self._folder_path),
+            tagger_model_id=model_id,
+            tagger_threshold=threshold,
+            tagger_use_onnx=use_onnx,
+        )
+
+    def _begin_runner_ui(self):
+        """Enter runner-chain mode: enable Stop, show live progress + log. Unlike
+        _begin_caption there is NO whole-folder rebuild timer — combine is a runner stage
+        scoped to its own only= list, so a whole-folder combine here would double it.
+
+        Also disables the Individual-Steps buttons (belt and suspenders): the guards in
+        _describe_joycaption / _start_refine / _open_tagger_dialog already block a manual
+        launch via _captioning_busy(), but disabling the buttons keeps them from even being
+        clickable while the runner chain owns the folder."""
         self._caption_stopped = False
-        chain = self._build_process_chain()
-        self._chain = list(chain)
-        self._chain_plan = list(chain)
-        self._chain_active = True
+        self._stop_caption_btn.setEnabled(True)
+        for b in (self._autotag_btn, self._describe_btn, self._llm_btn, self._combine_btn):
+            b.setEnabled(False)
+        self._caption_bar.setRange(0, 1)
+        self._caption_bar.setValue(0)
+        self._caption_file.setText("")
+        self._live_progress.setVisible(True)
+        self._tagger_log.setVisible(True)
+        self._tagger_log.clear()
+        self._tagger_log.append("⚠ Do not close the app while captioning is in progress.\n")
+
+    def _end_runner_ui(self):
+        """Leave runner-chain mode. No _rebuild_txt_from_sidecars() here — the runner has
+        already combined into .txt; a whole-folder rebuild is the double-combine hazard.
+
+        Called on every path out of a runner chain — success, mid-chain failure, and user
+        Stop all collapse into CaptionRunner.finished(bool) -> _on_caption_finished, which
+        calls this unconditionally — so the Individual-Steps buttons re-enable here too."""
+        self._stop_caption_btn.setEnabled(False)
+        for b in (self._autotag_btn, self._describe_btn, self._llm_btn, self._combine_btn):
+            b.setEnabled(True)
+        self._live_progress.setVisible(False)
+        self._clear_processing_frame()
+
+    def _start_runner_or_warn(self, job: CaptionJob) -> bool:
+        """Hand the job to the runner. Returns whether it actually started. On a refused
+        start (False) or an invalid chain (ValueError — unreachable via _build_process_chain,
+        guarded defensively) the UI is restored and False returned, so start_auto_caption
+        never raises into main_window._qr_advance (which shows its own error on False)."""
+        self._active_chain = job.chain
         self._process_btn.setEnabled(False)
-        self._chain_start_next()
-        return True
+        self._begin_runner_ui()
+        try:
+            started = self._runner.start(job)
+        except ValueError:
+            started = False
+        if not started:
+            self._auto_mode = False
+            self._end_runner_ui()
+            self._process_btn.setEnabled(True)
+            self._phase_label.setText("Idle")
+        return started
 
-    def _chain_start_next(self):
-        if not self._chain:
-            self._chain_active = False
-            self._chain_finish_ok()
-            return
-        key = self._chain[0]
-        self._phase_label.setText(phase_text(key, self._chain_plan))
-        if key == "tag":
-            self._start_tag_with_defaults()
-        elif key == "describe":
-            self._start_describe()
-        elif key == "refine":
-            self._start_refine()
-        elif key == "combine":
-            # All caption passes are done — first autosave restore point.
+    def _on_runner_log(self, line: str):
+        """Append a CaptionRunner log line. Progress ticks arrive separately via
+        runner.tick, so this does NOT parse progress (doing so would double-fire caption_tick)."""
+        self._tagger_log.append(line)
+        self._tagger_log.verticalScrollBar().setValue(
+            self._tagger_log.verticalScrollBar().maximum())
+
+    def _on_runner_tick(self, phase: str, done: int, total: int, filename: str):
+        """Adapt the runner's 4-arg tick to the tab's 3-arg caption_tick and drive the local
+        live UI (bar, current-file label, processing highlight)."""
+        step_key = _PHASE_TO_STEP.get(phase)
+        self._phase_label.setText(phase_text(step_key, self._active_chain) if step_key else phase)
+        self._caption_bar.setRange(0, total)
+        self._caption_bar.setValue(done)
+        self._caption_file.setText(filename)
+        self._set_processing_frame(filename)
+        self.caption_tick.emit(phase, done, total)
+
+    def _pre_combine_stage(self):
+        """The stage immediately before 'combine' in the active job's chain — the last raw
+        caption pass. None when 'combine' is absent or leads the chain."""
+        job = self._runner._job
+        chain = list(job.chain) if job else []
+        if "combine" not in chain:
+            return None
+        idx = chain.index("combine")
+        return chain[idx - 1] if idx > 0 else None
+
+    def _on_stage_done(self, stage: str):
+        """A runner stage landed. Refresh the on-disk step counts, and fire the 'captioned'
+        autosave milestone once the last raw pass completes — mirroring the old chain, which
+        emitted it at the top of the combine branch, immediately before combine ran."""
+        self._refresh_step_status()
+        if stage == self._pre_combine_stage():
             self.caption_stage_done.emit("captioned")
-            self._rebuild_txt_from_sidecars()
-            self._refresh_step_status()
-            self._chain.pop(0)
-            self._chain_start_next()
 
-    def _chain_step_done(self, key: str, success: bool, fail_reason: str):
-        """Called from a *_finished handler while a Process chain is active."""
-        if not success:
-            self._chain_fail(key, fail_reason)
-            return
-        if self._chain and self._chain[0] == key:
-            self._chain.pop(0)
-        self._chain_start_next()
-
-    def _chain_fail(self, key: str, reason: str):
-        self._chain = []
-        self._chain_active = False
-        self._process_btn.setEnabled(True)
-        self._phase_label.setText(f"Failed at {STEP_NAMES[key]}")
-        if self._auto_mode:
-            # Home pipeline: stay silent here; the orchestrator surfaces one error popup.
-            self._auto_mode = False
-            self.auto_caption_finished.emit(False)
-            return
-        QMessageBox.warning(
-            self, "Process stopped",
-            f"{STEP_NAMES[key]} failed: {reason}\n\nStopped. Completed steps are kept."
-        )
-
-    def _chain_finish_ok(self, *_):
-        self._chain = []
-        self._chain_active = False
+    def _on_caption_finished(self, ok: bool):
+        """The runner chain ended — success, a mid-chain failure, or a user Stop (the runner
+        collapses all three into finished(bool)). Replaces _chain_finish_ok / _chain_fail /
+        _chain_cancelled: re-enable the button, reset the phase, emit the 'processed'
+        milestone on success, and (in the Home pipeline) auto_caption_finished."""
+        self._end_runner_ui()
+        self._refresh_all_captions()   # gallery reflects the runner's freshly-combined .txt
+        self._refresh_step_status()
+        auto = self._auto_mode
+        self._auto_mode = False
         self._process_btn.setEnabled(True)
         self._phase_label.setText("Idle")
-        # Final .txt files are built — second autosave restore point.
-        self.caption_stage_done.emit("processed")
-        if self._auto_mode:
-            self._auto_mode = False
-            self.auto_caption_finished.emit(True)
+        if ok:
+            # Final .txt files are built — the 'processed' autosave restore point.
+            self.caption_stage_done.emit("processed")
+        if auto:
+            # Home pipeline: stay silent here; the orchestrator surfaces any error popup.
+            self.auto_caption_finished.emit(ok)
             return
-        c = self._step_status_counts()
-        QMessageBox.information(
-            self, "Process complete",
-            f"All steps complete — {c['txt']} caption file(s) built."
-        )
-
-    def _chain_cancelled(self):
-        self._chain = []
-        self._chain_active = False
-        self._process_btn.setEnabled(True)
-        self._phase_label.setText("Idle")
-        if self._auto_mode:
-            self._auto_mode = False
-            self.auto_caption_finished.emit(False)
+        if ok:
+            c = self._step_status_counts()
+            QMessageBox.information(
+                self, "Process complete",
+                f"All steps complete — {c['txt']} caption file(s) built.")
+        elif self._caption_stopped:
+            QMessageBox.information(
+                self, "Stopped",
+                "Captioning stopped. Captions completed so far are kept.")
+        else:
+            QMessageBox.warning(
+                self, "Process stopped",
+                "A step failed — stopping. Completed steps are kept. See the log for details.")
 
     def _describe_joycaption(self):
         if not self._dataset_ready():
@@ -1174,8 +1377,8 @@ class DatasetTab(QWidget):
         if not self._sdscripts_path:
             QMessageBox.warning(self, "No sd-scripts", "Set the sd-scripts path in the Setup tab first.")
             return
-        if self._joycaption.is_running() or self._tagger.is_running():
-            QMessageBox.information(self, "Busy", "A captioning process is already running.")
+        if self._captioning_blocked():
+            QMessageBox.information(self, "Busy", self._busy_message())
             return
         msg = QMessageBox(self)
         msg.setWindowTitle("Describe with JoyCaption")
@@ -1268,8 +1471,8 @@ class DatasetTab(QWidget):
 
     def _start_refine(self):
         """Start the LLM refine pass using saved settings (no dialog). Reused by Process."""
-        if self._llm.is_running() or self._joycaption.is_running() or self._tagger.is_running():
-            QMessageBox.information(self, "Busy", "A captioning process is already running.")
+        if self._captioning_blocked():
+            QMessageBox.information(self, "Busy", self._busy_message())
             return
         s = QSettings(SETTINGS_ORG, SETTINGS_APP)
         lora_type = s.value("lora_type", "General", type=str).lower()
@@ -1326,11 +1529,7 @@ class DatasetTab(QWidget):
         written = self._end_caption()
         self._refresh_step_status()
         if self._caption_stopped:
-            self._chain_cancelled()
             QMessageBox.information(self, "Stopped", "Captioning stopped. Captions completed so far are kept.")
-            return
-        if self._chain_active:
-            self._chain_step_done("refine", success, "LM Studio not reachable / refiner error.")
             return
         if success:
             QMessageBox.information(
@@ -1350,11 +1549,7 @@ class DatasetTab(QWidget):
         written = self._end_caption()
         self._refresh_step_status()
         if self._caption_stopped:
-            self._chain_cancelled()
             QMessageBox.information(self, "Stopped", "Captioning stopped. Captions completed so far are kept.")
-            return
-        if self._chain_active:
-            self._chain_step_done("describe", success, "JoyCaption exited with an error.")
             return
         if success:
             QMessageBox.information(
@@ -1516,8 +1711,8 @@ class DatasetTab(QWidget):
         if not self._sdscripts_path:
             QMessageBox.warning(self, "No sd-scripts", "Set the sd-scripts path in the Setup tab first.")
             return
-        if self._tagger.is_running():
-            QMessageBox.information(self, "Tagger Running", "Auto-tagger is already running.")
+        if self._captioning_blocked():
+            QMessageBox.information(self, "Tagger Running", self._busy_message())
             return
 
         dlg = QDialog(self)
@@ -1592,7 +1787,7 @@ class DatasetTab(QWidget):
             image_folder=self._folder_path,
             model_id=model_id,
             threshold=threshold,
-            overwrite=overwrite,
+            skip_existing=not overwrite,
             use_onnx=use_onnx,
         )
         self._begin_caption(self._tagger)
@@ -1611,7 +1806,7 @@ class DatasetTab(QWidget):
             image_folder=self._folder_path,
             model_id=model_id,
             threshold=threshold,
-            overwrite=overwrite,
+            skip_existing=not overwrite,
             use_onnx=use_onnx,
         )
         self._begin_caption(self._tagger)
@@ -1636,11 +1831,7 @@ class DatasetTab(QWidget):
         written = self._end_caption()
         self._refresh_step_status()
         if self._caption_stopped:
-            self._chain_cancelled()
             QMessageBox.information(self, "Stopped", "Captioning stopped. Captions completed so far are kept.")
-            return
-        if self._chain_active:
-            self._chain_step_done("tag", success, "The tagger exited with an error.")
             return
         if success:
             QMessageBox.information(
