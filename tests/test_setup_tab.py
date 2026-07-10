@@ -112,3 +112,15 @@ def test_setup_tab_survives_an_unrecognized_policy_in_the_store():
         assert t._policy_buttons[ASK].isChecked()
     finally:
         app.set("caption_existing_policy", prev)
+
+
+def test_startup_update_toggle_roundtrips():
+    s = SetupTab()
+    prev = s._app.get("startup_update_check")
+    try:
+        s._startup_update_check.setChecked(False)
+        assert s._app.get("startup_update_check") is False
+        s._startup_update_check.setChecked(True)
+        assert s._app.get("startup_update_check") is True
+    finally:
+        s._app.set("startup_update_check", prev)
