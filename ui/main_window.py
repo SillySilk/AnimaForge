@@ -360,6 +360,9 @@ class MainWindow(QMainWindow):
         # Add-to-batch from the Train tab populates the Batch queue
         self._train_tab.add_to_batch_requested.connect(self._batch_tab.add_run)
 
+        # Home's "➕ Add to Batch" (Lever band) queues the current cockpit-mirrored run
+        self._home_tab.add_to_batch_requested.connect(self._train_tab.add_current_to_batch)
+
         # Loading a set restores its dataset + trigger into the Dataset tab
         self._train_tab.load_set_requested.connect(self._on_load_set_requested)
 

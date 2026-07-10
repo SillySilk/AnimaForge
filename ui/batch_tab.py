@@ -2,6 +2,9 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -33,8 +36,12 @@ class BatchTab(QWidget):
         self._runner = BatchRunner(self)
         self._runner.run_started.connect(self._on_run_started)
         self._runner.run_finished.connect(self._on_run_finished)
+        self._runner.run_phase.connect(self._on_run_phase)
         self._runner.batch_finished.connect(self._on_batch_finished)
         self._runner.log_line.connect(self._on_log)
+        # Active run's phase pill (CAPTIONING / TRAINING) — reset between batches.
+        self._phase_idx = None
+        self._phase_text = ""
         # Side output for external supervisors (Comic Studio); GUI-run batches
         # emit the same batch_status.json the headless runner does.
         self._status_writer = StatusWriter(self._runner, self._runs,
@@ -98,11 +105,17 @@ class BatchTab(QWidget):
         self._start_btn = QPushButton("▶  Start Batch")
         self._start_btn.setObjectName("btn_start")
         self._start_btn.clicked.connect(self._start)
+        self._restart_btn = QPushButton("↻  Restart from Top")
+        self._restart_btn.setObjectName("af_btn_ghost")
+        self._restart_btn.setToolTip(
+            "Re-run every queued set from the top, including ones already DONE")
+        self._restart_btn.clicked.connect(self._restart)
         self._stop_btn = QPushButton("■  Stop Batch")
         self._stop_btn.setObjectName("btn_stop")
         self._stop_btn.setEnabled(False)
         self._stop_btn.clicked.connect(self._stop)
         run_row.addWidget(self._start_btn)
+        run_row.addWidget(self._restart_btn)
         run_row.addWidget(self._stop_btn)
         self._overall_label = QLabel("")
         self._overall_label.setStyleSheet("color: #8a8a93; font-size: 12px;")
@@ -166,6 +179,12 @@ class BatchTab(QWidget):
             f"color:{color}; border:1px solid {color}; border-radius:9px; "
             "padding:2px 10px; font-size:10px; font-weight:700;")
         row.addWidget(pill)
+        if i == self._phase_idx and self._phase_text:
+            phase_pill = QLabel(self._phase_text.upper())
+            phase_pill.setStyleSheet(
+                "color:#f4d160; border:1px solid #f4d160; border-radius:9px; "
+                "padding:2px 10px; font-size:10px; font-weight:700; margin-left:4px;")
+            row.addWidget(phase_pill)
         for text, slot in (("↑", lambda _c=False, idx=i: self._move_up(idx)),
                            ("↓", lambda _c=False, idx=i: self._move_down(idx)),
                            ("✕", lambda _c=False, idx=i: self._remove(idx))):
@@ -228,28 +247,139 @@ class BatchTab(QWidget):
     def _start(self):
         pending = [r for r in self._runs if r.status != DONE]
         if not pending:
-            QMessageBox.information(self, "Nothing to Run", "The queue has no pending runs.")
+            QMessageBox.information(
+                self, "Nothing to Run",
+                "Every run in the queue is done. Use ↻ Restart from Top to run them again.")
             return
+        if not self._resolve_conflicts(pending):
+            return
+        self._begin(lambda: self._runner.start(self._runs, continue_on_error=True,
+                                               skip_done=True))
+
+    def _restart(self):
+        if self._guard_running():
+            return
+        if not self._runs:
+            return
+        if QMessageBox.question(
+            self, "Restart Batch",
+            f"Re-run all {len(self._runs)} run(s) from the top? Finished runs will train again."
+        ) != QMessageBox.Yes:
+            return
+        # Every run executes on a restart (restart() resets every status to QUEUED),
+        # so every run's dataset folder must be checked for conflicts here — not
+        # just the currently-pending ones.
+        if not self._resolve_conflicts(list(self._runs)):
+            return
+        self._begin(lambda: self._runner.restart(self._runs, continue_on_error=True))
+
+    def _begin(self, go):
         self._start_btn.setEnabled(False)
+        self._restart_btn.setEnabled(False)
         self._stop_btn.setEnabled(True)
         self._log.clear()
-        self._log.append(f"[Batch] Starting {len(pending)} run(s)…")
-        self._runner.start(self._runs, continue_on_error=True)
+        go()
+
+    def _resolve_conflicts(self, candidates) -> bool:
+        """Settle every candidate run's caption policy BEFORE the queue starts. One
+        dialog, per-set choice, Apply-to-all. False = user cancelled, don't start.
+
+        `candidates` must be exactly the runs that will actually execute: the
+        non-DONE subset for _start(), every run for _restart() (restart() resets
+        every status to QUEUED, so a previously-DONE run's folder gets scanned
+        for conflicts too).
+        """
+        from core import caption_policy as cp
+        from core.settings import AppSettings
+
+        pending = list(candidates)
+        default = AppSettings().get("caption_existing_policy")
+        conflicted = []
+        for run in pending:
+            state = cp.scan(run.dataset_folder)
+            if cp.has_conflict(state):
+                conflicted.append((run, state))
+            else:
+                run.caption_policy = cp.OVERWRITE   # nothing to destroy
+
+        if not conflicted:
+            self._persist()
+            return True
+        if default != cp.ASK:
+            for run, _state in conflicted:
+                run.caption_policy = default
+            self._persist()
+            return True
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Existing captions found")
+        lay = QVBoxLayout(dlg)
+        lay.addWidget(QLabel(
+            f"{len(conflicted)} of {len(pending)} queued sets already have captions."))
+        combos = {}
+        for run, state in conflicted:
+            row = QHBoxLayout()
+            row.addWidget(QLabel(run.lora_name))
+            row.addWidget(QLabel(f"{len(state.captioned)}/{state.total} captioned"))
+            row.addStretch()
+            combo = QComboBox()
+            combo.addItem("Keep", cp.KEEP)
+            combo.addItem("Overwrite", cp.OVERWRITE)
+            combos[run.lora_name] = combo
+            row.addWidget(combo)
+            lay.addLayout(row)
+
+        all_row = QHBoxLayout()
+        all_row.addWidget(QLabel("Apply to all:"))
+        for label, policy in (("Keep", cp.KEEP), ("Overwrite", cp.OVERWRITE)):
+            b = QPushButton(label)
+            b.clicked.connect(
+                lambda _c=False, p=policy: [c.setCurrentIndex(c.findData(p))
+                                            for c in combos.values()])
+            all_row.addWidget(b)
+        all_row.addStretch()
+        lay.addLayout(all_row)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Ok).setText("Start Batch")
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        lay.addWidget(buttons)
+
+        if dlg.exec() != QDialog.Accepted:
+            return False
+        for run, _state in conflicted:
+            run.caption_policy = combos[run.lora_name].currentData()
+        self._persist()
+        return True
 
     def _stop(self):
         self._runner.stop()
 
     def _on_run_started(self, idx: int):
+        self._phase_idx = idx
+        self._phase_text = ""
         self._overall_label.setText(f"Running {idx + 1} / {len(self._runs)}")
         self._refresh_queue()
 
+    def _on_run_phase(self, idx: int, phase: str):
+        self._phase_idx = idx
+        self._phase_text = phase
+        self._refresh_queue()
+
     def _on_run_finished(self, idx: int, success: bool):
+        if idx == self._phase_idx:
+            self._phase_idx = None
+            self._phase_text = ""
         self._persist()
         self._refresh_queue()
 
     def _on_batch_finished(self):
         self._start_btn.setEnabled(True)
+        self._restart_btn.setEnabled(True)
         self._stop_btn.setEnabled(False)
+        self._phase_idx = None
+        self._phase_text = ""
         self._overall_label.setText("Batch complete.")
         self._log.append("[Batch] Finished.")
         self._persist()

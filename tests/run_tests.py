@@ -50,6 +50,7 @@ import test_caption_policy as m38
 import test_caption_manifest as m39
 import test_caption_runner as m40
 import test_run_manifest as m41
+import test_batch_tab as m42
 
 
 class MonkeyPatch:
@@ -100,7 +101,7 @@ def run_module(mod):
 
 if __name__ == "__main__":
     total_p = total_f = 0
-    for mod in (m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m20, m21, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37, m38, m39, m40, m41):
+    for mod in (m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m20, m21, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37, m38, m39, m40, m41, m42):
         print(f"== {mod.__name__} ==")
         p, f = run_module(mod)
         total_p += p

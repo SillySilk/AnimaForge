@@ -72,6 +72,7 @@ class HomeTab(QWidget):
     type_changed = Signal(str)     # "character" / "concept" / "style" (auto-detect → Train)
     anchor_changed = Signal(str)
     run_requested = Signal()          # "Forge It" — the unattended caption→train pipeline
+    add_to_batch_requested = Signal()  # "➕ Add to Batch" — queue this set for later
     run_caption_requested = Signal()  # pillar "Run Captioning" button
     start_train_requested = Signal()  # pillar "Start Training" button
     stop_train_requested = Signal()   # pillar "Stop" button (enabled while a run is live)
@@ -648,6 +649,15 @@ class HomeTab(QWidget):
         col.addWidget(mk)
         h.addLayout(col)
         h.addStretch()
+
+        self._add_batch_btn = QPushButton("➕  Add to Batch")
+        self._add_batch_btn.setObjectName("af_btn_ghost")
+        self._add_batch_btn.setMinimumHeight(52)
+        self._add_batch_btn.setCursor(Qt.PointingHandCursor)
+        self._add_batch_btn.setToolTip(
+            "Queue this set — caption and train — to run later on the Batch screen")
+        self._add_batch_btn.clicked.connect(self.add_to_batch_requested.emit)
+        h.addWidget(self._add_batch_btn)
 
         forge = QPushButton("⚒  Forge It")
         forge.setObjectName("af_btn_forge")

@@ -741,11 +741,6 @@ class TrainTab(QWidget):
         gen_btn.setToolTip("Generate the exact TOML files training will use and view them")
         gen_btn.clicked.connect(self._preview_config)
 
-        add_batch_btn = QPushButton("➕ Add to Batch")
-        add_batch_btn.setToolTip("Snapshot the current setup as a queued run on the Batch tab")
-        add_batch_btn.clicked.connect(self._add_to_batch)
-        btn_layout.addWidget(add_batch_btn)
-
         lowvram_btn = QPushButton("🧰 Low VRAM…")
         lowvram_btn.setToolTip("For small GPUs only — fit training on less VRAM (same quality, slower)")
         lowvram_btn.clicked.connect(self._open_lowvram)
