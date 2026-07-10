@@ -46,6 +46,8 @@ def read_build_stamp(root):
         return None
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return None
         sha = data.get("commit")
         return sha if isinstance(sha, str) and sha else None
     except (OSError, ValueError):

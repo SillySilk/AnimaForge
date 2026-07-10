@@ -99,6 +99,11 @@ def test_read_build_stamp_ignores_garbage(tmp_path):
     assert updater.read_build_stamp(tmp_path) is None
 
 
+def test_read_build_stamp_ignores_non_dict_json(tmp_path):
+    (tmp_path / "build_stamp.json").write_text("[1, 2, 3]", encoding="utf-8")
+    assert updater.read_build_stamp(tmp_path) is None
+
+
 def test_zip_extract_layout(tmp_path: Path):
     # Build a GitHub-style zipball: everything under one AnimaForge-main/ root.
     src = _fake_repo(tmp_path / "build")
