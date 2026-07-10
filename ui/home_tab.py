@@ -97,6 +97,13 @@ class HomeTab(QWidget):
         self._lms_thread = None
         self._last_ctx = {}
         self._build_ui()
+        # A live LM Studio ping is a QThread; if the app tears down while one is
+        # running, Qt aborts the process (nonzero exit). Wait them out on quit so
+        # the marketing capture / release build and run_tests exit cleanly.
+        from PySide6.QtWidgets import QApplication
+        app = QApplication.instance()
+        if app is not None:
+            app.aboutToQuit.connect(self._stop_lms_pings)
 
     # ---- pure logic (unit-tested) ----
     def _readiness_rows(self, ctx):
@@ -1020,6 +1027,16 @@ class HomeTab(QWidget):
         t.done.connect(self._on_lms_ping)
         self._lms_thread = t
         t.start()
+
+    def _stop_lms_pings(self):
+        """Wait for every in-flight LM Studio ping QThread to finish so the process
+        never tears down with a running QThread — Qt aborts the process on that,
+        which broke the marketing capture / release build and made run_tests exit
+        nonzero on a passing suite. run() self-terminates at its 2.5s urlopen
+        timeout, so each wait() returns within a few seconds."""
+        for t in self.findChildren(_LmsPing):
+            if t.isRunning():
+                t.wait(3000)
 
     def _on_lms_ping(self, ok):
         self._set_row("LM Studio", "ok" if ok else "err")

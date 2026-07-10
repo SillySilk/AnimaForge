@@ -140,3 +140,44 @@ def test_home_emits_add_to_batch_requested():
     h.add_to_batch_requested.connect(lambda: seen.append(True))
     h._add_batch_btn.click()
     assert seen == [True]
+
+
+def test_stop_lms_pings_leaves_no_running_ping_thread(monkeypatch):
+    """A live LM Studio ping is a QThread. If the app tears down while one is
+    running, Qt aborts the process (nonzero exit) — which broke the marketing
+    capture / release build and made run_tests exit nonzero on a passing suite.
+    _stop_lms_pings() must wait every in-flight ping out before teardown."""
+    import time
+    import threading
+    from PySide6.QtCore import QThread, Signal
+    import ui.home_tab as ht
+
+    release = threading.Event()
+
+    class _FakePing(QThread):
+        done = Signal(bool)
+
+        def __init__(self, url, parent=None):
+            super().__init__(parent)
+
+        def run(self):
+            release.wait(5.0)      # stays "running" until released (bounded like the real 2.5s timeout)
+            self.done.emit(False)
+
+    monkeypatch.setattr(ht, "_LmsPing", _FakePing)   # auto-restored after the test
+    try:
+        h = HomeTab()
+        h._start_lms_ping("http://ping.invalid/")
+        t = h._lms_thread
+        for _ in range(200):        # QThread.start() is async; wait for it to spin up
+            if t.isRunning():
+                break
+            time.sleep(0.01)
+        assert t.isRunning(), "precondition: a ping thread is in flight"
+
+        release.set()               # real run() self-terminates at its urlopen timeout
+        h._stop_lms_pings()
+        assert not t.isRunning(), "_stop_lms_pings must wait the ping thread out"
+        assert not [p for p in h.findChildren(_FakePing) if p.isRunning()]
+    finally:
+        release.set()               # ensure the fake thread is freed even on assertion failure
