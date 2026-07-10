@@ -165,17 +165,20 @@ def compare_to_main(local_sha, *, opener=urllib.request.urlopen) -> dict:
     except (OSError, ValueError):
         return {"status": "error"}
 
-    status = data.get("status")
-    if status != "ahead":
-        return {"status": status} if status else {"status": "error"}
-    commits = data.get("commits") or []
-    head_sha = commits[-1].get("sha", "") if commits else ""
-    subject = ""
-    if commits:
-        subject = (commits[-1].get("commit", {}).get("message", "")
-                   .splitlines() or [""])[0]
-    return {"status": "ahead", "ahead_by": int(data.get("ahead_by", len(commits))),
-            "head_sha": head_sha, "latest_subject": subject}
+    try:
+        status = data.get("status")
+        if status != "ahead":
+            return {"status": status} if status else {"status": "error"}
+        commits = data.get("commits") or []
+        head_sha = commits[-1].get("sha", "") if commits else ""
+        subject = ""
+        if commits:
+            subject = (commits[-1].get("commit", {}).get("message", "")
+                       .splitlines() or [""])[0]
+        return {"status": "ahead", "ahead_by": int(data.get("ahead_by", len(commits))),
+                "head_sha": head_sha, "latest_subject": subject}
+    except (AttributeError, ValueError, TypeError, KeyError, IndexError):
+        return {"status": "error"}
 
 
 def apply_update(new_root, app_root) -> int:

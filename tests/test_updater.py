@@ -194,3 +194,15 @@ def test_compare_network_error_is_error():
     def boom(url, timeout=None):
         raise OSError("no net")
     assert updater.compare_to_main("a" * 40, opener=boom) == {"status": "error"}
+
+
+def test_compare_non_integer_ahead_by_is_error():
+    payload = {"status": "ahead", "ahead_by": "lots",
+               "commits": [{"sha": "f" * 40, "commit": {"message": "x"}}]}
+    assert updater.compare_to_main("a" * 40,
+                                   opener=_fake_opener(payload)) == {"status": "error"}
+
+
+def test_compare_non_404_http_error_is_error():
+    out = updater.compare_to_main("a" * 40, opener=_fake_opener(http_error=500))
+    assert out == {"status": "error"}
