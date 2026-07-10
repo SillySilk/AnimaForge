@@ -120,7 +120,7 @@ def write_sidecar(image_path: str, ext: str, text: str) -> bool:
 
 
 def combine_caption(nl: str, tags: str, prefix: str = "", order: str = "nl_first",
-                    lead: str = "") -> str:
+                    lead: str = "", rules=None) -> str:
     """
     Merge a natural-language caption and booru tags into one caption string.
 
@@ -131,9 +131,17 @@ def combine_caption(nl: str, tags: str, prefix: str = "", order: str = "nl_first
     that must lead the caption right after the trigger prefix. Lead tokens are de-duplicated
     and any copy already sitting in nl/tags is removed so the token is hoisted to the front
     rather than duplicated — keeping the result idempotent across re-combines.
+
+    `rules`, if given, is a list of (find, replace) pairs (see core.caption_rules) applied to
+    the nl/tags BODY only, before prefix/lead are ever prepended — a rule can never delete the
+    trigger word, quality prefix, a character token or the style anchor.
     """
     nl = (nl or "").strip().strip(",").strip()
     tags = (tags or "").strip().strip(",").strip()
+    if rules:
+        from core.caption_rules import apply_caption_rules
+        nl = apply_caption_rules(nl, rules)
+        tags = apply_caption_rules(tags, rules)
     prefix = (prefix or "").strip().strip(",").strip()
     lead = (lead or "").strip().strip(",").strip()
 
@@ -155,7 +163,7 @@ def combine_caption(nl: str, tags: str, prefix: str = "", order: str = "nl_first
 
 
 def combine_all(folder_path: str, prefix: str = "", order: str = "nl_first",
-                apply_anchors: bool = True, only=None) -> tuple:
+                apply_anchors: bool = True, only=None, rules=None) -> tuple:
     """
     For every image, merge its .nl and .tags sidecars into the training .txt file.
 
@@ -165,6 +173,10 @@ def combine_all(folder_path: str, prefix: str = "", order: str = "nl_first",
 
     `only`, if given, is a list of image paths restricting which images get re-combined; other
     images' .txt files are left untouched. None (default) means every image in the folder.
+
+    `rules`, if given, is passed straight through to combine_caption — applied to the .txt this
+    builds, never to the .nl/.tags sidecars on disk, so changing a rule and re-running Combine
+    recomputes from pristine sources instead of compounding edits.
 
     Returns (written_count, error_count).
     """
@@ -195,7 +207,7 @@ def combine_all(folder_path: str, prefix: str = "", order: str = "nl_first",
             toks = _ch.explicit_tokens_for_image(chars, img.name)
             anchor = (chars.style_anchor or "").strip()
             lead = ", ".join(list(toks) + ([anchor] if anchor else []))
-        merged = combine_caption(nl, tags, prefix=prefix, order=order, lead=lead)
+        merged = combine_caption(nl, tags, prefix=prefix, order=order, lead=lead, rules=rules)
         if save_caption(str(img.with_suffix(".txt")), merged):
             written += 1
         else:

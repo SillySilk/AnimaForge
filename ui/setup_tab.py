@@ -22,11 +22,14 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSpinBox,
+    QTableWidget,
+    QTableWidgetItem,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
+from core.caption_rules import dump_rules, parse_rules
 from core.env import subprocess_python
 from core.settings import AppSettings
 from ui.forge_modal import ForgeModal
@@ -1009,7 +1012,81 @@ class SetupTab(QWidget):
             self._policy_buttons[key] = rb
             pol.addWidget(rb)
         v.addLayout(pol)
+
+        # Caption find/replace rules — banning a tag IS find/replace with an empty
+        # replacement ("1boy" -> ""), so one table covers both misgendering fixes
+        # ("man" -> "woman") and tag bans. Applied to the caption body only, when the
+        # .txt is built (see core/caption_rules.py + core/dataset_manager.combine_caption).
+        sep_rules = QFrame()
+        sep_rules.setFrameShape(QFrame.HLine)
+        sep_rules.setStyleSheet("color: #2a2a1e;")
+        v.addWidget(sep_rules)
+        v.addWidget(QLabel("Caption find/replace rules:"))
+        self._rules_table = QTableWidget(0, 2)
+        self._rules_table.setHorizontalHeaderLabels(["Find", "Replace with"])
+        self._rules_table.horizontalHeader().setStretchLastSection(True)
+        self._rules_table.setMinimumHeight(120)
+        self._rules_table.setSelectionBehavior(QTableWidget.SelectRows)
+        v.addWidget(self._rules_table)
+        rules_btn_row = QHBoxLayout()
+        add_rule_btn = QPushButton("Add rule")
+        add_rule_btn.clicked.connect(self._add_rule_row)
+        remove_rule_btn = QPushButton("Remove selected")
+        remove_rule_btn.clicked.connect(self._remove_selected_rule)
+        rules_btn_row.addWidget(add_rule_btn)
+        rules_btn_row.addWidget(remove_rule_btn)
+        rules_btn_row.addStretch()
+        v.addLayout(rules_btn_row)
+        rules_hint = QLabel(
+            "Whole words only — “man” won't match “woman” or “human”. "
+            "Leave Replace with empty to delete the term (that's how you ban a tag)."
+        )
+        rules_hint.setObjectName("label_field")
+        rules_hint.setWordWrap(True)
+        v.addWidget(rules_hint)
         return g
+
+    def _add_rule_row(self):
+        row = self._rules_table.rowCount()
+        self._rules_table.insertRow(row)
+        self._rules_table.setItem(row, 0, QTableWidgetItem(""))
+        self._rules_table.setItem(row, 1, QTableWidgetItem(""))
+        self._save_rules_from_table()
+
+    def _remove_selected_rule(self):
+        rows = sorted({idx.row() for idx in self._rules_table.selectedIndexes()}, reverse=True)
+        if not rows:
+            return
+        for row in rows:
+            self._rules_table.removeRow(row)
+        self._save_rules_from_table()
+
+    def _load_rules_into_table(self):
+        """Populate the table from AppSettings. Called from _bind_app_widgets BEFORE the
+        itemChanged connection is registered, so populating never triggers a write-back."""
+        rules = parse_rules(self._app.get("caption_rules_json"))
+        self._rules_table.setRowCount(0)
+        for find, repl in rules:
+            row = self._rules_table.rowCount()
+            self._rules_table.insertRow(row)
+            self._rules_table.setItem(row, 0, QTableWidgetItem(find))
+            self._rules_table.setItem(row, 1, QTableWidgetItem(repl))
+
+    def _rules_from_table(self) -> list:
+        """Read the table into [(find, replace)]. Cells can be None (row just inserted,
+        item not yet created for that column) so every read is guarded."""
+        rules = []
+        for row in range(self._rules_table.rowCount()):
+            find_item = self._rules_table.item(row, 0)
+            repl_item = self._rules_table.item(row, 1)
+            find = find_item.text().strip() if find_item is not None else ""
+            repl = repl_item.text() if repl_item is not None else ""
+            if find:
+                rules.append((find, repl))
+        return rules
+
+    def _save_rules_from_table(self, _item=None):
+        self._app.set("caption_rules_json", dump_rules(self._rules_from_table()))
 
     def _bind_app_widgets(self):
         """Load values from AppSettings into the new widgets, then save on change."""
@@ -1046,6 +1123,7 @@ class SetupTab(QWidget):
         from core.caption_policy import ASK
         policy = a.get("caption_existing_policy")
         self._policy_buttons.get(policy, self._policy_buttons[ASK]).setChecked(True)
+        self._load_rules_into_table()
         # Save on change (connected AFTER loading so load doesn't trigger writes)
         self._scan_edit.textChanged.connect(lambda t: a.set("model_scan_dir", t))
         self._forge_url_edit.textChanged.connect(lambda t: a.set("forge_api_url", t))
@@ -1073,6 +1151,7 @@ class SetupTab(QWidget):
         for key, rb in self._policy_buttons.items():
             rb.toggled.connect(
                 lambda checked, k=key: checked and a.set("caption_existing_policy", k))
+        self._rules_table.itemChanged.connect(self._save_rules_from_table)
 
     def _on_font_mode_changed(self, idx: int) -> None:
         from utils.fonts import apply_app_font

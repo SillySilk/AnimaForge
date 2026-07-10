@@ -25,8 +25,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from core.caption_rules import parse_rules
 from core.config_generator import generate_configs, get_config_summary
-from core.settings import SAMPLE_COUNT, SAMPLE_EVERY_N_EPOCHS, SETTINGS_APP, SETTINGS_ORG
+from core.settings import AppSettings, SAMPLE_COUNT, SAMPLE_EVERY_N_EPOCHS, SETTINGS_APP, SETTINGS_ORG
 from core.tagger import TAGGER_MODELS, read_tagger_defaults
 from core.step_calculator import (
     calculate_training_params,
@@ -1142,6 +1143,7 @@ class TrainTab(QWidget):
             tagger_model_id=tagger_model_id,
             tagger_threshold=threshold,
             tagger_use_onnx=tagger_use_onnx,
+            caption_rules=parse_rules(AppSettings().get("caption_rules_json")),
             style_anchor=self._dataset_style_anchor(),
             sdscripts_path=self._setup_path,
             dit_path=self._dit_path,
