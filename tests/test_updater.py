@@ -118,3 +118,21 @@ def test_zip_extract_layout(tmp_path: Path):
         zf.extractall(out)
     roots = [p for p in out.iterdir() if p.is_dir()]
     assert len(roots) == 1 and roots[0].name == "AnimaForge-main"
+
+
+# ---- local_commit resolution ----
+
+def test_local_commit_prefers_git(tmp_path, monkeypatch):
+    (tmp_path / ".git").mkdir()
+    monkeypatch.setattr(updater, "_git_head", lambda root: "b" * 40)
+    assert updater.local_commit(tmp_path) == "b" * 40
+
+
+def test_local_commit_falls_back_to_stamp(tmp_path):
+    # no .git dir
+    updater.write_build_stamp(tmp_path, "c" * 40, "2026-07-10")
+    assert updater.local_commit(tmp_path) == "c" * 40
+
+
+def test_local_commit_none_when_nothing(tmp_path):
+    assert updater.local_commit(tmp_path) is None

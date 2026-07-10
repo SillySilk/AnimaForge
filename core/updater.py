@@ -14,6 +14,7 @@ the new version.
 import json
 import re
 import shutil
+import subprocess
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -52,6 +53,28 @@ def read_build_stamp(root):
         return sha if isinstance(sha, str) and sha else None
     except (OSError, ValueError):
         return None
+
+
+def _git_head(root):
+    """`git rev-parse HEAD` in root, or None if git/rev unavailable."""
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=TIMEOUT_S)
+        sha = out.stdout.strip()
+        return sha if out.returncode == 0 and sha else None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def local_commit(app_root):
+    """Resolve the installed commit SHA: git HEAD, else build_stamp.json, else None."""
+    root = Path(app_root)
+    if (root / ".git").exists():
+        sha = _git_head(root)
+        if sha:
+            return sha
+    return read_build_stamp(root)
 
 
 def parse_version(s: str) -> tuple:
