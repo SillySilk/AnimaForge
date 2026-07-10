@@ -957,24 +957,27 @@ class MainWindow(QMainWindow):
 
     def _maybe_check_updates_at_startup(self):
         """Off-thread: resolve local commit, compare to main, decide. Silent on any
-        failure. Gated by the Setup toggle and the dev-branch guard."""
+        failure. Gated by the Setup toggle and the dev-branch guard. The git branch
+        check and all network/compute run inside the worker; the UI thread only reads
+        settings and spawns the thread so startup never blocks on git or GitHub."""
         from core import updater
         settings = self._setup_tab.get_app_settings()
         if not settings.get("startup_update_check"):
             return
         app_root = self._app_root()
-        if not updater.on_main_branch(app_root):
-            return
+        skipped = settings.get("skipped_update_commit")   # read on the UI thread
         import threading
 
         def work():
             from core.version import __version__
+            if not updater.on_main_branch(app_root):       # git calls off the UI thread
+                return                                     # silent: emit nothing
             local = updater.local_commit(app_root)
             compare = updater.compare_to_main(local) if local else {"status": "not_found"}
             remote_version = updater.fetch_remote_version()
             decision = updater.build_update_decision(
                 compare, remote_version=remote_version, local_version=__version__,
-                skipped_commit=settings.get("skipped_update_commit"))
+                skipped_commit=skipped)
             self._startup_update_ready.emit(decision)
 
         threading.Thread(target=work, daemon=True).start()
@@ -995,11 +998,11 @@ class MainWindow(QMainWindow):
     def _start_update_download(self, head_sha):
         """Reuse the manual-button download/apply path, stamping the install with the
         commit we are installing so the next launch reads the right local SHA."""
-        from core.version import __version__
+        if self._update_busy:
+            return
         self._update_busy = True
         self._status_bar.showMessage("Downloading update from GitHub…")
         import tempfile, threading, datetime
-        from pathlib import Path
         from core import updater as up
         app_root = self._app_root()
 
