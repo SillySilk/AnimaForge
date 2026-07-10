@@ -24,6 +24,16 @@ def run_headless(queue_path: str | None = None, status_path: str | None = None) 
         print(f"[headless] no runs in queue '{queue_path}' — nothing to do.")
         return 1
 
+    # 'ask' is a UI-only prompt; there is no GUI here to answer it. Degrade to
+    # 'keep' before the runner starts so a queued 'ask' run never blocks and
+    # never destroys captions that already exist on disk.
+    from core import caption_policy as cp
+    for r in runs:
+        if r.caption_policy == cp.ASK:
+            r.caption_policy = cp.KEEP
+            print(f"[headless] '{r.lora_name}': policy 'ask' has no GUI here — "
+                  f"using 'keep' (existing captions are never destroyed).", flush=True)
+
     app = QCoreApplication.instance() or QCoreApplication(sys.argv)
     runner = BatchRunner()
     writer = StatusWriter(runner, runs, status_path or default_status_path())

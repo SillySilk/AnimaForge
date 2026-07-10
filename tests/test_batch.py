@@ -1,15 +1,33 @@
+import os
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from PySide6.QtWidgets import QApplication
+
 from core.batch import RunDefinition, save_queue, load_queue, QUEUED
+
+_app = QApplication.instance() or QApplication([])
 
 
 def _rd(**kw):
     base = dict(lora_name="lr", dataset_folder="C:/d", image_count=20)
     base.update(kw)
     return RunDefinition(**base)
+
+
+def _png(folder: Path, name: str):
+    (folder / name).write_bytes(b"\x89PNG\r\n\x1a\n")
+
+
+def _neuter_caption_processes(runner, monkeypatch):
+    """Silence the captioner's real subprocess wrappers so no process is spawned;
+    its `finished` signals stay wired and the chain is driven by emitting them."""
+    monkeypatch.setattr(runner._captioner._tagger, "start", lambda **kw: None)
+    monkeypatch.setattr(runner._captioner._joy, "start", lambda **kw: None)
+    monkeypatch.setattr(runner._captioner._llm, "start", lambda **kw: None)
 
 
 def test_run_definition_roundtrip():
@@ -139,3 +157,186 @@ def test_from_dict_on_json_lacking_new_keys_yields_documented_defaults():
     assert rd.tagger_use_onnx is True
     assert rd.style_anchor == ""
     assert rd.caption_policy == "ask"
+
+
+# ----------------------------------------------------------------------------
+# Pure helpers: next_index / reset_statuses / restart
+# ----------------------------------------------------------------------------
+
+def test_next_index_skips_done_runs():
+    from core.batch import next_index, DONE, QUEUED
+    runs = [_rd(status=DONE), _rd(status=DONE), _rd(status=QUEUED)]
+    assert next_index(runs, 0, skip_done=True) == 2
+    assert next_index(runs, 0, skip_done=False) == 0
+
+
+def test_next_index_returns_len_when_exhausted():
+    from core.batch import next_index, DONE
+    runs = [_rd(status=DONE)]
+    assert next_index(runs, 0, skip_done=True) == 1
+
+
+def test_restart_resets_every_status_to_queued():
+    from core.batch import BatchRunner, DONE, FAILED, QUEUED
+    runs = [_rd(status=DONE), _rd(status=FAILED)]
+    r = BatchRunner()
+    r.reset_statuses(runs)
+    assert [x.status for x in runs] == [QUEUED, QUEUED]
+
+
+# ----------------------------------------------------------------------------
+# Caption phase state machine. Neuters the captioner's subprocess wrappers and
+# the trainer's start, then advances by emitting the real `finished` signals —
+# exactly how tests/test_caption_runner.py drives the caption chain.
+# ----------------------------------------------------------------------------
+
+def _caption_run(tmp_path, name, captioned=False, **kw):
+    folder = tmp_path / name
+    folder.mkdir()
+    _png(folder, "a.png")
+    if captioned:
+        (folder / "a.txt").write_text("a cat on a mat", encoding="utf-8")
+    base = dict(lora_name=name, dataset_folder=str(folder), sdscripts_path="C:/sd",
+                enable_bucket=False, caption_policy="keep",
+                output_dir=str(tmp_path / "out"), image_count=4, target_steps=100)
+    base.update(kw)
+    return RunDefinition(**base)
+
+
+def test_uncaptioned_run_emits_captioning_then_training(tmp_path, monkeypatch):
+    from core.batch import BatchRunner, CAPTIONING, TRAINING, DONE
+    import core.caption_runner as cr_mod
+
+    runner = BatchRunner()
+    _neuter_caption_processes(runner, monkeypatch)
+    monkeypatch.setattr(cr_mod, "combine_all", lambda *a, **kw: (1, 0))
+    trained = []
+    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd: trained.append(sd))
+
+    phases = []
+    runner.run_phase.connect(lambda i, p: phases.append((i, p)))
+
+    run = _caption_run(tmp_path, "ds")
+    runner.start([run])
+    assert phases == [(0, CAPTIONING)]           # captioning first, no training yet
+    assert runner._captioner.is_running() is True
+
+    runner._captioner._tagger.finished.emit(True)
+    runner._captioner._joy.finished.emit(True)   # combine runs synchronously here
+    assert phases == [(0, CAPTIONING), (0, TRAINING)]
+    assert trained == ["C:/sd"]                  # training only started after captions
+
+    runner._trainer.training_finished.emit(True)
+    assert run.status == DONE
+
+
+def test_fully_captioned_keep_skips_straight_to_training(tmp_path, monkeypatch):
+    from core.batch import BatchRunner, TRAINING
+
+    runner = BatchRunner()
+    trained = []
+    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd: trained.append(sd))
+    phases = []
+    runner.run_phase.connect(lambda i, p: phases.append((i, p)))
+
+    run = _caption_run(tmp_path, "ds", captioned=True)
+    runner.start([run])
+    assert phases == [(0, TRAINING)]             # no captioning phase at all
+    assert trained == ["C:/sd"]
+    assert runner._captioner.is_running() is False
+
+
+def test_caption_failure_fails_run_and_continues(tmp_path, monkeypatch):
+    from core.batch import BatchRunner, FAILED, RUNNING, QUEUED
+
+    runner = BatchRunner()
+    _neuter_caption_processes(runner, monkeypatch)
+    trained = []
+    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd: trained.append(sd))
+    finished_events = []
+    runner.run_finished.connect(lambda i, ok: finished_events.append((i, ok)))
+
+    run0 = _caption_run(tmp_path, "ds0")                    # needs captioning
+    run1 = _caption_run(tmp_path, "ds1", captioned=True)    # trains straight away
+    runner.start([run0, run1], continue_on_error=True)
+
+    runner._captioner._tagger.finished.emit(False)         # tag stage fails
+    assert run0.status == FAILED
+    assert (0, False) in finished_events
+    assert trained == ["C:/sd"]                            # advanced to run1
+    assert run1.status == RUNNING
+
+
+def test_caption_failure_stops_queue_when_not_continuing(tmp_path, monkeypatch):
+    from core.batch import BatchRunner, FAILED, QUEUED
+
+    runner = BatchRunner()
+    _neuter_caption_processes(runner, monkeypatch)
+    trained = []
+    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd: trained.append(sd))
+
+    run0 = _caption_run(tmp_path, "ds0")
+    run1 = _caption_run(tmp_path, "ds1", captioned=True)
+    runner.start([run0, run1], continue_on_error=False)
+
+    runner._captioner._tagger.finished.emit(False)
+    assert run0.status == FAILED
+    assert run1.status == QUEUED       # never reached
+    assert trained == []
+    assert runner.is_running() is False
+
+
+def test_stop_during_captioning_does_not_advance(tmp_path, monkeypatch):
+    from core.batch import BatchRunner
+
+    runner = BatchRunner()
+    _neuter_caption_processes(runner, monkeypatch)
+    trained = []
+    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd: trained.append(sd))
+    run_starts = []
+    runner.run_started.connect(run_starts.append)
+
+    run0 = _caption_run(tmp_path, "ds0")
+    run1 = _caption_run(tmp_path, "ds1")
+    runner.start([run0, run1])
+    assert run_starts == [0]
+    assert runner._captioner.is_running() is True
+
+    runner.stop()   # CaptionRunner.stop() re-enters _on_caption_finished(False)
+
+    assert runner.is_running() is False
+    assert run_starts == [0]            # queue never advanced to run1
+    assert trained == []               # no training ever started
+    assert run1.status == "queued"
+
+
+def test_start_skips_done_runs_by_default(tmp_path, monkeypatch):
+    from core.batch import BatchRunner, DONE, RUNNING
+
+    runner = BatchRunner()
+    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd: None)
+    started = []
+    runner.run_started.connect(started.append)
+
+    done = _caption_run(tmp_path, "ds0", captioned=True, status=DONE)
+    todo = _caption_run(tmp_path, "ds1", captioned=True)
+    runner.start([done, todo])                  # skip_done defaults True
+    assert started == [1]                        # index 0 (DONE) is skipped
+    assert done.status == DONE
+    assert todo.status == RUNNING
+
+
+def test_restart_reruns_finished_queue_from_the_top(tmp_path, monkeypatch):
+    from core.batch import BatchRunner, DONE, RUNNING, QUEUED
+
+    runner = BatchRunner()
+    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd: None)
+    started = []
+    runner.run_started.connect(started.append)
+
+    r0 = _caption_run(tmp_path, "ds0", captioned=True, status=DONE)
+    r1 = _caption_run(tmp_path, "ds1", captioned=True, status=DONE)
+    runner.restart([r0, r1])                     # resets all -> QUEUED, skip_done off
+    assert started == [0]                        # starts from the very top again
+    assert r0.status == RUNNING
+    assert r1.status == QUEUED

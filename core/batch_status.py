@@ -8,6 +8,7 @@ indistinguishable to a watcher.
 
 Schema: a JSON list, one entry per queued run:
     {"lora_name", "state": "queued"|"running"|"done"|"failed",
+     "phase": ""|"captioning"|"training",
      "current_step", "target_steps", "started_at", "finished_at",
      "lora_path", "error_tail"}
 """
@@ -48,10 +49,12 @@ class StatusWriter(QObject):
         self._started = {}
         self._finished = {}
         self._tails = {}
+        self._phases = {}
         self._log_ring = deque(maxlen=_ERROR_TAIL_LINES)
         self._active_idx = None
 
         runner.run_started.connect(self._on_started)
+        runner.run_phase.connect(self._on_phase)
         runner.progress_updated.connect(self._on_progress)
         runner.run_finished.connect(self._on_finished)
         runner.batch_finished.connect(self._write)
@@ -64,6 +67,10 @@ class StatusWriter(QObject):
         self._active_idx = idx
         self._log_ring.clear()
         self._started[idx] = datetime.now().isoformat(timespec="seconds")
+        self._write()
+
+    def _on_phase(self, idx: int, phase: str):
+        self._phases[idx] = phase
         self._write()
 
     def _on_progress(self, idx: int, step: int):
@@ -95,6 +102,7 @@ class StatusWriter(QObject):
         return {
             "lora_name": run.lora_name,
             "state": run.status,
+            "phase": self._phases.get(idx, ""),
             "current_step": self._steps.get(idx, 0),
             "target_steps": total,
             "started_at": self._started.get(idx),

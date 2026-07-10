@@ -10,6 +10,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, Signal
 
 from core.caption_policy import ASK
+from core.caption_runner import CaptionRunner
 from core.config_generator import generate_configs
 from core.paths import run_output_dir
 from core.settings import AppSettings
@@ -21,6 +22,22 @@ QUEUED = "queued"
 RUNNING = "running"
 DONE = "done"
 FAILED = "failed"
+
+# Per-run phase values (emitted via BatchRunner.run_phase)
+CAPTIONING = "captioning"
+TRAINING = "training"
+
+
+def next_index(runs, start: int, skip_done: bool) -> int:
+    """The index of the next run to execute at or after `start`.
+
+    Walks forward over already-`DONE` runs when `skip_done` is set; returns
+    `len(runs)` when the queue is exhausted (nothing left to run).
+    """
+    i = start
+    while i < len(runs) and skip_done and runs[i].status == DONE:
+        i += 1
+    return i
 
 
 @dataclass
@@ -133,6 +150,7 @@ class BatchRunner(QObject):
 
     run_started = Signal(int)          # index
     run_finished = Signal(int, bool)   # index, success
+    run_phase = Signal(int, str)       # index, phase in {"captioning", "training"}
     batch_finished = Signal()
     log_line = Signal(str)
     progress_updated = Signal(int, int)  # index, step
@@ -143,25 +161,48 @@ class BatchRunner(QObject):
         self._idx = -1
         self._running = False
         self._continue_on_error = True
+        self._skip_done = True
         self._trainer = TrainingProcess(self)
         self._trainer.log_line.connect(self.log_line)
         self._trainer.training_finished.connect(self._on_run_finished)
         self._trainer.progress_updated.connect(self._on_progress)
+        # Captioner is wired ONCE here — a per-run connect/disconnect dance is how
+        # double-fired slots get born. Each queued run captions itself just before
+        # its own training (see _caption_then_train).
+        self._captioner = CaptionRunner(self)
+        self._captioner.log_line.connect(self.log_line)
+        self._captioner.finished.connect(self._on_caption_finished)
 
     def is_running(self) -> bool:
         return self._running
 
-    def start(self, runs, continue_on_error: bool = True):
+    def start(self, runs, continue_on_error: bool = True, skip_done: bool = True):
         if self._running or not runs:
             return
         self._runs = runs
         self._continue_on_error = continue_on_error
+        self._skip_done = skip_done
         self._running = True
         self._idx = -1
         self._advance()
 
+    def reset_statuses(self, runs) -> None:
+        for r in runs:
+            r.status = QUEUED
+
+    def restart(self, runs, continue_on_error: bool = True):
+        """Run the whole queue again from the top — the only way back once every
+        run is DONE. Resets every status to QUEUED and starts with skip_done off."""
+        self.reset_statuses(runs)
+        self.start(runs, continue_on_error=continue_on_error, skip_done=False)
+
     def stop(self):
+        # Tear down _running BEFORE stopping the captioner: CaptionRunner.stop()
+        # emits finished(False) synchronously, which re-enters _on_caption_finished
+        # — it must find _running already False and NOT advance the queue.
         self._running = False
+        if self._captioner.is_running():
+            self._captioner.stop()
         if self._trainer.is_running():
             self._trainer.stop()
         self.batch_finished.emit()
@@ -171,7 +212,7 @@ class BatchRunner(QObject):
     def _advance(self):
         if not self._running:
             return
-        self._idx += 1
+        self._idx = next_index(self._runs, self._idx + 1, self._skip_done)
         if self._idx >= len(self._runs):
             self._running = False
             self.batch_finished.emit()
@@ -181,7 +222,54 @@ class BatchRunner(QObject):
         run.status = RUNNING
         self.run_started.emit(self._idx)
         self.log_line.emit(f"[Batch] ({self._idx + 1}/{len(self._runs)}) starting '{run.lora_name}'")
+        self._caption_then_train(run)
 
+    def _caption_then_train(self, run):
+        """Caption this run just before its own training, so a caption failure kills
+        only this one run and the sample prompts (resolved later in _start_training)
+        are drawn from captions that exist by then."""
+        from core import caption_policy as cp, characters as ch
+        # ASK never reaches a runner: it is a UI-only prompt. Unattended, KEEP is the
+        # safe resolution — existing captions are never destroyed.
+        policy = run.caption_policy if run.caption_policy != cp.ASK else cp.KEEP
+        state = cp.scan(run.dataset_folder)
+        if not cp.images_for(state, policy):
+            self._start_training(run)
+            return
+        self.run_phase.emit(self._idx, CAPTIONING)
+        try:
+            job = run.to_caption_job(
+                run.sdscripts_path, ch.path_for(run.dataset_folder), policy)
+            started = self._captioner.start(job)
+        except ValueError as e:
+            # An unknown stage in the caption chain: fail this run, spare the queue.
+            self._fail_run(f"captioning could not start for '{run.lora_name}': {e}")
+            return
+        if not started:
+            self._fail_run(f"could not start captioning for '{run.lora_name}'")
+
+    def _on_caption_finished(self, ok: bool):
+        if not self._running:
+            return
+        if not ok:
+            self._fail_run(
+                f"captioning failed for '{self._runs[self._idx].lora_name}'")
+            return
+        self._start_training(self._runs[self._idx])
+
+    def _fail_run(self, msg: str):
+        """Mark the current run FAILED, report it, and stop or advance per policy."""
+        self._runs[self._idx].status = FAILED
+        self.log_line.emit(f"[Batch] {msg}")
+        self.run_finished.emit(self._idx, False)
+        if not self._continue_on_error:
+            self._running = False
+            self.batch_finished.emit()
+            return
+        self._advance()
+
+    def _start_training(self, run):
+        self.run_phase.emit(self._idx, TRAINING)
         try:
             params = calculate_training_params(run.image_count, target_steps=run.target_steps)
             self._trainer.set_total_steps(params["total_steps"])

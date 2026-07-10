@@ -16,6 +16,7 @@ class FakeRunner(QObject):
     """Emits the same signals BatchRunner does, with the same status mutations."""
     run_started = Signal(int)
     run_finished = Signal(int, bool)
+    run_phase = Signal(int, str)
     batch_finished = Signal()
     log_line = Signal(str)
     progress_updated = Signal(int, int)
@@ -112,3 +113,18 @@ def test_file_is_valid_json_after_every_event(tmp_path):
     runner.run_finished.emit(0, True)
     runner.batch_finished.emit()
     assert _read(path)[0]["state"] == DONE
+
+
+def test_status_payload_carries_the_phase(tmp_path):
+    runner, runs, path, _ = _setup(tmp_path, runs=[_rd(lora_name="a"),
+                                                    _rd(lora_name="b")])
+    # Initial snapshot: no phase reported yet for any run.
+    assert _read(path)[0]["phase"] == ""
+
+    runner.run_phase.emit(0, "captioning")
+    assert _read(path)[0]["phase"] == "captioning"
+
+    runner.run_phase.emit(0, "training")
+    data = _read(path)
+    assert data[0]["phase"] == "training"
+    assert data[1]["phase"] == ""      # untouched run has no phase yet
