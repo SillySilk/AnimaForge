@@ -69,8 +69,11 @@ QWidget {{
 #af_eyebrow {{ font-family: {F_TYPE}; color: #8a8a93; font-size: 10px;
     letter-spacing: 3px; background-color: transparent; }}
 #af_rule {{ background-color: #8a5a12; max-height: 2px; min-height: 2px; border: none; }}
+/* padding:0 — square icon buttons are ~26px wide; QPushButton's 14px side
+   padding would leave no content rect and Qt clips the glyph away entirely. */
 #af_collapse_btn {{ background-color: #141312; border: 1px solid #3a3a1f;
-    border-radius: 5px; color: #f4d160; font-size: 15px; font-weight: 700; }}
+    border-radius: 5px; color: #f4d160; font-size: 15px; font-weight: 700;
+    padding: 0px; }}
 #af_collapse_btn:hover {{ border: 1px solid #8a5a12; background-color: #201d14; }}
 
 #af_nav {{
@@ -219,7 +222,8 @@ QPushButton:disabled {{ background-color: #121110; color: #4a4a44; border: 1px s
 #af_pill_ok {{ background-color: rgba(143,168,107,0.10); border: 1px solid rgba(143,168,107,0.4);
     color: #8fa86b; border-radius: 18px; padding: 0 14px; font-family: {F_UI}; font-size: 11px; letter-spacing: 1px; }}
 #af_pill_ok:hover {{ background-color: rgba(143,168,107,0.18); }}
-#af_icon_btn {{ background-color: #141312; border: 1px solid #3a3a1f; border-radius: 6px; color: #8a8a93; }}
+#af_icon_btn {{ background-color: #141312; border: 1px solid #3a3a1f; border-radius: 6px;
+    color: #8a8a93; font-size: 14px; padding: 0px; }}
 #af_icon_btn:hover {{ color: #f4d160; border-color: #8a5a12; }}
 
 /* ============================================================
@@ -366,7 +370,8 @@ QGroupBox::title {{ subcontrol-origin: margin; subcontrol-position: top left; pa
 #af_modal_card {{ background-color: #141312; border: 1px solid #8a5a12; border-radius: 10px; }}
 #af_modal_rule {{ background-color: #d4972b; max-height: 2px; min-height: 2px; }}
 #af_modal_title {{ color: #d4af37; font-family: {F_DISPLAY}; font-size: 30px; background-color: transparent; }}
-#af_modal_close {{ background-color: transparent; border: none; color: #8a8a93; font-size: 18px; }}
+#af_modal_close {{ background-color: transparent; border: none; color: #8a8a93; font-size: 18px;
+    padding: 0px; }}
 #af_modal_close:hover {{ color: #f4d160; }}
 
 /* ---- Splitter / Status / Frame / Tooltip / Dialog ---- */

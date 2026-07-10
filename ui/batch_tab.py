@@ -197,12 +197,15 @@ class BatchTab(QWidget):
                 "color:#f4d160; border:1px solid #f4d160; border-radius:9px; "
                 "padding:2px 10px; font-size:10px; font-weight:700; margin-left:4px;")
             row.addWidget(phase_pill)
-        for text, slot in (("↑", lambda _c=False, idx=i: self._move_up(idx)),
-                           ("↓", lambda _c=False, idx=i: self._move_down(idx)),
-                           ("✕", lambda _c=False, idx=i: self._remove(idx))):
+        for text, tip, slot in (
+            ("↑", "Move up — run earlier", lambda _c=False, idx=i: self._move_up(idx)),
+            ("↓", "Move down — run later", lambda _c=False, idx=i: self._move_down(idx)),
+            ("✕", "Remove from the line", lambda _c=False, idx=i: self._remove(idx)),
+        ):
             b = QPushButton(text)
             b.setObjectName("af_icon_btn")
             b.setFixedSize(26, 26)
+            b.setToolTip(tip)
             b.setCursor(Qt.PointingHandCursor)
             b.clicked.connect(slot)
             row.addWidget(b)
