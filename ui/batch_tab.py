@@ -328,21 +328,35 @@ class BatchTab(QWidget):
             self._apply_policy_plan(plan)
             return True
 
+        from collections import Counter
+
         dlg = QDialog(self)
         dlg.setWindowTitle("Existing captions found")
         lay = QVBoxLayout(dlg)
         lay.addWidget(QLabel(
             f"{len(conflicted)} of {len(pending)} queued sets already have captions."))
-        combos = {}
+        # Nothing enforces unique lora_name in the queue, so a name alone can't key
+        # these rows (see combos below) — disambiguate duplicate names with the
+        # dataset folder's basename so the user can tell which row is which.
+        name_counts = Counter(run.lora_name for run, _state in conflicted)
+        # Parallel list, same order as `conflicted` — combos MUST be keyed by
+        # position, not by run.lora_name: duplicate names are legal in the queue
+        # (e.g. retraining the same set with a tweak), and a dict keyed by name
+        # would collapse two rows' widgets into one, silently applying the last
+        # row's policy to every run sharing that name.
+        combos = []
         for run, state in conflicted:
             row = QHBoxLayout()
-            row.addWidget(QLabel(run.lora_name))
+            label_text = run.lora_name
+            if name_counts[run.lora_name] > 1:
+                label_text = f"{run.lora_name}  ·  {Path(run.dataset_folder).name}"
+            row.addWidget(QLabel(label_text))
             row.addWidget(QLabel(f"{len(state.captioned)}/{state.total} captioned"))
             row.addStretch()
             combo = QComboBox()
             combo.addItem("Keep", cp.KEEP)
             combo.addItem("Overwrite", cp.OVERWRITE)
-            combos[run.lora_name] = combo
+            combos.append(combo)
             row.addWidget(combo)
             lay.addLayout(row)
 
@@ -352,7 +366,7 @@ class BatchTab(QWidget):
             b = QPushButton(label)
             b.clicked.connect(
                 lambda _c=False, p=policy: [c.setCurrentIndex(c.findData(p))
-                                            for c in combos.values()])
+                                            for c in combos])
             all_row.addWidget(b)
         all_row.addStretch()
         lay.addLayout(all_row)
@@ -365,7 +379,8 @@ class BatchTab(QWidget):
 
         if dlg.exec() != QDialog.Accepted:
             return False
-        plan.extend((run, combos[run.lora_name].currentData()) for run, _state in conflicted)
+        plan.extend((run, combo.currentData())
+                    for (run, _state), combo in zip(conflicted, combos))
         self._apply_policy_plan(plan)
         return True
 

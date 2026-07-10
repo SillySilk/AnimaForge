@@ -291,3 +291,84 @@ def test_restart_cancel_conflict_dialog_never_calls_runner_restart(tmp_path, mon
         app.set("caption_existing_policy", prev)
 
     assert restarted == []   # Cancel on the conflict dialog must not restart the batch
+
+
+# ----------------------------------------------------------------------------
+# Finding 1 -- nothing enforces unique lora_name in the queue (a user can
+# legitimately queue the same set twice, e.g. to retrain with a tweak). The
+# conflict dialog's combos must be keyed by row position, not by name, or the
+# second row's dropdown silently overwrites the first in the lookup and both
+# runs take the second row's policy.
+# ----------------------------------------------------------------------------
+
+def test_resolve_conflicts_duplicate_lora_names_keep_independent_policies(tmp_path, monkeypatch):
+    t = _make_tab(tmp_path, monkeypatch)
+    r1 = _rd(lora_name="Akimov", dataset_folder=str(_folder(tmp_path, "akimov-v1", captioned=True)),
+             caption_policy=cp.ASK)
+    r2 = _rd(lora_name="Akimov", dataset_folder=str(_folder(tmp_path, "akimov-v2", captioned=True)),
+             caption_policy=cp.ASK)
+    t._runs = [r1, r2]
+
+    def _fake_exec(self):
+        from PySide6.QtWidgets import QComboBox
+        combos = self.findChildren(QComboBox)
+        assert len(combos) == 2
+        combos[0].setCurrentIndex(combos[0].findData(cp.KEEP))       # row 1: Keep
+        combos[1].setCurrentIndex(combos[1].findData(cp.OVERWRITE))  # row 2: Overwrite
+        return QDialog.Accepted
+    monkeypatch.setattr(QDialog, "exec", _fake_exec)
+
+    app, prev = _with_policy(cp.ASK)
+    try:
+        assert t._resolve_conflicts([r1, r2]) is True
+    finally:
+        app.set("caption_existing_policy", prev)
+
+    assert r1.caption_policy == cp.KEEP       # row 1's own choice
+    assert r2.caption_policy == cp.OVERWRITE  # row 2's own choice -- NOT row 1's
+
+
+# ----------------------------------------------------------------------------
+# Finding 2 -- a genuinely empty queue (never held a run) must get its own
+# "empty" message, not the all-DONE wording, from both _start() and _restart().
+# ----------------------------------------------------------------------------
+
+def test_start_on_empty_queue_message_differs_from_all_done_wording(tmp_path, monkeypatch):
+    t = _make_tab(tmp_path, monkeypatch)
+    t._runs = []
+
+    info_calls = []
+    monkeypatch.setattr(QMessageBox, "information",
+                        lambda *a, **kw: info_calls.append(a) or QMessageBox.Ok)
+    started = []
+    monkeypatch.setattr(t._runner, "start", lambda *a, **kw: started.append((a, kw)))
+
+    t._start()
+
+    assert len(info_calls) == 1
+    message = info_calls[0][2]
+    assert "empty" in message.lower()
+    assert "done" not in message.lower()
+    assert started == []
+
+
+def test_restart_on_empty_queue_message_differs_from_all_done_wording(tmp_path, monkeypatch):
+    t = _make_tab(tmp_path, monkeypatch)
+    t._runs = []
+
+    def _boom(*a, **kw):
+        raise AssertionError("empty queue -> no confirm dialog, no restart call")
+    monkeypatch.setattr(QMessageBox, "question", _boom)
+    info_calls = []
+    monkeypatch.setattr(QMessageBox, "information",
+                        lambda *a, **kw: info_calls.append(a) or QMessageBox.Ok)
+    restarted = []
+    monkeypatch.setattr(t._runner, "restart", lambda *a, **kw: restarted.append((a, kw)))
+
+    t._restart()
+
+    assert len(info_calls) == 1
+    message = info_calls[0][2]
+    assert "empty" in message.lower()
+    assert "done" not in message.lower()
+    assert restarted == []
