@@ -181,3 +181,26 @@ def test_build_run_definition_never_clobbers_authored_prompts(tmp_path: Path):
     rd, msg = t.build_run_definition()
     assert rd is not None, msg
     assert rd.sample_prompts == ["my own prompt"]
+
+
+def test_set_quality_prefix_reaches_build_run_definition(tmp_path: Path):
+    """Home owns the quality-prefix control; TrainTab has no widget of its own for it,
+    so set_quality_prefix (wired from Home via MainWindow) must be the only path a
+    queued run's snapshot gets it through."""
+    sd = tmp_path / "sd"; sd.mkdir()
+    dit = tmp_path / "dit.safetensors"; dit.write_bytes(b"x")
+    q = tmp_path / "q.safetensors"; q.write_bytes(b"x")
+    vae = tmp_path / "vae.safetensors"; vae.write_bytes(b"x")
+    out = tmp_path / "out"; out.mkdir()
+    ds = tmp_path / "ds"; ds.mkdir()
+
+    t = TrainTab()
+    assert t._quality_prefix == ""  # default before Home ever sets it
+    t.set_environment(str(sd), str(dit), str(q), str(vae), str(out))
+    t.set_dataset(str(ds), 1)
+    t._lora_name_edit.setText("Demo")
+    t.set_quality_prefix("masterpiece, best quality")
+
+    rd, msg = t.build_run_definition()
+    assert rd is not None, msg
+    assert rd.quality_prefix == "masterpiece, best quality"

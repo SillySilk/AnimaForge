@@ -82,3 +82,60 @@ def test_resolve_sample_prompts_captionless_dataset_returns_empty(tmp_path):
     from core.batch import resolve_sample_prompts
     rd = _rd(dataset_folder=str(tmp_path), sample_prompts=[])
     assert resolve_sample_prompts(rd) == []
+
+
+def test_caption_fields_default_and_roundtrip():
+    rd = _rd(quality_prefix="masterpiece", caption_order="tags_first",
+             refine_enabled=True, lms_url="http://x/v1", max_tokens=900,
+             tagger_threshold=0.4, caption_policy="keep")
+    back = RunDefinition.from_dict(rd.to_dict())
+    assert back == rd
+    assert _rd().caption_policy == "ask"
+    assert _rd().refine_enabled is False
+
+
+def test_to_caption_job_carries_the_snapshot_not_live_ui():
+    rd = _rd(trigger_word="manbag", quality_prefix="masterpiece",
+             caption_order="tags_first", refine_enabled=True)
+    job = rd.to_caption_job(sdscripts_path="C:/sd", characters_file="C:/c.json",
+                            policy="keep")
+    assert job.trigger == "manbag"
+    assert job.prefix == "masterpiece"
+    assert job.order == "tags_first"
+    assert job.policy == "keep"
+    assert job.chain == ["tag", "describe", "refine", "combine"]
+
+
+def test_to_caption_job_drops_refine_when_disabled():
+    job = _rd(refine_enabled=False).to_caption_job("C:/sd", "", "overwrite")
+    assert job.chain == ["tag", "describe", "combine"]
+
+
+def test_to_caption_job_sets_tagger_use_onnx_and_combine_prefix():
+    rd = _rd(trigger_word="manbag", quality_prefix="masterpiece",
+             tagger_use_onnx=False, tagger_model_id="some/repo")
+    job = rd.to_caption_job(sdscripts_path="C:/sd", characters_file="", policy="keep")
+    assert job.tagger_use_onnx is False
+    assert job.tagger_model_id == "some/repo"
+    assert job.combine_prefix() == "manbag, masterpiece"
+
+
+def test_from_dict_on_json_lacking_new_keys_yields_documented_defaults():
+    """Old sets/*.json (written before Task 10) carry none of the new caption fields —
+    they must still load, falling back to the dataclass defaults."""
+    rd = RunDefinition.from_dict({
+        "lora_name": "old", "dataset_folder": "C:/d", "image_count": 3,
+    })
+    assert rd.quality_prefix == ""
+    assert rd.caption_order == "nl_first"
+    assert rd.refine_enabled is False
+    assert rd.lms_url == ""
+    assert rd.lms_model == ""
+    assert rd.lms_focus == ""
+    assert rd.lora_type == ""
+    assert rd.max_tokens == 1200
+    assert rd.tagger_model_id == ""
+    assert rd.tagger_threshold == 0.35
+    assert rd.tagger_use_onnx is True
+    assert rd.style_anchor == ""
+    assert rd.caption_policy == "ask"

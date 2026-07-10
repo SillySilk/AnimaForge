@@ -390,6 +390,7 @@ class MainWindow(QMainWindow):
         self._home_tab.name_changed.connect(self._train_tab.set_lora_name)
         self._home_tab.trigger_changed.connect(self._on_home_trigger_changed)
         self._home_tab.prefix_changed.connect(self._dataset_tab.set_prefix)
+        self._home_tab.prefix_changed.connect(self._train_tab.set_quality_prefix)
         self._home_tab.type_changed.connect(self._on_home_type_changed)
         self._home_tab.anchor_changed.connect(self._characters_tab.set_style_anchor)
         self._home_tab.run_requested.connect(self._on_home_run)
@@ -870,10 +871,12 @@ class MainWindow(QMainWindow):
             self._dataset_tab.load_folder_path(dataset_folder)
         if trigger:
             self._dataset_tab.set_trigger_word(trigger)
+        self._train_tab.set_quality_prefix(self._dataset_tab.get_prefix())
 
     def _on_dataset_loaded(self, folder_path: str, image_count: int):
         self._train_tab.set_dataset(folder_path, image_count)
         self._train_tab.set_trigger_word(self._dataset_tab.get_trigger_word())
+        self._train_tab.set_quality_prefix(self._dataset_tab.get_prefix())
         self._characters_tab.set_dataset(folder_path)
         self._status_bar.showMessage(
             f"Dataset loaded: {image_count} images from {folder_path}"

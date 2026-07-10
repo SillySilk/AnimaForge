@@ -9,6 +9,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal
 
+from core.caption_policy import ASK
 from core.config_generator import generate_configs
 from core.paths import run_output_dir
 from core.settings import AppSettings
@@ -44,6 +45,21 @@ class RunDefinition:
     sample_enabled: bool = False
     sample_prompts: list = field(default_factory=list)
     subject_type: str = ""
+    # Captioning (so a queued run captions with the settings it was queued with, not
+    # whatever happens to sit in the live UI when the batch reaches it — see to_caption_job)
+    quality_prefix: str = ""
+    caption_order: str = "nl_first"
+    refine_enabled: bool = False
+    lms_url: str = ""
+    lms_model: str = ""
+    lms_focus: str = ""
+    lora_type: str = ""
+    max_tokens: int = 1200
+    tagger_model_id: str = ""
+    tagger_threshold: float = 0.35
+    tagger_use_onnx: bool = True
+    style_anchor: str = ""
+    caption_policy: str = ASK
     # Environment
     sdscripts_path: str = ""
     dit_path: str = ""
@@ -60,6 +76,24 @@ class RunDefinition:
     def from_dict(cls, d: dict) -> "RunDefinition":
         known = {f for f in cls.__dataclass_fields__}
         return cls(**{k: v for k, v in d.items() if k in known})
+
+    def to_caption_job(self, sdscripts_path: str, characters_file: str, policy: str):
+        """The CaptionJob this queued run should caption with — built from the run's own
+        snapshot, never from whatever sits in the live UI when the batch reaches it."""
+        from core.caption_runner import CaptionJob
+        chain = ["tag", "describe"]
+        if self.refine_enabled:
+            chain.append("refine")
+        chain.append("combine")
+        return CaptionJob(
+            dataset_folder=self.dataset_folder, sdscripts_path=sdscripts_path,
+            trigger=self.trigger_word, prefix=self.quality_prefix,
+            order=self.caption_order, chain=chain, policy=policy,
+            lms_url=self.lms_url, lms_model=self.lms_model, lms_focus=self.lms_focus,
+            lora_type=self.lora_type, max_tokens=self.max_tokens,
+            characters_file=characters_file,
+            tagger_model_id=self.tagger_model_id, tagger_threshold=self.tagger_threshold,
+            tagger_use_onnx=self.tagger_use_onnx)
 
 
 def resolve_sample_prompts(run: RunDefinition):

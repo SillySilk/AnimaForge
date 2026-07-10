@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QSize, QTimer, Signal, Slot
+from PySide6.QtCore import Qt, QSettings, QSize, QTimer, Signal, Slot
 from PySide6.QtGui import QColor, QIcon, QPainter
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -26,7 +26,8 @@ from PySide6.QtWidgets import (
 )
 
 from core.config_generator import generate_configs, get_config_summary
-from core.settings import SAMPLE_COUNT, SAMPLE_EVERY_N_EPOCHS
+from core.settings import SAMPLE_COUNT, SAMPLE_EVERY_N_EPOCHS, SETTINGS_APP, SETTINGS_ORG
+from core.tagger import TAGGER_MODELS, read_tagger_defaults
 from core.step_calculator import (
     calculate_training_params,
     format_calculation_string,
@@ -222,6 +223,7 @@ class TrainTab(QWidget):
         self._app_settings = None
         self._lms_url = "http://localhost:1234/v1"
         self._lms_model = ""
+        self._quality_prefix = ""
         # Tracks which dataset folder the sample box was auto-filled for, so a repeated
         # set_dataset for the same folder won't clobber edits.
         self._sample_autofill_folder = None
@@ -262,6 +264,12 @@ class TrainTab(QWidget):
 
     def set_trigger_word(self, trigger: str):
         self._trigger_word = trigger
+
+    def set_quality_prefix(self, prefix: str):
+        """Quality prefix is edited on Home; TrainTab needs its own copy so a queued
+        run's RunDefinition snapshot reflects the prefix actually in force, not
+        whatever the Dataset tab happens to hold hours later when the batch runs."""
+        self._quality_prefix = prefix or ""
 
     # ---- accessors the Home cockpit drives / reads (single source of truth) ----
     def set_lora_name(self, name: str):
@@ -1092,6 +1100,11 @@ class TrainTab(QWidget):
         if not valid:
             return None, msg
         self._ensure_sample_prompts()
+        s = QSettings(SETTINGS_ORG, SETTINGS_APP)
+        model_index, threshold, _overwrite = read_tagger_defaults()
+        _label, tagger_model_id, tagger_use_onnx = TAGGER_MODELS[model_index]
+        lora_type = s.value("lora_type", "General", type=str).lower()
+        caption_order = "tags_first" if s.value("combine_order", 0, type=int) == 1 else "nl_first"
         rd = RunDefinition(
             lora_name=self._lora_name_edit.text().strip(),
             dataset_folder=self._dataset_path,
@@ -1111,6 +1124,18 @@ class TrainTab(QWidget):
             sample_enabled=self._sample_enable_check.isChecked(),
             sample_prompts=[ln for ln in self._sample_prompts_edit.toPlainText().splitlines() if ln.strip()],
             subject_type=self._lora_type_for_subject(),
+            quality_prefix=self._quality_prefix,
+            caption_order=caption_order,
+            refine_enabled=s.value("lmstudio_refine_in_process", False, type=bool),
+            lms_url=self._lms_url,
+            lms_model=self._lms_model,
+            lms_focus=s.value("lmstudio_focus", "", type=str),
+            lora_type=("" if lora_type == "general" else lora_type),
+            max_tokens=s.value("lmstudio_max_tokens", 1200, type=int),
+            tagger_model_id=tagger_model_id,
+            tagger_threshold=threshold,
+            tagger_use_onnx=tagger_use_onnx,
+            style_anchor=self._dataset_style_anchor(),
             sdscripts_path=self._setup_path,
             dit_path=self._dit_path,
             qwen3_path=self._qwen3_path,

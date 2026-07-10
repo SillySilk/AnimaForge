@@ -1,9 +1,28 @@
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, Signal
+from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, QSettings, Signal
 
+from core.settings import SETTINGS_APP, SETTINGS_ORG
 from utils.proc import apply_no_window
+
+# (display label, repo_id, use_onnx)
+TAGGER_MODELS = [
+    ("WD SwinV2 Tagger v3 (recommended)", "SmilingWolf/wd-swinv2-tagger-v3",    True),
+    ("WD ViT Tagger v3",                  "SmilingWolf/wd-vit-tagger-v3",        True),
+    ("WD SwinV2 Tagger v2 (Keras)",       "SmilingWolf/wd-v1-4-swinv2-tagger-v2", False),
+    ("WD ViT Tagger v2 (Keras)",          "SmilingWolf/wd-v1-4-vit-tagger-v2",    False),
+]
+
+
+def read_tagger_defaults():
+    """Saved Auto-Tag settings (model index, threshold, overwrite) used by a Process run."""
+    s = QSettings(SETTINGS_ORG, SETTINGS_APP)
+    return (
+        s.value("tagger_model_index", 0, type=int),
+        s.value("tagger_threshold", 0.35, type=float),
+        s.value("tagger_overwrite", False, type=bool),
+    )
 
 
 class TaggerProcess(QObject):

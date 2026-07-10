@@ -34,19 +34,11 @@ from core.caption_runner import CaptionJob, CaptionRunner
 from core.dataset_manager import (
     SUPPORTED_EXTENSIONS, apply_prefix, combine_all, save_caption, scan_folder,
 )
-from core.tagger import TaggerProcess
+from core.tagger import TaggerProcess, TAGGER_MODELS, read_tagger_defaults
 from core.joycaption import JoyCaptionProcess
 from core.llm_refine import LLMRefineProcess
 from core.settings import SETTINGS_ORG, SETTINGS_APP, AppSettings
 from ui.image_editor import ImageEditorDialog
-
-# (display label, repo_id, use_onnx)
-TAGGER_MODELS = [
-    ("WD SwinV2 Tagger v3 (recommended)", "SmilingWolf/wd-swinv2-tagger-v3",    True),
-    ("WD ViT Tagger v3",                  "SmilingWolf/wd-vit-tagger-v3",        True),
-    ("WD SwinV2 Tagger v2 (Keras)",       "SmilingWolf/wd-v1-4-swinv2-tagger-v2", False),
-    ("WD ViT Tagger v2 (Keras)",          "SmilingWolf/wd-v1-4-vit-tagger-v2",    False),
-]
 
 THUMB_SIZE = 220
 GRID_COLS = 4
@@ -68,16 +60,6 @@ def phase_text(step_key: str, chain=None) -> str:
     chain = chain if chain else PROCESS_STEPS
     idx = chain.index(step_key)
     return f"Step {idx + 1}/{len(chain)} · {STEP_NAMES[step_key]}…"
-
-
-def read_tagger_defaults():
-    """Saved Auto-Tag settings (model index, threshold, overwrite) used by a Process run."""
-    s = QSettings(SETTINGS_ORG, SETTINGS_APP)
-    return (
-        s.value("tagger_model_index", 0, type=int),
-        s.value("tagger_threshold", 0.35, type=float),
-        s.value("tagger_overwrite", False, type=bool),
-    )
 
 
 def conflict_text(state) -> str:
