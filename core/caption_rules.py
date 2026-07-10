@@ -64,6 +64,11 @@ def apply_caption_rules(text: str, rules) -> str:
     if not text or not rules:
         return text
     for find, replacement in rules:
+        # A blank `find` compiles to a zero-width pattern that matches at every
+        # non-word boundary, splattering the replacement across the whole caption.
+        # parse_rules() already drops these, but this is a public function.
+        if not find:
+            continue
         # Lookarounds on \w rather than \b: \b misbehaves when a term starts or ends
         # with a non-word char (e.g. "(medium)"), while \w boundaries hold for
         # "1boy", "score_7" and multi-word phrases alike.

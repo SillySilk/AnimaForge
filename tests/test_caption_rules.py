@@ -72,3 +72,12 @@ def test_combine_all_applies_rules_but_leaves_sidecars_untouched(tmp_path):
     # sidecars are pristine — combine never mutates its own inputs
     assert (tmp_path / "a.nl").read_text(encoding="utf-8") == "a man stands"
     assert (tmp_path / "a.tags").read_text(encoding="utf-8") == "1boy, solo"
+
+
+def test_blank_find_is_ignored_not_splattered_across_the_caption():
+    """A blank `find` compiles to a zero-width pattern matching every non-word
+    boundary. parse_rules() drops these, but apply_caption_rules is public."""
+    assert apply_caption_rules("1girl, solo", [("", "X")]) == "1girl, solo"
+    assert apply_caption_rules("1girl, solo", [("", "")]) == "1girl, solo"
+    # a blank rule alongside a real one must not disturb the real one
+    assert apply_caption_rules("1girl, 1boy, solo", [("", "X"), ("1boy", "")]) == "1girl, solo"

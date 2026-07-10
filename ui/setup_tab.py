@@ -1039,7 +1039,9 @@ class SetupTab(QWidget):
         v.addLayout(rules_btn_row)
         rules_hint = QLabel(
             "Whole words only — “man” won't match “woman” or “human”. "
-            "Leave Replace with empty to delete the term (that's how you ban a tag)."
+            "Leave Replace with empty to delete the term: that bans a tag cleanly, but in a "
+            "written description it leaves a gap (“a man stands” → “a stands”). For prose, "
+            "replacing beats deleting."
         )
         rules_hint.setObjectName("label_field")
         rules_hint.setWordWrap(True)
