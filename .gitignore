@@ -60,3 +60,7 @@ _ss_setup.png
 _ss_train.png
 publish-release.bat
 scripts/publish_release.py
+
+# Build identity stamp — describes a build, never source. Written by build_release.py
+# and by the self-updater; must never be committed.
+build_stamp.json
