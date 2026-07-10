@@ -88,6 +88,17 @@ def test_requirements_changed_ignores_whitespace(tmp_path: Path):
 
 # ---- zip layout validation (extraction half of download_and_extract) ----
 
+def test_build_stamp_roundtrip(tmp_path):
+    assert updater.read_build_stamp(tmp_path) is None
+    assert updater.write_build_stamp(tmp_path, "a" * 40, "2026-07-10") is True
+    assert updater.read_build_stamp(tmp_path) == "a" * 40
+
+
+def test_read_build_stamp_ignores_garbage(tmp_path):
+    (tmp_path / "build_stamp.json").write_text("not json", encoding="utf-8")
+    assert updater.read_build_stamp(tmp_path) is None
+
+
 def test_zip_extract_layout(tmp_path: Path):
     # Build a GitHub-style zipball: everything under one AnimaForge-main/ root.
     src = _fake_repo(tmp_path / "build")

@@ -11,6 +11,7 @@ Overwriting .py files while the app runs is safe on Windows (source files
 aren't locked; the running app keeps its in-memory code) — a restart picks up
 the new version.
 """
+import json
 import re
 import shutil
 import urllib.request
@@ -24,6 +25,31 @@ ZIPBALL_URL = f"https://github.com/{REPO}/archive/refs/heads/{BRANCH}.zip"
 TIMEOUT_S = 15
 
 _VERSION_RE = re.compile(r"__version__\s*=\s*[\"']([^\"']+)[\"']")
+
+STAMP_NAME = "build_stamp.json"
+
+
+def write_build_stamp(root, commit: str, built: str) -> bool:
+    """Write build_stamp.json into `root`. Returns False on any OS error."""
+    try:
+        (Path(root) / STAMP_NAME).write_text(
+            json.dumps({"commit": commit, "built": built}), encoding="utf-8")
+        return True
+    except OSError:
+        return False
+
+
+def read_build_stamp(root):
+    """Return the commit SHA from root/build_stamp.json, or None if absent/malformed."""
+    p = Path(root) / STAMP_NAME
+    if not p.is_file():
+        return None
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        sha = data.get("commit")
+        return sha if isinstance(sha, str) and sha else None
+    except (OSError, ValueError):
+        return None
 
 
 def parse_version(s: str) -> tuple:
