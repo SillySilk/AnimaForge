@@ -71,6 +71,23 @@ def test_apply_update_creates_new_directories(tmp_path: Path):
     assert (app / "ui" / "new_tab.py").is_file()
 
 
+def test_apply_update_writes_stamp_when_commit_given(tmp_path):
+    new_root = tmp_path / "new"; new_root.mkdir()
+    (new_root / "a.py").write_text("x", encoding="utf-8")
+    app_root = tmp_path / "app"; app_root.mkdir()
+    n = updater.apply_update(new_root, app_root, commit="a" * 40, built="2026-07-10")
+    assert n == 1
+    assert updater.read_build_stamp(app_root) == "a" * 40
+
+
+def test_apply_update_without_commit_writes_no_stamp(tmp_path):
+    new_root = tmp_path / "new"; new_root.mkdir()
+    (new_root / "a.py").write_text("x", encoding="utf-8")
+    app_root = tmp_path / "app"; app_root.mkdir()
+    updater.apply_update(new_root, app_root)
+    assert updater.read_build_stamp(app_root) is None
+
+
 def test_requirements_changed(tmp_path: Path):
     new_root = _fake_repo(tmp_path / "extracted")
     app = tmp_path / "app"

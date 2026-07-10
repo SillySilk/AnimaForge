@@ -206,9 +206,10 @@ def build_update_decision(compare, *, remote_version, local_version, skipped_com
     return None
 
 
-def apply_update(new_root, app_root) -> int:
+def apply_update(new_root, app_root, *, commit=None, built=None) -> int:
     """Overlay-copy every file from the extracted repo onto the install.
-    Returns the number of files written."""
+    Returns the number of files written. When `commit` is given, stamp the install
+    with it (build_stamp.json) so a zip install gains a real commit identity."""
     new_root = Path(new_root)
     app_root = Path(app_root)
     n = 0
@@ -219,4 +220,6 @@ def apply_update(new_root, app_root) -> int:
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
         n += 1
+    if commit:
+        write_build_stamp(app_root, commit, built or "")
     return n
