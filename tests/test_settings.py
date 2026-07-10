@@ -256,3 +256,17 @@ def test_caption_existing_policy_defaults_to_ask(tmp_path):
     assert a.get("caption_existing_policy") == ASK
     a.set("caption_existing_policy", KEEP)
     assert a.get("caption_existing_policy") == KEEP
+
+
+def test_startup_update_check_defaults(tmp_path):
+    a = _appsettings(tmp_path)          # existing helper at the top of test_settings.py
+    assert a.get("startup_update_check") is True
+    assert a.get("skipped_update_commit") == ""
+
+
+def test_startup_update_check_roundtrip(tmp_path):
+    a = _appsettings(tmp_path)
+    a.set("startup_update_check", False)
+    a.set("skipped_update_commit", "a" * 40)
+    assert a.get("startup_update_check") is False
+    assert a.get("skipped_update_commit") == "a" * 40

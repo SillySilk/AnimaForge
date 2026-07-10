@@ -112,6 +112,10 @@ DEFAULTS = {
     # on the system UI stack). mode: "forge" (bundled faces) | "system" | "custom".
     "ui_font_mode": "forge",
     "ui_font_family": "",   # family name; used only when mode == "custom"
+    # Startup update check: compare the local commit against GitHub main and offer to
+    # update when behind. skipped_update_commit silences the popup for one main SHA.
+    "startup_update_check": True,
+    "skipped_update_commit": "",
 }
 
 # Note: fp8_scaled is intentionally absent — anima_train_network.py hard-disables it
