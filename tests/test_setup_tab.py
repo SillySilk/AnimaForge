@@ -58,6 +58,48 @@ def test_policy_radio_reflects_and_writes_the_setting():
         s._app.set("caption_existing_policy", prev_policy)
 
 
+def test_caption_rules_table_loads_without_write_back_and_saves_on_edit():
+    """The rules table is populated in _bind_app_widgets BEFORE itemChanged is connected,
+    so constructing SetupTab from a seeded store must not alter that store. Editing a cell
+    afterwards (connection now live) must persist."""
+    from core.caption_rules import dump_rules, parse_rules
+    from core.settings import AppSettings
+    app_probe = AppSettings()
+    prev = app_probe.get("caption_rules_json")
+    try:
+        seeded = dump_rules([("man", "woman")])
+        app_probe.set("caption_rules_json", seeded)
+        s = SetupTab()
+        assert s._app.get("caption_rules_json") == seeded      # load did not write back
+        assert s._rules_table.rowCount() == 1
+        assert s._rules_table.item(0, 0).text() == "man"
+        assert s._rules_table.item(0, 1).text() == "woman"
+        s._rules_table.item(0, 1).setText("woman!!")           # edit after load
+        assert parse_rules(s._app.get("caption_rules_json")) == [("man", "woman!!")]
+    finally:
+        app_probe.set("caption_rules_json", prev)
+
+
+def test_add_and_remove_rule_row():
+    from core.caption_rules import parse_rules
+    from core.settings import AppSettings
+    app_probe = AppSettings()
+    prev = app_probe.get("caption_rules_json")
+    try:
+        s = SetupTab()
+        s._rules_table.setRowCount(0)
+        s._add_rule_row()
+        assert s._rules_table.rowCount() == 1
+        s._rules_table.item(0, 0).setText("1boy")
+        assert parse_rules(s._app.get("caption_rules_json")) == [("1boy", "")]
+        s._rules_table.selectRow(0)
+        s._remove_selected_rule()
+        assert s._rules_table.rowCount() == 0
+        assert parse_rules(s._app.get("caption_rules_json")) == []
+    finally:
+        app_probe.set("caption_rules_json", prev)
+
+
 def test_setup_tab_survives_an_unrecognized_policy_in_the_store():
     """SetupTab is built unconditionally at app start; a corrupted preference must not
     take the whole app down with a KeyError."""

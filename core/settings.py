@@ -66,6 +66,10 @@ DEFAULTS = {
     "comfyui_lora_dir": "",
     # Custom training presets (JSON array — see core/train_presets.py)
     "train_presets_json": "",
+    # Caption find/replace rules (JSON array of {"find","replace"} — see core/caption_rules.py).
+    # Applied to the caption BODY only (nl/tags), never the trigger/prefix/lead, when a .txt
+    # is built — never to the .tags/.nl sidecars on disk.
+    "caption_rules_json": "[]",
     # App defaults (Train tab initializes from these)
     "default_optimizer": "prodigy",
     "default_network_dim": 16,

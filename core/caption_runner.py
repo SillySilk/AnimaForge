@@ -45,6 +45,7 @@ class CaptionJob:
     tagger_model_id: str = ""
     tagger_threshold: float = 0.35
     tagger_use_onnx: bool = True
+    caption_rules: list = field(default_factory=list)
 
     def combine_prefix(self) -> str:
         """What `combine_all(prefix=...)` receives. The trigger is NOT a separate
@@ -173,7 +174,7 @@ class CaptionRunner(QObject):
         elif stage == "combine":
             written, errors = combine_all(
                 job.dataset_folder, prefix=job.combine_prefix(), order=job.order,
-                only=images)
+                only=images, rules=job.caption_rules)
             self.log_line.emit(f"[Combine] {written} caption file(s) built, {errors} error(s).")
             self._step_done("combine", errors == 0)
 

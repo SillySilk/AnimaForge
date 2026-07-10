@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 from core import characters as characters_mod
 from core import caption_policy as cp
 from core.caption_progress import parse_progress
+from core.caption_rules import parse_rules
 from core.caption_runner import CaptionJob, CaptionRunner
 from core.dataset_manager import (
     SUPPORTED_EXTENSIONS, apply_prefix, combine_all, save_caption, scan_folder,
@@ -1006,7 +1007,9 @@ class DatasetTab(QWidget):
         trigger = self._trigger_edit.text().strip()
         prefix = self._prefix_edit.text().strip()
         full_prefix = ", ".join(b for b in [trigger, prefix] if b)
-        written, errors = combine_all(self._folder_path, prefix=full_prefix, order=order)
+        rules = parse_rules(AppSettings().get("caption_rules_json"))
+        written, errors = combine_all(self._folder_path, prefix=full_prefix, order=order,
+                                      rules=rules)
         self._refresh_all_captions()
         return written, errors
 
@@ -1247,6 +1250,7 @@ class DatasetTab(QWidget):
             tagger_model_id=model_id,
             tagger_threshold=threshold,
             tagger_use_onnx=use_onnx,
+            caption_rules=parse_rules(AppSettings().get("caption_rules_json")),
         )
 
     def _begin_runner_ui(self):

@@ -77,6 +77,7 @@ class RunDefinition:
     tagger_use_onnx: bool = True
     style_anchor: str = ""
     caption_policy: str = ASK
+    caption_rules: list = field(default_factory=list)
     # Environment
     sdscripts_path: str = ""
     dit_path: str = ""
@@ -110,7 +111,7 @@ class RunDefinition:
             lora_type=self.lora_type, max_tokens=self.max_tokens,
             characters_file=characters_file,
             tagger_model_id=self.tagger_model_id, tagger_threshold=self.tagger_threshold,
-            tagger_use_onnx=self.tagger_use_onnx)
+            tagger_use_onnx=self.tagger_use_onnx, caption_rules=self.caption_rules)
 
 
 def resolve_sample_prompts(run: RunDefinition):
