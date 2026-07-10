@@ -866,12 +866,18 @@ class MainWindow(QMainWindow):
             self, "Update Applied",
             f"AnimaForge v{version} is in place.\nRestart AnimaForge to finish.{extra}")
 
-    def _on_load_set_requested(self, dataset_folder: str, trigger: str):
+    def _on_load_set_requested(self, dataset_folder: str, trigger: str, quality_prefix: str):
         if dataset_folder:
             self._dataset_tab.load_folder_path(dataset_folder)
         if trigger:
             self._dataset_tab.set_trigger_word(trigger)
-        self._train_tab.set_quality_prefix(self._dataset_tab.get_prefix())
+        # Unconditional (not `if quality_prefix:`): a loaded set with an empty prefix must
+        # clear whatever the previous dataset left in the field — that's the exact
+        # stale-live-UI bug this restore path exists to prevent. Restore both the visible
+        # Home/Dataset field and TrainTab's own copy so the UI never disagrees with what
+        # a queued run would actually use.
+        self._dataset_tab.set_prefix(quality_prefix)
+        self._train_tab.set_quality_prefix(quality_prefix)
 
     def _on_dataset_loaded(self, folder_path: str, image_count: int):
         self._train_tab.set_dataset(folder_path, image_count)

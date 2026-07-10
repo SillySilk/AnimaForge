@@ -199,7 +199,7 @@ class TickBar(QWidget):
 class TrainTab(QWidget):
     status_message = Signal(str)  # for main window status bar
     add_to_batch_requested = Signal(object)  # emits a RunDefinition
-    load_set_requested = Signal(str, str)    # (dataset_folder, trigger_word)
+    load_set_requested = Signal(str, str, str)  # (dataset_folder, trigger_word, quality_prefix)
     subject_type_changed = Signal()          # Person/Object/Style changed -> refresh rail
     run_progress = Signal(object)            # RunProgress payload mirrored onto Home
     optimizer_changed = Signal(str)          # preset label for the Home OPTIMIZER tile
@@ -1166,12 +1166,14 @@ class TrainTab(QWidget):
         self._dataset_path = rd.dataset_folder
         self._image_count = rd.image_count
         self._trigger_word = rd.trigger_word
+        self.set_quality_prefix(getattr(rd, "quality_prefix", "") or "")
         if rd.dataset_folder:
             self._dataset_path_edit.setText(rd.dataset_folder)
         self._recalculate()
         self._refresh_resume_option()
-        # Ask MainWindow to load the dataset into the Dataset tab + restore trigger
-        self.load_set_requested.emit(rd.dataset_folder or "", rd.trigger_word or "")
+        # Ask MainWindow to load the dataset into the Dataset tab + restore trigger + prefix
+        self.load_set_requested.emit(
+            rd.dataset_folder or "", rd.trigger_word or "", self._quality_prefix)
 
     def _refresh_sets_combo(self):
         from core import sets
@@ -1229,8 +1231,11 @@ class TrainTab(QWidget):
         ) != QMessageBox.Yes:
             return
         n = sets.restore_captions(folder, name, stage)
-        # Rescan the folder so the Dataset gallery shows the restored captions.
-        self.load_set_requested.emit(folder, "")
+        # Rescan the folder so the Dataset gallery shows the restored captions. This is a
+        # caption-file rescan, not a full set restore, so the trigger word is left alone —
+        # but the prefix is this same named set's own value, not a foreign stale one, so
+        # it's safe (and correct) to pass it through.
+        self.load_set_requested.emit(folder, "", (rd.quality_prefix if rd else "") or "")
         self.status_message.emit(
             f"Restored {n} caption file(s) from '{name}' ({stage}).")
 

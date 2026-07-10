@@ -183,6 +183,53 @@ def test_build_run_definition_never_clobbers_authored_prompts(tmp_path: Path):
     assert rd.sample_prompts == ["my own prompt"]
 
 
+def test_apply_run_definition_restores_the_quality_prefix():
+    """Load Set must not leave the previous dataset's prefix on the run."""
+    t = TrainTab()
+    t.set_quality_prefix("OLD_LIVE_PREFIX")
+    rd = RunDefinition(lora_name="Saved", dataset_folder="C:/ds", image_count=5,
+                       trigger_word="savedtrigger", quality_prefix="SAVED_SET_PREFIX")
+    t.apply_run_definition(rd)
+    assert t._quality_prefix == "SAVED_SET_PREFIX"
+
+
+def test_apply_run_definition_clears_a_stale_prefix_when_the_set_has_none():
+    t = TrainTab()
+    t.set_quality_prefix("LEFTOVER")
+    rd = RunDefinition(lora_name="S", dataset_folder="C:/ds", image_count=5)
+    t.apply_run_definition(rd)
+    assert t._quality_prefix == ""
+
+
+def test_load_set_requested_carries_the_quality_prefix():
+    t = TrainTab()
+    seen = []
+    t.load_set_requested.connect(lambda f, tr, p: seen.append((f, tr, p)))
+    rd = RunDefinition(lora_name="S", dataset_folder="C:/ds", image_count=5,
+                       trigger_word="trig", quality_prefix="masterpiece")
+    t.apply_run_definition(rd)
+    assert seen == [("C:/ds", "trig", "masterpiece")]
+
+
+def test_quality_prefix_survives_an_apply_then_build_round_trip(tmp_path: Path):
+    """The snapshot must survive a load -> save cycle, not just a load."""
+    sd = tmp_path / "sd"; sd.mkdir()
+    dit = tmp_path / "dit.safetensors"; dit.write_bytes(b"x")
+    q = tmp_path / "q.safetensors"; q.write_bytes(b"x")
+    vae = tmp_path / "vae.safetensors"; vae.write_bytes(b"x")
+    out = tmp_path / "out"; out.mkdir()
+    ds = tmp_path / "ds"; ds.mkdir()
+
+    t = TrainTab()
+    t.set_environment(str(sd), str(dit), str(q), str(vae), str(out))
+    rd = RunDefinition(lora_name="Demo", dataset_folder=str(ds), image_count=5,
+                       trigger_word="trig", quality_prefix="masterpiece, best quality")
+    t.apply_run_definition(rd)
+    rd2, msg = t.build_run_definition()
+    assert rd2 is not None, msg
+    assert rd2.quality_prefix == rd.quality_prefix
+
+
 def test_set_quality_prefix_reaches_build_run_definition(tmp_path: Path):
     """Home owns the quality-prefix control; TrainTab has no widget of its own for it,
     so set_quality_prefix (wired from Home via MainWindow) must be the only path a
