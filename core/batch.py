@@ -168,7 +168,7 @@ class BatchRunner(QObject):
         self._trainer.progress_updated.connect(self._on_progress)
         # Captioner is wired ONCE here — a per-run connect/disconnect dance is how
         # double-fired slots get born. Each queued run captions itself just before
-        # its own training (see _caption_then_train).
+        # its own training (see _begin_run).
         self._captioner = CaptionRunner(self)
         self._captioner.log_line.connect(self.log_line)
         self._captioner.finished.connect(self._on_caption_finished)
@@ -210,65 +210,111 @@ class BatchRunner(QObject):
     # ------------------------------------------------------------------
 
     def _advance(self):
-        if not self._running:
-            return
-        self._idx = next_index(self._runs, self._idx + 1, self._skip_done)
-        if self._idx >= len(self._runs):
-            self._running = False
-            self.batch_finished.emit()
-            return
+        """Move through the queue as an explicit loop, never a recursive call.
 
-        run = self._runs[self._idx]
-        run.status = RUNNING
-        self.run_started.emit(self._idx)
-        self.log_line.emit(f"[Batch] ({self._idx + 1}/{len(self._runs)}) starting '{run.lora_name}'")
-        self._caption_then_train(run)
+        A synchronous run failure (e.g. every run refusing to caption because of
+        one shared bad sdscripts_path) must not re-enter this method on the same
+        call stack — with a few hundred queued runs that blew the stack with a
+        RecursionError before continue_on_error ever got a chance to matter.
+        `_begin_run` either hands off to async work and returns True (in which
+        case we return and wait for the callback to bring us back here on a
+        fresh stack), or fails the run synchronously and returns False, in which
+        case we just loop to the next run.
+        """
+        while True:
+            if not self._running:
+                return
+            self._idx = next_index(self._runs, self._idx + 1, self._skip_done)
+            if self._idx >= len(self._runs):
+                self._running = False
+                self.batch_finished.emit()
+                return
 
-    def _caption_then_train(self, run):
+            run = self._runs[self._idx]
+            run.status = RUNNING
+            self.run_started.emit(self._idx)
+            self.log_line.emit(
+                f"[Batch] ({self._idx + 1}/{len(self._runs)}) starting '{run.lora_name}'")
+            if self._begin_run(run):
+                return                      # async work in flight; the callback re-enters
+            if not self._continue_on_error:
+                self._running = False
+                self.batch_finished.emit()
+                return
+            # synchronous failure — loop straight to the next run, no recursion
+
+    def _begin_run(self, run) -> bool:
         """Caption this run just before its own training, so a caption failure kills
         only this one run and the sample prompts (resolved later in _start_training)
-        are drawn from captions that exist by then."""
+        are drawn from captions that exist by then.
+
+        Returns True once the run has been handed off to asynchronous work
+        (captioning started, or training started). Returns False if it failed
+        synchronously — in which case _mark_failed has already been called and
+        the caller (the loop in _advance) decides whether to continue or stop.
+        Must never call _advance() itself.
+        """
         from core import caption_policy as cp, characters as ch
         # ASK never reaches a runner: it is a UI-only prompt. Unattended, KEEP is the
         # safe resolution — existing captions are never destroyed.
         policy = run.caption_policy if run.caption_policy != cp.ASK else cp.KEEP
-        state = cp.scan(run.dataset_folder)
-        if not cp.images_for(state, policy):
-            self._start_training(run)
-            return
-        self.run_phase.emit(self._idx, CAPTIONING)
         try:
+            state = cp.scan(run.dataset_folder)
+            if not cp.images_for(state, policy):
+                return self._start_training(run)
+            self.run_phase.emit(self._idx, CAPTIONING)
             job = run.to_caption_job(
                 run.sdscripts_path, ch.path_for(run.dataset_folder), policy)
             started = self._captioner.start(job)
-        except ValueError as e:
-            # An unknown stage in the caption chain: fail this run, spare the queue.
-            self._fail_run(f"captioning could not start for '{run.lora_name}': {e}")
-            return
+        except (ValueError, OSError) as e:
+            # ValueError: an unknown stage in the caption chain. OSError: the
+            # dataset folder vanished mid-batch (deleted, or a network share
+            # dropped) while cp.scan() was walking it. Either way, fail this
+            # run and spare the queue.
+            self._mark_failed(f"captioning could not start for '{run.lora_name}': {e}")
+            return False
         if not started:
-            self._fail_run(f"could not start captioning for '{run.lora_name}'")
+            self._mark_failed(f"could not start captioning for '{run.lora_name}'")
+            return False
+        return True
 
     def _on_caption_finished(self, ok: bool):
         if not self._running:
             return
         if not ok:
-            self._fail_run(
+            self._mark_failed(
                 f"captioning failed for '{self._runs[self._idx].lora_name}'")
+            self._advance_or_stop()
             return
-        self._start_training(self._runs[self._idx])
+        if not self._start_training(self._runs[self._idx]):
+            self._advance_or_stop()
 
-    def _fail_run(self, msg: str):
-        """Mark the current run FAILED, report it, and stop or advance per policy."""
+    def _mark_failed(self, msg: str):
+        """Pure bookkeeping: mark the current run FAILED and report it. Does not
+        advance the queue — callers decide whether to continue or stop."""
         self._runs[self._idx].status = FAILED
         self.log_line.emit(f"[Batch] {msg}")
         self.run_finished.emit(self._idx, False)
+
+    def _advance_or_stop(self):
+        """After an asynchronous failure: stop the batch if continue_on_error is
+        False, otherwise move on to the next run. Safe to call self._advance()
+        here — this runs from a real callback (a fresh, shallow stack), not from
+        within _advance()'s own loop."""
         if not self._continue_on_error:
             self._running = False
             self.batch_finished.emit()
             return
         self._advance()
 
-    def _start_training(self, run):
+    def _start_training(self, run) -> bool:
+        """Generate this run's config and launch training.
+
+        Returns True once training has been handed off asynchronously to the
+        trainer. Returns False if config generation failed synchronously — in
+        that case _mark_failed has already been called; the caller decides
+        whether to continue or stop. Must never call _advance() itself.
+        """
         self.run_phase.emit(self._idx, TRAINING)
         try:
             params = calculate_training_params(run.image_count, target_steps=run.target_steps)
@@ -320,11 +366,8 @@ class BatchRunner(QObject):
                 extra_args=extra,
             )
         except Exception as e:
-            run.status = FAILED
-            self.log_line.emit(f"[Batch] config generation failed for '{run.lora_name}': {e}")
-            self.run_finished.emit(self._idx, False)
-            self._advance()
-            return
+            self._mark_failed(f"config generation failed for '{run.lora_name}': {e}")
+            return False
 
         # Unattended: never block the queue, just warn in the log if VRAM looks low.
         try:
@@ -341,6 +384,7 @@ class BatchRunner(QObject):
             pass
 
         self._trainer.start(cfg, run.sdscripts_path)
+        return True
 
     def _on_run_finished(self, success: bool):
         if not self._running:
@@ -350,9 +394,8 @@ class BatchRunner(QObject):
         if success:
             self._maybe_deliver(run)
         self.run_finished.emit(self._idx, success)
-        if not success and not self._continue_on_error:
-            self._running = False
-            self.batch_finished.emit()
+        if not success:
+            self._advance_or_stop()
             return
         self._advance()
 

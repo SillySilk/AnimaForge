@@ -340,3 +340,170 @@ def test_restart_reruns_finished_queue_from_the_top(tmp_path, monkeypatch):
     assert started == [0]                        # starts from the very top again
     assert r0.status == RUNNING
     assert r1.status == QUEUED
+
+
+# ----------------------------------------------------------------------------
+# Task 11 fix pass: _advance must never recurse on a synchronous run failure.
+# ----------------------------------------------------------------------------
+
+def test_500_synchronous_caption_refusals_do_not_recurse(tmp_path):
+    """A queue where every run's captioning refuses synchronously (blank
+    sdscripts_path) must not recurse through _advance -> _begin_run -> _mark_failed
+    -> _advance. Before the fix this raised RecursionError around run 330."""
+    from core.batch import BatchRunner, FAILED
+
+    runner = BatchRunner()
+    runs = [_caption_run(tmp_path, f"ds{i}", sdscripts_path="") for i in range(500)]
+    finished = []
+    runner.batch_finished.connect(lambda: finished.append(True))
+
+    runner.start(runs, continue_on_error=True)
+
+    assert all(r.status == FAILED for r in runs)
+    assert finished == [True]
+    assert runner.is_running() is False
+
+
+def test_config_generation_failure_honors_continue_on_error_false(tmp_path, monkeypatch):
+    """Finding 2: config-generation failure must respect continue_on_error like
+    every other failure path, instead of always marching on."""
+    from core.batch import BatchRunner, FAILED, QUEUED
+    import core.batch as batch_mod
+
+    def _boom(**kw):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(batch_mod, "generate_configs", _boom)
+
+    runner = BatchRunner()
+    run0 = _caption_run(tmp_path, "ds0", captioned=True)   # already captioned -> straight to training
+    run1 = _caption_run(tmp_path, "ds1", captioned=True)
+    runner.start([run0, run1], continue_on_error=False)
+
+    assert run0.status == FAILED
+    assert run1.status == QUEUED       # never reached
+    assert runner.is_running() is False
+
+
+def test_config_generation_failure_continues_when_continue_on_error_true(tmp_path, monkeypatch):
+    from core.batch import BatchRunner, FAILED, RUNNING
+    import core.batch as batch_mod
+
+    def _boom_for_ds0(**kw):
+        if kw.get("lora_name") == "ds0":
+            raise RuntimeError("boom")
+        return ("cfg", None)
+    monkeypatch.setattr(batch_mod, "generate_configs", _boom_for_ds0)
+
+    runner = BatchRunner()
+    trained = []
+    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd: trained.append(sd))
+    run0 = _caption_run(tmp_path, "ds0", captioned=True)
+    run1 = _caption_run(tmp_path, "ds1", captioned=True)
+    runner.start([run0, run1], continue_on_error=True)
+
+    assert run0.status == FAILED
+    assert run1.status == RUNNING
+    assert trained == ["C:/sd"]
+
+
+def test_scan_oserror_fails_only_that_run_and_queue_continues(tmp_path, monkeypatch):
+    """Finding 3: cp.scan() walks the dataset folder with iterdir()/is_file(), which
+    can raise OSError if the folder vanishes (deleted, or a network share drops)
+    mid-batch. That must fail only the one run, not the whole queue."""
+    from core.batch import BatchRunner, FAILED, RUNNING
+    from core import caption_policy as cp
+
+    runner = BatchRunner()
+    trained = []
+    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd: trained.append(sd))
+
+    run0 = _caption_run(tmp_path, "ds0")                    # needs captioning
+    run1 = _caption_run(tmp_path, "ds1", captioned=True)    # trains straight away
+
+    real_scan = cp.scan
+
+    def _scan(folder):
+        if folder == run0.dataset_folder:
+            raise OSError("dataset folder vanished mid-batch")
+        return real_scan(folder)
+    monkeypatch.setattr(cp, "scan", _scan)
+
+    runner.start([run0, run1], continue_on_error=True)
+
+    assert run0.status == FAILED
+    assert run1.status == RUNNING
+    assert trained == ["C:/sd"]
+
+
+def test_unknown_caption_stage_fails_only_that_run_and_queue_continues(tmp_path, monkeypatch):
+    """Finding 4: no BatchRunner-level test previously exercised the ValueError
+    branch (unknown chain stage) of _begin_run."""
+    from core.batch import BatchRunner, FAILED, RUNNING
+    from core.caption_runner import CaptionJob
+
+    runner = BatchRunner()
+    trained = []
+    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd: trained.append(sd))
+
+    run0 = _caption_run(tmp_path, "ds0")
+    run1 = _caption_run(tmp_path, "ds1", captioned=True)
+    monkeypatch.setattr(
+        run0, "to_caption_job",
+        lambda sdscripts_path, characters_file, policy: CaptionJob(
+            dataset_folder=run0.dataset_folder, sdscripts_path=sdscripts_path,
+            chain=["not_a_real_stage"]))
+
+    runner.start([run0, run1], continue_on_error=True)
+
+    assert run0.status == FAILED
+    assert run1.status == RUNNING
+    assert trained == ["C:/sd"]
+
+
+def test_caption_refusal_fails_only_that_run_and_queue_continues(tmp_path, monkeypatch):
+    """Finding 4: no BatchRunner-level test previously exercised the `if not
+    started` refusal branch of _begin_run (blank sdscripts_path)."""
+    from core.batch import BatchRunner, FAILED, RUNNING
+
+    runner = BatchRunner()
+    trained = []
+    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd: trained.append(sd))
+
+    run0 = _caption_run(tmp_path, "ds0", sdscripts_path="")   # blank -> CaptionRunner.start() refuses
+    run1 = _caption_run(tmp_path, "ds1", captioned=True)
+
+    runner.start([run0, run1], continue_on_error=True)
+
+    assert run0.status == FAILED
+    assert run1.status == RUNNING
+    assert trained == ["C:/sd"]
+
+
+def test_on_caption_finished_guard_blocks_stray_true_after_stop(tmp_path, monkeypatch):
+    """Finding 4 (mutation result): deleting `if not self._running: return` from
+    _on_caption_finished isn't caught by test_stop_during_captioning_does_not_advance
+    (that one is protected by _advance()'s own guard on the ok=False path). But a
+    stray finished(True) landing after stop() calls _start_training directly —
+    _advance() is never in the way — so without the guard this would resurrect a
+    batch the user already stopped and launch training. This test makes the guard
+    load-bearing."""
+    from core.batch import BatchRunner, RUNNING
+
+    runner = BatchRunner()
+    _neuter_caption_processes(runner, monkeypatch)
+    trained = []
+    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd: trained.append(sd))
+
+    run0 = _caption_run(tmp_path, "ds0")
+    runner.start([run0])
+    assert run0.status == RUNNING
+
+    runner.stop()
+    assert runner.is_running() is False
+
+    # Simulate a stray finished(True) slipping in after stop() (e.g. a signal
+    # already in flight before the captioner was torn down).
+    runner._on_caption_finished(True)
+
+    assert trained == []
+    assert runner.is_running() is False
