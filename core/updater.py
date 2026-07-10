@@ -15,6 +15,7 @@ import json
 import re
 import shutil
 import subprocess
+import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -146,6 +147,35 @@ def requirements_changed(new_root, app_root) -> bool:
     old_text = old.read_text(encoding="utf-8", errors="replace") if old.is_file() else ""
     new_text = new.read_text(encoding="utf-8", errors="replace") if new.is_file() else ""
     return old_text.strip() != new_text.strip()
+
+
+COMPARE_URL = f"https://api.github.com/repos/{REPO}/compare/{{base}}...{BRANCH}"
+
+
+def compare_to_main(local_sha, *, opener=urllib.request.urlopen) -> dict:
+    """Compare the installed commit against main via the GitHub compare API.
+    Never raises: returns {"status": ...} where status is ahead/identical/behind/
+    diverged/not_found/error. Only "ahead" carries ahead_by/head_sha/latest_subject."""
+    url = COMPARE_URL.format(base=local_sha)
+    try:
+        with opener(url, timeout=TIMEOUT_S) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+    except urllib.error.HTTPError as e:
+        return {"status": "not_found"} if e.code == 404 else {"status": "error"}
+    except (OSError, ValueError):
+        return {"status": "error"}
+
+    status = data.get("status")
+    if status != "ahead":
+        return {"status": status} if status else {"status": "error"}
+    commits = data.get("commits") or []
+    head_sha = commits[-1].get("sha", "") if commits else ""
+    subject = ""
+    if commits:
+        subject = (commits[-1].get("commit", {}).get("message", "")
+                   .splitlines() or [""])[0]
+    return {"status": "ahead", "ahead_by": int(data.get("ahead_by", len(commits))),
+            "head_sha": head_sha, "latest_subject": subject}
 
 
 def apply_update(new_root, app_root) -> int:

@@ -1,4 +1,7 @@
+import io
+import json as _json
 import sys
+import urllib.error
 import zipfile
 from pathlib import Path
 
@@ -155,3 +158,39 @@ def test_on_main_branch_false_when_head_differs(tmp_path, monkeypatch):
     monkeypatch.setattr(updater, "_git_rev",
                         lambda root, ref: ("d" * 40) if ref == "HEAD" else ("e" * 40))
     assert updater.on_main_branch(tmp_path) is False
+
+
+# ---- compare_to_main ----
+
+def _fake_opener(payload=None, *, http_error=None):
+    def opener(url, timeout=None):
+        if http_error is not None:
+            raise urllib.error.HTTPError(url, http_error, "err", None, None)
+        return io.BytesIO(_json.dumps(payload).encode("utf-8"))
+    return opener
+
+
+def test_compare_ahead_extracts_fields():
+    payload = {"status": "ahead", "ahead_by": 12,
+               "commits": [{"sha": "f" * 40,
+                            "commit": {"message": "fix: batch icons\n\nbody"}}]}
+    out = updater.compare_to_main("a" * 40, opener=_fake_opener(payload))
+    assert out == {"status": "ahead", "ahead_by": 12,
+                   "head_sha": "f" * 40, "latest_subject": "fix: batch icons"}
+
+
+def test_compare_identical():
+    payload = {"status": "identical", "ahead_by": 0, "commits": []}
+    assert updater.compare_to_main("a" * 40,
+                                   opener=_fake_opener(payload)) == {"status": "identical"}
+
+
+def test_compare_404_is_not_found():
+    out = updater.compare_to_main("a" * 40, opener=_fake_opener(http_error=404))
+    assert out == {"status": "not_found"}
+
+
+def test_compare_network_error_is_error():
+    def boom(url, timeout=None):
+        raise OSError("no net")
+    assert updater.compare_to_main("a" * 40, opener=boom) == {"status": "error"}
