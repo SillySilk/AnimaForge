@@ -172,3 +172,19 @@ def test_qr_advance_caption_genuine_refusal_shows_warning(monkeypatch):
 
     assert len(warn_calls) == 1                   # the genuine-refusal warning fires
     assert progress_calls[-1] == {"kind": "error", "label": "Caption error"}
+
+
+# ----------------------------------------------------------------------------
+# GPU exclusivity: MainWindow is the arbiter -- it injects a reason-returning
+# busy check into Dataset/Train/Batch so any one of them can see the other two,
+# but a tab must never report itself as the reason it's busy.
+# ----------------------------------------------------------------------------
+
+def test_gpu_busy_check_injected_bidirectionally_excludes_self(monkeypatch):
+    w = MainWindow()
+    monkeypatch.setattr(w._batch_tab._runner, "is_running", lambda: True)
+    # Dataset and Train both see the batch as busy...
+    assert w._dataset_tab._gpu_busy_check() is not None
+    assert w._train_tab._gpu_busy_check() is not None
+    # ...but Batch does not report itself as the reason it's busy.
+    assert w._batch_tab._gpu_busy_check() is None

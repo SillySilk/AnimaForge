@@ -367,6 +367,10 @@ class DatasetTab(QWidget):
         self._auto_mode = False   # True while the Home pipeline runs the chain headless
         self._start_cancelled = False  # True when the user cancelled the conflict dialog
         self._active_chain = None  # job.chain of the in-flight runner run -> phase_text()
+        # Injected by MainWindow so this tab can see the OTHER two GPU-owning surfaces
+        # (Batch, Train) without importing them; defaults to a no-op so a standalone
+        # DatasetTab() (every test in this file) keeps working.
+        self._gpu_busy_check = lambda: None
         self._build_ui()
         self._load_llm_prefs()
         self._refresh_refine_reflection()
@@ -1074,8 +1078,8 @@ class DatasetTab(QWidget):
         if not self._sdscripts_path:
             QMessageBox.warning(self, "No sd-scripts", "Set the sd-scripts path in the Setup tab first.")
             return
-        if self._captioning_busy():
-            QMessageBox.information(self, "Busy", "A captioning process is already running.")
+        if self._captioning_blocked():
+            QMessageBox.information(self, "Busy", self._busy_message())
             return
         chain = self._build_process_chain()
         header = (
@@ -1112,7 +1116,7 @@ class DatasetTab(QWidget):
         self._start_cancelled = False
         if not self._folder_path or len(self._image_data) == 0 or not self._sdscripts_path:
             return False
-        if self._captioning_busy():
+        if self._captioning_blocked():
             return False
         policy = self._resolve_policy()
         if policy is None:
@@ -1120,12 +1124,42 @@ class DatasetTab(QWidget):
         self._auto_mode = True
         return self._start_runner_or_warn(self._build_caption_job(policy))
 
+    def set_gpu_busy_check(self, fn):
+        """Injected by MainWindow: returns a human-readable reason the GPU is busy
+        elsewhere, or None. Keeps the tabs from importing one another."""
+        self._gpu_busy_check = fn
+
     def _captioning_busy(self) -> bool:
-        """True if any caption engine is live — the runner chain OR a manual step button.
-        Two TaggerProcess objects exist (this tab's for the manual buttons, the runner's
-        own for the chain); both must be idle before a new run starts."""
+        """True if any of THIS tab's caption engines is live — the runner chain OR a
+        manual step button. Two TaggerProcess objects exist (this tab's for the manual
+        buttons, the runner's own for the chain); both must be idle before a new run
+        starts.
+
+        Deliberately pure (own engines only, no self._gpu_busy_check() fold): MainWindow's
+        cross-tab arbiter calls this exact method to ask "is DatasetTab busy?" on behalf of
+        Train/Batch. Folding the injected check in here would make that query circular —
+        e.g. Batch asking Dataset would transitively re-derive "is Batch itself running?"
+        and Batch would falsely see itself as the reason it's busy. Call sites that need
+        the combined "busy for any reason" answer OR this with self._gpu_busy_check()
+        themselves (see _captioning_blocked())."""
         return (self._runner.is_running() or self._llm.is_running()
                 or self._joycaption.is_running() or self._tagger.is_running())
+
+    def _captioning_blocked(self) -> bool:
+        """True if a caption start should be refused: this tab's own engines are busy,
+        OR the single GPU is busy elsewhere (a batch run or training; see
+        set_gpu_busy_check). Every start path uses this, not _captioning_busy() alone,
+        so the manual Auto-Tag / Describe / Refine buttons inherit the cross-tab guard
+        the same way _process_clicked and start_auto_caption do."""
+        return self._captioning_busy() or self._gpu_busy_check() is not None
+
+    def _busy_message(self) -> str:
+        """The dialog text for a refused start: names the reason when it's the GPU
+        being busy elsewhere, otherwise the original own-engine wording."""
+        reason = self._gpu_busy_check()
+        if reason:
+            return f"Cannot start — {reason}. Wait for it to finish, or stop it first."
+        return "A captioning process is already running."
 
     def _resolve_policy(self, header: str = "", state=None):
         """The policy this run should use — OVERWRITE or KEEP — or None if the user
@@ -1343,8 +1377,8 @@ class DatasetTab(QWidget):
         if not self._sdscripts_path:
             QMessageBox.warning(self, "No sd-scripts", "Set the sd-scripts path in the Setup tab first.")
             return
-        if self._captioning_busy():
-            QMessageBox.information(self, "Busy", "A captioning process is already running.")
+        if self._captioning_blocked():
+            QMessageBox.information(self, "Busy", self._busy_message())
             return
         msg = QMessageBox(self)
         msg.setWindowTitle("Describe with JoyCaption")
@@ -1437,8 +1471,8 @@ class DatasetTab(QWidget):
 
     def _start_refine(self):
         """Start the LLM refine pass using saved settings (no dialog). Reused by Process."""
-        if self._captioning_busy():
-            QMessageBox.information(self, "Busy", "A captioning process is already running.")
+        if self._captioning_blocked():
+            QMessageBox.information(self, "Busy", self._busy_message())
             return
         s = QSettings(SETTINGS_ORG, SETTINGS_APP)
         lora_type = s.value("lora_type", "General", type=str).lower()
@@ -1677,8 +1711,8 @@ class DatasetTab(QWidget):
         if not self._sdscripts_path:
             QMessageBox.warning(self, "No sd-scripts", "Set the sd-scripts path in the Setup tab first.")
             return
-        if self._captioning_busy():
-            QMessageBox.information(self, "Tagger Running", "Auto-tagger is already running.")
+        if self._captioning_blocked():
+            QMessageBox.information(self, "Tagger Running", self._busy_message())
             return
 
         dlg = QDialog(self)

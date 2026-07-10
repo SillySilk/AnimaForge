@@ -238,8 +238,20 @@ class TrainTab(QWidget):
         self._preview_timer = QTimer(self)
         self._preview_timer.setInterval(3000)
         self._preview_timer.timeout.connect(self._poll_sample_dir)
+        # Injected by MainWindow so this tab can see the OTHER two GPU-owning surfaces
+        # (Dataset, Batch) without importing them; defaults to a no-op so a standalone
+        # TrainTab() (as in tests) keeps working.
+        self._gpu_busy_check = lambda: None
         self._build_ui()
         self._connect_trainer()
+
+    def set_gpu_busy_check(self, fn):
+        """Injected by MainWindow: returns a human-readable reason the GPU is busy
+        elsewhere, or None. Keeps the tabs from importing one another."""
+        self._gpu_busy_check = fn
+
+    def is_training(self) -> bool:
+        return self._trainer.is_running()
 
     # ------------------------------------------------------------------
     # Public API — called by main window to sync shared state
@@ -1558,6 +1570,13 @@ class TrainTab(QWidget):
         modal.open()
 
     def _start_training(self, confirm: bool = True):
+        reason = self._gpu_busy_check()
+        if reason:
+            QMessageBox.warning(
+                self, "Cannot Start Training",
+                f"Cannot start — {reason}. Wait for it to finish, or stop it first.")
+            return
+
         valid, msg = self._validate_for_training()
         if not valid:
             QMessageBox.warning(self, "Cannot Start Training", msg)

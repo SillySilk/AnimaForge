@@ -531,3 +531,64 @@ def test_start_auto_caption_genuine_refusal_leaves_cancelled_flag_false(tmp_path
                        "txt_path": str(tmp_path / "a.txt"), "caption": ""}]
     assert t.start_auto_caption() is False
     assert t.start_cancelled_by_user() is False
+
+
+# ----------------------------------------------------------------------------
+# GPU exclusivity: MainWindow injects set_gpu_busy_check() so DatasetTab refuses
+# to start captioning (any path) while the batch runner or training owns the GPU.
+# ----------------------------------------------------------------------------
+
+def _ready_tab(tmp_path):
+    import ui.dataset_tab as dt_mod
+    t = dt_mod.DatasetTab()
+    t._folder_path = str(tmp_path)
+    t._sdscripts_path = "C:/sd"
+    t._image_data = [{"image_path": str(tmp_path / "a.png"),
+                       "txt_path": str(tmp_path / "a.txt"), "caption": ""}]
+    return t
+
+
+def test_default_gpu_busy_check_is_none_for_a_standalone_tab():
+    # A DatasetTab() built outside MainWindow (as every other test in this file
+    # does) must keep working -- the injected check defaults to a no-op.
+    import ui.dataset_tab as dt_mod
+    t = dt_mod.DatasetTab()
+    assert t._gpu_busy_check() is None
+
+
+def test_process_clicked_refused_when_gpu_busy_elsewhere(tmp_path, monkeypatch):
+    import ui.dataset_tab as dt_mod
+    t = _ready_tab(tmp_path)
+    t.set_gpu_busy_check(lambda: "a batch run is in progress")
+
+    def _boom(self):
+        raise AssertionError("no confirm/conflict dialog should show when GPU is busy elsewhere")
+    monkeypatch.setattr(dt_mod.QMessageBox, "exec", _boom)
+    monkeypatch.setattr(dt_mod.QMessageBox, "information", staticmethod(lambda *a, **k: None))
+    started = []
+    monkeypatch.setattr(t, "_start_runner_or_warn", lambda job: started.append(job) or True)
+    t._process_clicked()
+    assert started == []
+
+
+def test_start_auto_caption_refused_when_gpu_busy_elsewhere(tmp_path):
+    t = _ready_tab(tmp_path)
+    t.set_gpu_busy_check(lambda: "a batch run is in progress")
+    assert t.start_auto_caption() is False
+    # Not a user cancel -- _qr_advance must show the real "cannot caption" warning.
+    assert t.start_cancelled_by_user() is False
+
+
+def test_describe_joycaption_refused_when_gpu_busy_elsewhere(tmp_path, monkeypatch):
+    import ui.dataset_tab as dt_mod
+    t = _ready_tab(tmp_path)
+    t.set_gpu_busy_check(lambda: "a batch run is in progress")
+    monkeypatch.setattr(dt_mod.QMessageBox, "information", staticmethod(lambda *a, **k: None))
+
+    def _boom(self):
+        raise AssertionError("the Describe confirm dialog must not show when GPU is busy elsewhere")
+    monkeypatch.setattr(dt_mod.QMessageBox, "exec", _boom)
+    launched = []
+    monkeypatch.setattr(t, "_start_describe", lambda: launched.append("describe"))
+    t._describe_joycaption()
+    assert launched == []

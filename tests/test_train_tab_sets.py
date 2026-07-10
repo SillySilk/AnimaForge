@@ -251,3 +251,38 @@ def test_set_quality_prefix_reaches_build_run_definition(tmp_path: Path):
     rd, msg = t.build_run_definition()
     assert rd is not None, msg
     assert rd.quality_prefix == "masterpiece, best quality"
+
+
+# ----------------------------------------------------------------------------
+# GPU exclusivity: MainWindow injects set_gpu_busy_check() so Start Training
+# refuses before anything else (config generation, VRAM probe, launch) when a
+# batch or a manual caption chain already owns the single GPU.
+# ----------------------------------------------------------------------------
+
+def test_default_gpu_busy_check_is_none_for_a_standalone_tab():
+    t = TrainTab()
+    assert t._gpu_busy_check() is None
+
+
+def test_start_training_refused_when_gpu_busy_elsewhere(monkeypatch):
+    import ui.train_tab as tt_mod
+    t = TrainTab()
+    t.set_gpu_busy_check(lambda: "a batch run is in progress")
+    monkeypatch.setattr(tt_mod.QMessageBox, "warning", lambda *a, **k: None)
+
+    def _boom(*a, **k):
+        raise AssertionError("must refuse before validating/generating anything else")
+    monkeypatch.setattr(t, "_validate_for_training", _boom)
+    started = []
+    monkeypatch.setattr(t._trainer, "start", lambda *a, **k: started.append((a, k)))
+
+    t._start_training(confirm=False)
+    assert started == []
+
+
+def test_is_training_reflects_trainer_running_state(monkeypatch):
+    t = TrainTab()
+    monkeypatch.setattr(t._trainer, "is_running", lambda: True)
+    assert t.is_training() is True
+    monkeypatch.setattr(t._trainer, "is_running", lambda: False)
+    assert t.is_training() is False

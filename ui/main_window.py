@@ -304,6 +304,26 @@ class MainWindow(QMainWindow):
         self._stack.addWidget(self._train_tab)       # index 4
         self._stack.addWidget(self._batch_tab)       # index 5
 
+        # There is exactly one GPU. DatasetTab captioning, TrainTab training, and
+        # BatchTab's own CaptionRunner + TrainingProcess can each seize it, and none
+        # of them knows about the others. MainWindow is the arbiter: inject a
+        # reason-returning busy check into each tab, naming the OTHER two surfaces
+        # (never itself -- self-collision is already handled by each tab's own
+        # guards) so every start path can refuse instead of colliding on the GPU.
+        def _busy_except(tab):
+            def check():
+                if tab is not self._batch_tab and self._batch_tab.is_running():
+                    return "a batch run is in progress"
+                if tab is not self._dataset_tab and self._dataset_tab._captioning_busy():
+                    return "captioning is in progress"
+                if tab is not self._train_tab and self._train_tab.is_training():
+                    return "training is in progress"
+                return None
+            return check
+
+        for tab in (self._dataset_tab, self._train_tab, self._batch_tab):
+            tab.set_gpu_busy_check(_busy_except(tab))
+
         # ---- Status bar ----
         self._status_bar = QStatusBar()
         self.setStatusBar(self._status_bar)

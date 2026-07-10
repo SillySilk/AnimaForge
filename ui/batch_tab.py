@@ -46,12 +46,24 @@ class BatchTab(QWidget):
         # emit the same batch_status.json the headless runner does.
         self._status_writer = StatusWriter(self._runner, self._runs,
                                            default_status_path())
+        # Injected by MainWindow so this tab can see the OTHER two GPU-owning surfaces
+        # (Dataset, Train) without importing them; defaults to a no-op so a standalone
+        # BatchTab() (as in tests) keeps working.
+        self._gpu_busy_check = lambda: None
         self._build_ui()
         self._refresh_queue()
 
     # ------------------------------------------------------------------
     # Public
     # ------------------------------------------------------------------
+
+    def set_gpu_busy_check(self, fn):
+        """Injected by MainWindow: returns a human-readable reason the GPU is busy
+        elsewhere, or None. Keeps the tabs from importing one another."""
+        self._gpu_busy_check = fn
+
+    def is_running(self) -> bool:
+        return self._runner.is_running()
 
     def add_run(self, run_definition):
         self._runs.append(run_definition)
@@ -245,6 +257,12 @@ class BatchTab(QWidget):
     # ------------------------------------------------------------------
 
     def _start(self):
+        reason = self._gpu_busy_check()
+        if reason:
+            QMessageBox.warning(
+                self, "Cannot Start Batch",
+                f"Cannot start — {reason}. Wait for it to finish, or stop it first.")
+            return
         pending = [r for r in self._runs if r.status != DONE]
         if not pending:
             if not self._runs:
@@ -263,6 +281,12 @@ class BatchTab(QWidget):
                     f"[Batch] Starting {len(pending)} run(s)…")
 
     def _restart(self):
+        reason = self._gpu_busy_check()
+        if reason:
+            QMessageBox.warning(
+                self, "Cannot Start Batch",
+                f"Cannot start — {reason}. Wait for it to finish, or stop it first.")
+            return
         if self._guard_running():
             return
         if not self._runs:

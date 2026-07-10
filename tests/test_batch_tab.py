@@ -372,3 +372,61 @@ def test_restart_on_empty_queue_message_differs_from_all_done_wording(tmp_path, 
     assert "empty" in message.lower()
     assert "done" not in message.lower()
     assert restarted == []
+
+
+# ----------------------------------------------------------------------------
+# GPU exclusivity: MainWindow injects set_gpu_busy_check() so _start()/_restart()
+# refuse BEFORE _resolve_conflicts (no popping the conflict dialog only to then
+# refuse) when captioning or training already owns the single GPU.
+# ----------------------------------------------------------------------------
+
+def test_default_gpu_busy_check_is_none_for_a_standalone_tab(tmp_path, monkeypatch):
+    t = _make_tab(tmp_path, monkeypatch)
+    assert t._gpu_busy_check() is None
+
+
+def test_batch_tab_has_is_running_delegating_to_the_runner(tmp_path, monkeypatch):
+    t = _make_tab(tmp_path, monkeypatch)
+    monkeypatch.setattr(t._runner, "is_running", lambda: True)
+    assert t.is_running() is True
+    monkeypatch.setattr(t._runner, "is_running", lambda: False)
+    assert t.is_running() is False
+
+
+def test_start_refused_when_gpu_busy_elsewhere_before_conflict_dialog(tmp_path, monkeypatch):
+    t = _make_tab(tmp_path, monkeypatch)
+    r1 = _rd(lora_name="a", dataset_folder=str(_folder(tmp_path, "a", captioned=True)),
+             caption_policy=cp.ASK)
+    t._runs = [r1]
+    t.set_gpu_busy_check(lambda: "captioning is in progress")
+
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **kw: QMessageBox.Ok)
+
+    def _boom(self):
+        raise AssertionError("conflict dialog must not be shown when GPU is busy elsewhere")
+    monkeypatch.setattr(QDialog, "exec", _boom)
+    started = []
+    monkeypatch.setattr(t._runner, "start", lambda *a, **kw: started.append((a, kw)))
+
+    t._start()
+    assert started == []
+
+
+def test_restart_refused_when_gpu_busy_elsewhere_before_conflict_dialog(tmp_path, monkeypatch):
+    t = _make_tab(tmp_path, monkeypatch)
+    r1 = _rd(lora_name="a", dataset_folder=str(_folder(tmp_path, "a", captioned=True)),
+             caption_policy=cp.ASK)
+    t._runs = [r1]
+    t.set_gpu_busy_check(lambda: "training is in progress")
+
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **kw: QMessageBox.Ok)
+
+    def _boom(*a, **kw):
+        raise AssertionError("must refuse before the 'restart everything?' confirm or the conflict dialog")
+    monkeypatch.setattr(QMessageBox, "question", _boom)
+    monkeypatch.setattr(QDialog, "exec", _boom)
+    restarted = []
+    monkeypatch.setattr(t._runner, "restart", lambda *a, **kw: restarted.append((a, kw)))
+
+    t._restart()
+    assert restarted == []
