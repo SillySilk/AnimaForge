@@ -1,6 +1,9 @@
 from PySide6.QtCore import Qt, QSize, QSettings, Signal
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
+    QCheckBox,
+    QDialog,
+    QDialogButtonBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -51,6 +54,59 @@ class NavButton(QPushButton):
     def set_collapsed(self, collapsed: bool):
         self.setText("" if collapsed else self._label)
         self.setToolTip(self._label.strip() if collapsed else "")
+
+
+def _compose_lines(payload) -> list:
+    """Body text for the update popup, top to bottom. Version line only when the
+    remote __version__ actually moved; commits-behind only when ahead_by is known."""
+    lines = []
+    if payload.get("remote_version"):
+        lines.append(f"AnimaForge v{payload['remote_version']} is available.")
+    have = f"You have v{payload['local_version']}"
+    if payload.get("ahead_by"):
+        have += f" — {payload['ahead_by']} commits behind."
+    else:
+        have += "."
+    lines.append(have)
+    if payload.get("latest_subject"):
+        lines.append("")
+        lines.append(f"Latest: {payload['latest_subject']}")
+    lines.append("")
+    lines.append("Your sets, settings, datasets and models are untouched.")
+    return lines
+
+
+class UpdateAvailableDialog(QDialog):
+    """Startup 'update available' popup with a per-commit 'don't show again' checkbox.
+    After exec(): .do_update and .dont_show_again carry the user's choice."""
+
+    def __init__(self, payload, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Update Available")
+        self.do_update = False
+        self.dont_show_again = False
+        lay = QVBoxLayout(self)
+        for line in _compose_lines(payload):
+            lay.addWidget(QLabel(line))
+        self._skip_check = QCheckBox("Don't show me this update again")
+        lay.addWidget(self._skip_check)
+        buttons = QDialogButtonBox()
+        dismiss = buttons.addButton("Dismiss", QDialogButtonBox.RejectRole)
+        update = buttons.addButton("Update", QDialogButtonBox.AcceptRole)
+        update.setObjectName("btn_primary")
+        dismiss.clicked.connect(self._on_dismiss)
+        update.clicked.connect(self._on_update)
+        lay.addWidget(buttons)
+
+    def _on_update(self):
+        self.do_update = True
+        self.dont_show_again = self._skip_check.isChecked()
+        self.accept()
+
+    def _on_dismiss(self):
+        self.do_update = False
+        self.dont_show_again = self._skip_check.isChecked()
+        self.reject()
 
 
 class MainWindow(QMainWindow):
