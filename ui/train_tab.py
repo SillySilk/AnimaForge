@@ -222,8 +222,6 @@ class TrainTab(QWidget):
         self._trigger_word = ""
         self._resume_state_path = None
         self._app_settings = None
-        self._lms_url = "http://localhost:1234/v1"
-        self._lms_model = ""
         self._quality_prefix = ""
         # Tracks which dataset folder the sample box was auto-filled for, so a repeated
         # set_dataset for the same folder won't clobber edits.
@@ -369,10 +367,6 @@ class TrainTab(QWidget):
         self._sample_prompts_edit.textChanged.connect(
             lambda: a.set("sample_prompts", self._sample_prompts_edit.toPlainText()))
         self._update_sample_schedule()
-
-    def set_lmstudio_config(self, url: str, model: str):
-        self._lms_url = url or "http://localhost:1234/v1"
-        self._lms_model = model or ""
 
     def showEvent(self, event):
         """Re-sync sample prompts from settings so Setup-tab edits are reflected."""
@@ -1113,7 +1107,6 @@ class TrainTab(QWidget):
         s = QSettings(SETTINGS_ORG, SETTINGS_APP)
         model_index, threshold, _overwrite = read_tagger_defaults()
         _label, tagger_model_id, tagger_use_onnx = TAGGER_MODELS[model_index]
-        lora_type = s.value("lora_type", "General", type=str).lower()
         caption_order = "tags_first" if s.value("combine_order", 0, type=int) == 1 else "nl_first"
         rd = RunDefinition(
             lora_name=self._lora_name_edit.text().strip(),
@@ -1136,12 +1129,6 @@ class TrainTab(QWidget):
             subject_type=self._lora_type_for_subject(),
             quality_prefix=self._quality_prefix,
             caption_order=caption_order,
-            refine_enabled=s.value("lmstudio_refine_in_process", False, type=bool),
-            lms_url=self._lms_url,
-            lms_model=self._lms_model,
-            lms_focus=s.value("lmstudio_focus", "", type=str),
-            lora_type=("" if lora_type == "general" else lora_type),
-            max_tokens=s.value("lmstudio_max_tokens", 1200, type=int),
             tagger_model_id=tagger_model_id,
             tagger_threshold=threshold,
             tagger_use_onnx=tagger_use_onnx,

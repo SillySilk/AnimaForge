@@ -86,10 +86,6 @@ launch.bat    :: start training
 
 > **Why NVIDIA-only? (no AMD on Windows)** — AnimaForge trains through PyTorch + Kohya's `sd-scripts`, and that stack only has a working GPU path on **NVIDIA/CUDA on Windows**. AMD's equivalent (ROCm) is **Linux-only** — there are no Windows ROCm builds of PyTorch — so there's no supported way to run the training backend on an AMD card under Windows. The only experimental option is **ZLUDA** (a CUDA-translation layer), but it's unproven for training workloads like this and would be fragile; **DirectML** exists but is too slow and incomplete for this kind of training. But I'll keep looking at it, and if I find a way to wire it in, I will.
 
-## 🤖 LM Studio (optional)
-
-The core pipeline runs **without any LLM**. If you run [LM Studio](https://lmstudio.ai/), three optional enhancements light up (LLM caption refine, Name Cast "find characters", sample-prompt generation) — each with a non-LLM fallback. Any OpenAI-compatible model works.
-
 ## 💛 Free & open source
 
 100% free. No paid tier, no credits, no Buzz, no catch. MIT licensed — install it, use it, train as many LoRAs as you want.

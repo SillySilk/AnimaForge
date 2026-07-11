@@ -6,6 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from core.dataset_manager import (
     combine_caption,
     combine_all,
+    normalize_tags,
     apply_prefix,
     read_sidecar,
     write_sidecar,
@@ -13,6 +14,28 @@ from core.dataset_manager import (
     TAGS_EXT,
     NL_EXT,
 )
+
+
+def test_normalize_tags_dedupes_preserving_first_order():
+    assert normalize_tags("1girl, solo, 1girl, SOLO") == "1girl, solo"
+
+
+def test_normalize_tags_underscores_and_case():
+    assert normalize_tags("Long_Hair, BLUE_eyes") == "long hair, blue eyes"
+
+
+def test_normalize_tags_keeps_score_underscore():
+    assert normalize_tags("score_7, score_8_up, masterpiece") == "score_7, score_8_up, masterpiece"
+
+
+def test_normalize_tags_drops_empties_and_collapses_space():
+    assert normalize_tags(" , 1girl ,,  long   hair , ") == "1girl, long hair"
+
+
+def test_combine_normalizes_the_tag_body_only():
+    # tags are deduped/normalized; the NL prose is left exactly as written
+    out = combine_caption("A Girl With Long_Hair.", "long_hair, Long_Hair, 1girl", prefix="ohwx")
+    assert out == "ohwx, A Girl With Long_Hair., long hair, 1girl"
 
 
 def test_combine_nl_first():

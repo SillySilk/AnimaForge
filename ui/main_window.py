@@ -684,8 +684,6 @@ class MainWindow(QMainWindow):
             "torch_ok": torch_ok,
             "dataset_folder": self._dataset_tab.get_folder_path(),
             "image_count": self._dataset_tab.get_image_count(),
-            "lms_url": s.get_lmstudio_url(),
-            "lms_ok": None,
             # Quick Run cockpit mirror (Train tab is the source of truth)
             "lora_name": self._train_tab.get_lora_name(),
             "trigger_word": self._dataset_tab.get_trigger_word(),
@@ -1072,9 +1070,3 @@ class MainWindow(QMainWindow):
             output_dir=self._setup_tab.get_output_dir(),
         )
         self._dataset_tab.set_sdscripts_path(sd_path)
-        lms_url = self._setup_tab.get_lmstudio_url()
-        lms_model = self._setup_tab.get_lmstudio_model()
-        self._dataset_tab.set_lmstudio_config(lms_url, lms_model)
-        self._train_tab.set_lmstudio_config(lms_url, lms_model)
-        # Reflect the LM Studio Refine-in-Process toggle on the Dataset tab live
-        self._dataset_tab._refresh_refine_reflection()

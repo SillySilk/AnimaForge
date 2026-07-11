@@ -47,20 +47,12 @@ def test_reconcile_lets_sidecars_win_when_a_file_was_hand_deleted(tmp_path):
     assert d["images"]["a.png"]["describe"] == "pending"
 
 
-def test_reconcile_preserves_refine_which_has_no_sidecar(tmp_path):
-    """refine rewrites .nl in place — only the manifest remembers it ran."""
-    _img(tmp_path, "a", nl="refined prose")
+def test_reconcile_preserves_describe_while_its_nl_survives(tmp_path):
+    """describe stays 'done' as long as the .nl it wrote is still on disk."""
+    _img(tmp_path, "a", nl="a woman")
     cm.mark_stage(str(tmp_path), "describe", [str(tmp_path / "a.png")])
-    cm.mark_stage(str(tmp_path), "refine", [str(tmp_path / "a.png")])
     d = cm.reconcile(str(tmp_path))
-    assert d["images"]["a.png"]["refine"] == "done"
-
-
-def test_reconcile_drops_refine_when_its_nl_is_gone(tmp_path):
-    _img(tmp_path, "a")
-    cm.mark_stage(str(tmp_path), "refine", [str(tmp_path / "a.png")])
-    d = cm.reconcile(str(tmp_path))
-    assert d["images"]["a.png"]["refine"] == "pending"
+    assert d["images"]["a.png"]["describe"] == "done"
 
 
 def test_images_dict_feeds_caption_policy_foreign_count(tmp_path):

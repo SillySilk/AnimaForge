@@ -47,10 +47,10 @@ def test_plan_stages_overwrite_takes_everything():
     assert [len(i) for _s, i in stages] == [80, 80]
 
 
-def test_plan_stages_honours_chain_order_and_refine():
-    job = _job(policy=OVERWRITE, chain=["tag", "describe", "refine", "combine"])
+def test_plan_stages_honours_chain_order():
+    job = _job(policy=OVERWRITE, chain=["tag", "describe", "combine"])
     got = [s for s, _ in plan_stages(job, _state(untouched=2))]
-    assert got == ["tag", "describe", "refine", "combine"]
+    assert got == ["tag", "describe", "combine"]
 
 
 def test_plan_stages_raises_on_unknown_stage():

@@ -2,8 +2,6 @@
 
 `<dataset>/.animaforge/progress.json` records what the sidecars cannot:
 
-  * `refine` leaves no artifact -- it rewrites .nl in place, so only the manifest
-    remembers that it ran. This is the actual gap in resume-from-checkpoint.
   * Provenance -- a .txt with no manifest entry was not written by AnimaForge.
   * The settings the captions were built with (trigger, prefix, order, chain).
 
@@ -24,7 +22,7 @@ from core.dataset_manager import NL_EXT, TAGS_EXT
 MANIFEST_REL = Path(".animaforge") / "progress.json"
 VERSION = 1
 
-# stage -> the sidecar that proves it ran. `refine` has none; `combine` writes .txt.
+# stage -> the sidecar that proves it ran. `combine` writes .txt.
 _STAGE_ARTIFACT = {"tag": TAGS_EXT, "describe": NL_EXT, "combine": ".txt"}
 
 
@@ -98,9 +96,8 @@ def mark_stage(folder: str, stage: str, images: list) -> None:
 def reconcile(folder: str) -> dict:
     """Correct the manifest against what is actually on disk.
 
-    A stage whose proving sidecar is gone reverts to "pending". `refine` has no
-    sidecar of its own, so it survives only while the .nl it rewrote survives.
-    A falsy `folder` yields {} (load()'s empty value) with nothing to reconcile.
+    A stage whose proving sidecar is gone reverts to "pending". A falsy `folder`
+    yields {} (load()'s empty value) with nothing to reconcile.
     """
     d = load(folder)
     if not folder:
@@ -109,13 +106,10 @@ def reconcile(folder: str) -> dict:
     for name, stages in d.get("images", {}).items():
         img = base / name
         for stage in list(stages):
-            if stage == "refine":
-                proof = img.with_suffix(NL_EXT)
-            else:
-                ext = _STAGE_ARTIFACT.get(stage)
-                if ext is None:
-                    continue
-                proof = img.with_suffix(ext)
+            ext = _STAGE_ARTIFACT.get(stage)
+            if ext is None:
+                continue
+            proof = img.with_suffix(ext)
             if not proof.is_file():
                 stages[stage] = "pending"
     return d

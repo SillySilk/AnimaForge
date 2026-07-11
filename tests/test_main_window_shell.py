@@ -42,7 +42,7 @@ def test_collect_home_context_keys():
     w = MainWindow()
     ctx = w._collect_home_context()
     for k in ("sdscripts", "dit", "qwen3", "vae", "output", "torch_ok",
-              "dataset_folder", "image_count", "lms_url", "lms_ok"):
+              "dataset_folder", "image_count"):
         assert k in ctx
 
 

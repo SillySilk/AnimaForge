@@ -37,7 +37,6 @@ from core.dataset_manager import (
 )
 from core.tagger import TaggerProcess, TAGGER_MODELS, read_tagger_defaults
 from core.joycaption import JoyCaptionProcess
-from core.llm_refine import LLMRefineProcess
 from core.settings import SETTINGS_ORG, SETTINGS_APP, AppSettings
 from ui.image_editor import ImageEditorDialog
 
@@ -45,8 +44,8 @@ THUMB_SIZE = 220
 GRID_COLS = 4
 WORKFLOW_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif")
 
-PROCESS_STEPS = ["tag", "describe", "refine", "combine"]
-STEP_NAMES = {"tag": "Tag", "describe": "Describe", "refine": "Refine", "combine": "Combine"}
+PROCESS_STEPS = ["tag", "describe", "combine"]
+STEP_NAMES = {"tag": "Tag", "describe": "Describe", "combine": "Combine"}
 # CaptionRunner.tick's phase string (see core/caption_progress.py::_PHASES) back to the
 # step key phase_text() expects.
 _PHASE_TO_STEP = {v: k for k, v in STEP_NAMES.items()}
@@ -55,7 +54,7 @@ _PHASE_TO_STEP = {v: k for k, v in STEP_NAMES.items()}
 def phase_text(step_key: str, chain=None) -> str:
     """Status-line text for a step during a Process run, e.g. 'Step 2/4 · Describe…'.
 
-    Numbers against the actual chain so a Refine-less run reads 'Step 3/3 · Combine…'.
+    Numbers against the actual chain so a run reads 'Step 3/3 · Combine…'.
     Falls back to the full PROCESS_STEPS when no chain is supplied.
     """
     chain = chain if chain else PROCESS_STEPS
@@ -345,11 +344,6 @@ class DatasetTab(QWidget):
         self._joycaption = JoyCaptionProcess(self)
         self._joycaption.log_line.connect(self._on_tagger_log)
         self._joycaption.finished.connect(self._on_joycaption_finished)
-        self._llm = LLMRefineProcess(self)
-        self._llm.log_line.connect(self._on_tagger_log)
-        self._llm.finished.connect(self._on_llm_finished)
-        self._lms_url = "http://localhost:1234/v1"
-        self._lms_model = ""
         # Live caption feedback: track the running process + a refresh timer.
         self._active_caption_proc = None
         self._caption_stopped = False
@@ -357,9 +351,9 @@ class DatasetTab(QWidget):
         self._caption_timer.setInterval(2000)
         self._caption_timer.timeout.connect(self._rebuild_txt_from_sidecars)
         self._characters = characters_mod.DatasetCharacters()
-        # The tag -> describe -> refine -> combine chain is owned by CaptionRunner now
+        # The tag -> describe -> combine chain is owned by CaptionRunner now
         # (shared headless with BatchRunner). This tab drives it and re-emits its signals;
-        # the manual step buttons above still drive self._tagger/_joycaption/_llm directly.
+        # the manual step buttons above still drive self._tagger/_joycaption directly.
         self._runner = CaptionRunner(self)
         self._runner.log_line.connect(self._on_runner_log)
         self._runner.tick.connect(self._on_runner_tick)
@@ -373,23 +367,9 @@ class DatasetTab(QWidget):
         # DatasetTab() (every test in this file) keeps working.
         self._gpu_busy_check = lambda: None
         self._build_ui()
-        self._load_llm_prefs()
-        self._refresh_refine_reflection()
 
     def set_sdscripts_path(self, path: str):
         self._sdscripts_path = path
-
-    def set_lmstudio_config(self, url: str, model: str):
-        self._lms_url = url or "http://localhost:1234/v1"
-        self._lms_model = model
-
-    def _load_llm_prefs(self):
-        """Seed sensible QSettings defaults the Refine/Combine dialogs read from."""
-        s = QSettings(SETTINGS_ORG, SETTINGS_APP)
-        if s.value("lora_type", None) is None:
-            s.setValue("lora_type", "General")
-        if s.value("lmstudio_max_tokens", None) is None:
-            s.setValue("lmstudio_max_tokens", 1200)
 
     # ------------------------------------------------------------------
     # Public
@@ -428,36 +408,13 @@ class DatasetTab(QWidget):
     # UI Construction
     # ------------------------------------------------------------------
 
-    def _refine_in_process(self) -> bool:
-        """Whether the LM Studio Refine step is part of automated Process / auto-pipeline runs."""
-        s = QSettings(SETTINGS_ORG, SETTINGS_APP)
-        return s.value("lmstudio_refine_in_process", False, type=bool)
-
     def _build_process_chain(self) -> list:
-        """Steps the ▶ Process / Home auto-pipeline runs, in order. Refine is included only
-        when the user has opted in via Setup; otherwise it stays manual-only."""
-        steps = ["tag", "describe"]
-        if self._refine_in_process():
-            steps.append("refine")
-        steps.append("combine")
-        return steps
+        """Steps the ▶ Process / Home auto-pipeline runs, in order."""
+        return ["tag", "describe", "combine"]
 
     def _chain_arrow_text(self, chain=None) -> str:
         chain = chain if chain else self._build_process_chain()
         return " → ".join(STEP_NAMES[k] for k in chain)
-
-    def _refresh_refine_reflection(self):
-        """Reflect the Setup toggle on the Dataset tab: the Refine pill label and the
-        Process button tooltip. The ✨ Refine button itself stays enabled for manual use."""
-        if not hasattr(self, "_step3_status"):
-            return
-        if self._refine_in_process():
-            self._step3_status.setText("(in Process)")
-        else:
-            self._step3_status.setText("(manual only — enable in Setup)")
-        self._process_btn.setToolTip(
-            f"Run all steps in order ({self._chain_arrow_text()}) using your saved settings"
-        )
 
     def _refresh_step_status(self):
         c = self._step_status_counts()
@@ -468,8 +425,6 @@ class DatasetTab(QWidget):
         self._step1_status.setText(fmt(c["tags"]))
         self._step2_status.setText(fmt(c["nl"]))
         self._step4_status.setText(fmt(c["txt"]))
-        # step 3 (refine) has no distinct artifact -> label reflects the Setup toggle
-        self._refresh_refine_reflection()
         if hasattr(self, "_status_summary"):
             self._update_status_summary()
         self.caption_finished.emit()  # keep the global progress rail in sync
@@ -701,17 +656,12 @@ class DatasetTab(QWidget):
         self._describe_btn.setToolTip("Natural-language captions with JoyCaption (.nl)")
         self._describe_btn.clicked.connect(self._describe_joycaption)
 
-        self._llm_btn = QPushButton("✨ Refine")
-        self._llm_btn.setToolTip("Fuse + verify into Anima format with LM Studio")
-        self._llm_btn.clicked.connect(self._open_refine_dialog)
-
         self._combine_btn = QPushButton("🧩 Combine")
         self._combine_btn.setToolTip("Merge .nl + .tags (with trigger/prefix) into training .txt")
         self._combine_btn.clicked.connect(self._open_combine_dialog)
 
         self._step1_status = QLabel("— not run")
         self._step2_status = QLabel("— not run")
-        self._step3_status = QLabel("(optional)")
         self._step4_status = QLabel("— not run")
 
         steps_btn_row = QHBoxLayout()
@@ -721,7 +671,6 @@ class DatasetTab(QWidget):
         for btn, status in (
             (self._autotag_btn, self._step1_status),
             (self._describe_btn, self._step2_status),
-            (self._llm_btn, self._step3_status),
             (self._combine_btn, self._step4_status),
         ):
             btn.setObjectName("btn_step_compact")
@@ -775,12 +724,9 @@ class DatasetTab(QWidget):
             "Run the steps in order. Tag adds booru tags, Describe writes a plain-English "
             "draft, and Combine merges your trigger word + draft + tags into the .txt files "
             "the trainer reads.\n\n"
-            "Refine is optional: it uses your local AI (LM Studio) to fuse + verify the draft "
-            "into Anima's format. It's off by default for ▶ Process runs — turn it on in the "
-            "Setup tab's LM Studio section, or click ✨ Refine to run it manually any time.\n\n"
-            "▶ Process runs the enabled steps in order with your saved settings. Open "
+            "▶ Process runs all three steps in order with your saved settings. Open "
             "'Individual steps' to run just one. Name recurring characters on the Characters "
-            "tab so the AI uses real names instead of guessing."
+            "tab so the captions use real names instead of guessing."
         )
 
     def _save_splits(self):
@@ -1145,14 +1091,14 @@ class DatasetTab(QWidget):
         and Batch would falsely see itself as the reason it's busy. Call sites that need
         the combined "busy for any reason" answer OR this with self._gpu_busy_check()
         themselves (see _captioning_blocked())."""
-        return (self._runner.is_running() or self._llm.is_running()
+        return (self._runner.is_running()
                 or self._joycaption.is_running() or self._tagger.is_running())
 
     def _captioning_blocked(self) -> bool:
         """True if a caption start should be refused: this tab's own engines are busy,
         OR the single GPU is busy elsewhere (a batch run or training; see
         set_gpu_busy_check). Every start path uses this, not _captioning_busy() alone,
-        so the manual Auto-Tag / Describe / Refine buttons inherit the cross-tab guard
+        so the manual Auto-Tag / Describe buttons inherit the cross-tab guard
         the same way _process_clicked and start_auto_caption do."""
         return self._captioning_busy() or self._gpu_busy_check() is not None
 
@@ -1231,7 +1177,6 @@ class DatasetTab(QWidget):
         s = QSettings(SETTINGS_ORG, SETTINGS_APP)
         model_index, threshold, _overwrite = read_tagger_defaults()
         _label, model_id, use_onnx = TAGGER_MODELS[model_index]
-        lora_type = s.value("lora_type", "General", type=str).lower()
         order = "tags_first" if s.value("combine_order", 0, type=int) == 1 else "nl_first"
         return CaptionJob(
             dataset_folder=self._folder_path,
@@ -1241,11 +1186,6 @@ class DatasetTab(QWidget):
             order=order,
             chain=self._build_process_chain(),
             policy=policy,
-            lms_url=self._lms_url,
-            lms_model=self._lms_model,
-            lms_focus=s.value("lmstudio_focus", "", type=str),
-            lora_type=("" if lora_type == "general" else lora_type),
-            max_tokens=s.value("lmstudio_max_tokens", 1200, type=int),
             characters_file=characters_mod.path_for(self._folder_path),
             tagger_model_id=model_id,
             tagger_threshold=threshold,
@@ -1259,12 +1199,12 @@ class DatasetTab(QWidget):
         scoped to its own only= list, so a whole-folder combine here would double it.
 
         Also disables the Individual-Steps buttons (belt and suspenders): the guards in
-        _describe_joycaption / _start_refine / _open_tagger_dialog already block a manual
+        _describe_joycaption / _open_tagger_dialog already block a manual
         launch via _captioning_busy(), but disabling the buttons keeps them from even being
         clickable while the runner chain owns the folder."""
         self._caption_stopped = False
         self._stop_caption_btn.setEnabled(True)
-        for b in (self._autotag_btn, self._describe_btn, self._llm_btn, self._combine_btn):
+        for b in (self._autotag_btn, self._describe_btn, self._combine_btn):
             b.setEnabled(False)
         self._caption_bar.setRange(0, 1)
         self._caption_bar.setValue(0)
@@ -1282,7 +1222,7 @@ class DatasetTab(QWidget):
         Stop all collapse into CaptionRunner.finished(bool) -> _on_caption_finished, which
         calls this unconditionally — so the Individual-Steps buttons re-enable here too."""
         self._stop_caption_btn.setEnabled(False)
-        for b in (self._autotag_btn, self._describe_btn, self._llm_btn, self._combine_btn):
+        for b in (self._autotag_btn, self._describe_btn, self._combine_btn):
             b.setEnabled(True)
         self._live_progress.setVisible(False)
         self._clear_processing_frame()
@@ -1411,94 +1351,6 @@ class DatasetTab(QWidget):
         )
         self._begin_caption(self._joycaption)
 
-    def _open_refine_dialog(self):
-        if not self._dataset_ready():
-            return
-        if not self._sdscripts_path:
-            QMessageBox.warning(self, "No sd-scripts", "Set the sd-scripts path in the Setup tab first.")
-            return
-        s = QSettings(SETTINGS_ORG, SETTINGS_APP)
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Refine with AI")
-        dlg.setMinimumWidth(440)
-        lay = QVBoxLayout(dlg)
-
-        row_a = QHBoxLayout()
-        row_a.addWidget(QLabel("Type:"))
-        type_combo = QComboBox()
-        type_combo.addItems(["General", "Character", "Style", "Concept"])
-        idx = type_combo.findText(s.value("lora_type", "General", type=str))
-        type_combo.setCurrentIndex(idx if idx >= 0 else 0)
-        type_combo.setToolTip("Steers what the model emphasizes vs omits for this LoRA type")
-        row_a.addWidget(type_combo, 1)
-        lay.addLayout(row_a)
-
-        row_f = QHBoxLayout()
-        row_f.addWidget(QLabel("Focus:"))
-        focus_edit = QLineEdit(s.value("lmstudio_focus", "", type=str))
-        focus_edit.setPlaceholderText("optional, e.g. emphasize the lighting")
-        row_f.addWidget(focus_edit, 1)
-        lay.addLayout(row_f)
-
-        row_t = QHBoxLayout()
-        maxtok_label = QLabel("Max tokens:")
-        maxtok_label.setToolTip(
-            "Token budget per image. Reasoning models spend most of this 'thinking' before "
-            "writing the caption, so too low a value yields an empty/truncated result."
-        )
-        row_t.addWidget(maxtok_label)
-        slider = QSlider(Qt.Horizontal)
-        slider.setMinimum(256)
-        slider.setMaximum(4000)
-        slider.setSingleStep(100)
-        slider.setPageStep(200)
-        slider.setValue(s.value("lmstudio_max_tokens", 1200, type=int))
-        row_t.addWidget(slider)
-        val = QLabel(str(slider.value()))
-        val.setMinimumWidth(40)
-        slider.valueChanged.connect(lambda v: val.setText(str(v)))
-        row_t.addWidget(val)
-        lay.addLayout(row_t)
-
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.button(QDialogButtonBox.Ok).setText("Run Refine")
-        buttons.accepted.connect(dlg.accept)
-        buttons.rejected.connect(dlg.reject)
-        lay.addWidget(buttons)
-
-        if dlg.exec() != QDialog.Accepted:
-            return
-        s.setValue("lora_type", type_combo.currentText())
-        s.setValue("lmstudio_focus", focus_edit.text().strip())
-        s.setValue("lmstudio_max_tokens", slider.value())
-        self._start_refine()
-
-    def _start_refine(self):
-        """Start the LLM refine pass using saved settings (no dialog). Reused by Process."""
-        if self._captioning_blocked():
-            QMessageBox.information(self, "Busy", self._busy_message())
-            return
-        s = QSettings(SETTINGS_ORG, SETTINGS_APP)
-        lora_type = s.value("lora_type", "General", type=str).lower()
-        if lora_type == "general":
-            lora_type = ""
-        self._tagger_log.setVisible(True)
-        self._tagger_log.clear()
-        self._tagger_log.append("⚠ Ensure the LM Studio server is running with a vision model loaded.\n")
-        self._llm_btn.setEnabled(False)
-        self._llm_btn.setText("✨ Refining…")
-        self._llm.start(
-            sdscripts_path=self._sdscripts_path,
-            image_folder=self._folder_path,
-            url=self._lms_url,
-            model=self._lms_model,
-            focus=s.value("lmstudio_focus", "", type=str),
-            lora_type=lora_type,
-            max_tokens=s.value("lmstudio_max_tokens", 1200, type=int),
-            characters_file=characters_mod.path_for(self._folder_path),
-        )
-        self._begin_caption(self._llm)
-
     def _open_combine_dialog(self):
         if not self._dataset_ready():
             return
@@ -1526,26 +1378,6 @@ class DatasetTab(QWidget):
             return
         s.setValue("combine_order", order_combo.currentIndex())
         self._combine_captions()
-
-    def _on_llm_finished(self, success: bool):
-        self._llm_btn.setEnabled(True)
-        self._llm_btn.setText("✨ Refine")
-        written = self._end_caption()
-        self._refresh_step_status()
-        if self._caption_stopped:
-            QMessageBox.information(self, "Stopped", "Captioning stopped. Captions completed so far are kept.")
-            return
-        if success:
-            QMessageBox.information(
-                self, "LLM Pass Complete",
-                f"Captions refined and merged into {written} caption file(s)."
-            )
-        else:
-            QMessageBox.warning(
-                self, "LLM Pass Failed",
-                "The LLM refiner exited with an error (is LM Studio running with a vision model "
-                "loaded?). Check the log above."
-            )
 
     def _on_joycaption_finished(self, success: bool):
         self._describe_btn.setEnabled(True)

@@ -10,9 +10,9 @@ def test_joycaption_line():
     assert t == ProgressTick(phase="Describe", done=3, total=12, filename="aria_03.png")
 
 
-def test_llm_line_filename_with_space():
-    t = parse_progress("[LLM] (5/12) my photo.png: prose… | tags: a, b")
-    assert t == ProgressTick(phase="Refine", done=5, total=12, filename="my photo.png")
+def test_joycaption_line_filename_with_space():
+    t = parse_progress("[JoyCaption] (5/12) my photo.png: a woman in a garden…")
+    assert t == ProgressTick(phase="Describe", done=5, total=12, filename="my photo.png")
 
 
 def test_tagger_done_line_is_none():

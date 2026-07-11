@@ -27,7 +27,6 @@ def _neuter_caption_processes(runner, monkeypatch):
     its `finished` signals stay wired and the chain is driven by emitting them."""
     monkeypatch.setattr(runner._captioner._tagger, "start", lambda **kw: None)
     monkeypatch.setattr(runner._captioner._joy, "start", lambda **kw: None)
-    monkeypatch.setattr(runner._captioner._llm, "start", lambda **kw: None)
 
 
 def test_run_definition_roundtrip():
@@ -104,28 +103,26 @@ def test_resolve_sample_prompts_captionless_dataset_returns_empty(tmp_path):
 
 def test_caption_fields_default_and_roundtrip():
     rd = _rd(quality_prefix="masterpiece", caption_order="tags_first",
-             refine_enabled=True, lms_url="http://x/v1", max_tokens=900,
              tagger_threshold=0.4, caption_policy="keep")
     back = RunDefinition.from_dict(rd.to_dict())
     assert back == rd
     assert _rd().caption_policy == "ask"
-    assert _rd().refine_enabled is False
 
 
 def test_to_caption_job_carries_the_snapshot_not_live_ui():
     rd = _rd(trigger_word="manbag", quality_prefix="masterpiece",
-             caption_order="tags_first", refine_enabled=True)
+             caption_order="tags_first")
     job = rd.to_caption_job(sdscripts_path="C:/sd", characters_file="C:/c.json",
                             policy="keep")
     assert job.trigger == "manbag"
     assert job.prefix == "masterpiece"
     assert job.order == "tags_first"
     assert job.policy == "keep"
-    assert job.chain == ["tag", "describe", "refine", "combine"]
+    assert job.chain == ["tag", "describe", "combine"]
 
 
-def test_to_caption_job_drops_refine_when_disabled():
-    job = _rd(refine_enabled=False).to_caption_job("C:/sd", "", "overwrite")
+def test_to_caption_job_chain_is_tag_describe_combine():
+    job = _rd().to_caption_job("C:/sd", "", "overwrite")
     assert job.chain == ["tag", "describe", "combine"]
 
 
@@ -146,12 +143,6 @@ def test_from_dict_on_json_lacking_new_keys_yields_documented_defaults():
     })
     assert rd.quality_prefix == ""
     assert rd.caption_order == "nl_first"
-    assert rd.refine_enabled is False
-    assert rd.lms_url == ""
-    assert rd.lms_model == ""
-    assert rd.lms_focus == ""
-    assert rd.lora_type == ""
-    assert rd.max_tokens == 1200
     assert rd.tagger_model_id == ""
     assert rd.tagger_threshold == 0.35
     assert rd.tagger_use_onnx is True

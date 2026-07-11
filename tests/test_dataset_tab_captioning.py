@@ -162,29 +162,6 @@ def test_captioned_milestone_fires_on_pre_combine_stage(tmp_path):
     assert stages == ["captioned"]      # combine itself does not re-emit
 
 
-def test_captioned_milestone_fires_on_refine_when_refine_is_in_the_chain(tmp_path):
-    # Finding 3: the refine-less chain test above happens to have "describe" as the
-    # pre-combine stage, so an implementation that hardcoded stage == "describe" would
-    # still pass it. Exercise the refine chain, where the pre-combine stage is "refine".
-    from ui.dataset_tab import DatasetTab
-    from core.caption_runner import CaptionJob
-    t = DatasetTab()
-    t._folder_path = str(tmp_path)
-    t._runner._job = CaptionJob(
-        dataset_folder=str(tmp_path), sdscripts_path="C:/sd",
-        chain=["tag", "describe", "refine", "combine"])
-    stages = []
-    t.caption_stage_done.connect(stages.append)
-    t._runner.stage_done.emit("tag")
-    assert stages == []
-    t._runner.stage_done.emit("describe")
-    assert stages == []             # describe is NOT pre-combine here -- refine is
-    t._runner.stage_done.emit("refine")
-    assert stages == ["captioned"]  # refine precedes combine -> milestone
-    t._runner.stage_done.emit("combine")
-    assert stages == ["captioned"]  # combine itself does not re-emit
-
-
 def test_full_chain_emits_stage_done_exactly_twice_in_order(tmp_path):
     # End-to-end: a full successful chain fires caption_stage_done exactly twice,
     # "captioned" then "processed" -- never more, never reordered.
@@ -206,7 +183,7 @@ def test_full_chain_emits_stage_done_exactly_twice_in_order(tmp_path):
 
 
 def test_manual_describe_is_blocked_while_the_runner_chain_is_active(tmp_path, monkeypatch):
-    # Finding 1 (CRITICAL): CaptionRunner owns its own Tagger/JoyCaption/LLM processes, so
+    # Finding 1 (CRITICAL): CaptionRunner owns its own Tagger/JoyCaption processes, so
     # the tab's own procs are idle during a chain. A guard that only checks the tab's procs
     # would let a second JoyCaption launch against the same folder mid-chain.
     import ui.dataset_tab as dt_mod
@@ -223,19 +200,6 @@ def test_manual_describe_is_blocked_while_the_runner_chain_is_active(tmp_path, m
     launched = []
     monkeypatch.setattr(t, "_start_describe", lambda: launched.append("describe"))
     t._describe_joycaption()
-    assert launched == []          # blocked
-
-
-def test_manual_refine_is_blocked_while_the_runner_chain_is_active(tmp_path, monkeypatch):
-    import ui.dataset_tab as dt_mod
-    t = dt_mod.DatasetTab()
-    t._folder_path = str(tmp_path)
-    t._sdscripts_path = "C:/sd"
-    monkeypatch.setattr(t._runner, "is_running", lambda: True)
-    monkeypatch.setattr(dt_mod.QMessageBox, "information", staticmethod(lambda *a, **k: None))
-    launched = []
-    monkeypatch.setattr(t._llm, "start", lambda *a, **k: launched.append("refine"))
-    t._start_refine()
     assert launched == []          # blocked
 
 

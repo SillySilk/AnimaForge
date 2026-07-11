@@ -1,4 +1,4 @@
-"""The tag -> describe -> refine -> combine caption chain, without a GUI.
+"""The tag -> describe -> combine caption chain, without a GUI.
 
 Lifted out of ui.dataset_tab so BatchRunner and DatasetTab drive the same code.
 It is a QObject, not a QWidget: it needs a Qt event loop (QProcess) but no display,
@@ -16,11 +16,10 @@ from core import caption_manifest, caption_policy as cp
 from core.caption_progress import parse_progress
 from core.dataset_manager import combine_all
 from core.joycaption import JoyCaptionProcess
-from core.llm_refine import LLMRefineProcess
 from core.tagger import TaggerProcess
 
 
-VALID_STAGES = ("tag", "describe", "refine", "combine")
+VALID_STAGES = ("tag", "describe", "combine")
 
 
 def _default_chain():
@@ -36,11 +35,6 @@ class CaptionJob:
     order: str = "nl_first"
     chain: list = field(default_factory=_default_chain)
     policy: str = cp.OVERWRITE
-    lms_url: str = ""
-    lms_model: str = ""
-    lms_focus: str = ""
-    lora_type: str = ""
-    max_tokens: int = 1200
     characters_file: str = ""
     tagger_model_id: str = ""
     tagger_threshold: float = 0.35
@@ -82,12 +76,10 @@ class CaptionRunner(QObject):
         self._only_file = None
         self._tagger = TaggerProcess(self)
         self._joy = JoyCaptionProcess(self)
-        self._llm = LLMRefineProcess(self)
-        for proc in (self._tagger, self._joy, self._llm):
+        for proc in (self._tagger, self._joy):
             proc.log_line.connect(self._on_log)
         self._tagger.finished.connect(lambda ok: self._step_done("tag", ok))
         self._joy.finished.connect(lambda ok: self._step_done("describe", ok))
-        self._llm.finished.connect(lambda ok: self._step_done("refine", ok))
 
     def is_running(self) -> bool:
         return self._running
@@ -118,7 +110,7 @@ class CaptionRunner(QObject):
             return
         self._running = False
         self._stages = []
-        for proc in (self._tagger, self._joy, self._llm):
+        for proc in (self._tagger, self._joy):
             if proc.is_running():
                 proc.stop()
         self._cleanup_only_file()
@@ -164,13 +156,6 @@ class CaptionRunner(QObject):
             self._joy.start(sdscripts_path=job.sdscripts_path,
                             image_folder=job.dataset_folder,
                             overwrite=(job.policy == cp.OVERWRITE))
-        elif stage == "refine":
-            self._llm.start(
-                sdscripts_path=job.sdscripts_path, image_folder=job.dataset_folder,
-                url=job.lms_url, model=job.lms_model, focus=job.lms_focus,
-                lora_type=job.lora_type, max_tokens=job.max_tokens,
-                characters_file=job.characters_file,
-                skip_existing=(job.policy == cp.KEEP))
         elif stage == "combine":
             written, errors = combine_all(
                 job.dataset_folder, prefix=job.combine_prefix(), order=job.order,

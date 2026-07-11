@@ -2,13 +2,12 @@
 
 The slow steps print lines like:
   [JoyCaption] (3/12) aria_03.png: <caption>…
-  [LLM] (5/12) my photo.png: <prose>… | tags: …
 This turns one such line into a ProgressTick; anything else returns None.
 """
 import re
 from dataclasses import dataclass
 
-_PHASES = {"tagger": "Tag", "joycaption": "Describe", "llm": "Refine"}
+_PHASES = {"tagger": "Tag", "joycaption": "Describe"}
 _PREFIX_RE = re.compile(r"^\[(\w+)\]")
 # (n/N) then the filename up to the first colon (Windows filenames can't contain ':')
 _PROG_RE = re.compile(r"\((\d+)\s*/\s*(\d+)\)\s+(.+?):")

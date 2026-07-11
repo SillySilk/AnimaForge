@@ -54,9 +54,6 @@ DEFAULTS = {
     "vae_path": "",
     "output_dir": "",
     # Connections
-    "lmstudio_url": "http://localhost:1234/v1",
-    # Recommended public vision model; leave blank to use whatever LM Studio has loaded.
-    "lmstudio_model": "qwen2.5-vl-7b-instruct",
     "forge_api_url": "http://127.0.0.1:7860",
     "forge_lora_dir": "",
     "forge_auto_deliver": False,

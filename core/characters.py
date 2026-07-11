@@ -1,8 +1,9 @@
-"""Per-dataset character roster + style anchor for caption refinement.
+"""Per-dataset character roster + style anchor for captioning.
 
 One JSON file per dataset folder (animaforge_characters.json) records the characters that may
 appear in the set (token + recognition description), a dataset-wide @-style anchor, and per-image
-assignments. Pure stdlib so scripts/llm_refine_run.py (stdlib + Pillow only) can import it.
+assignments. The Combine step forces each image's confirmed tokens (+ the anchor) into its caption.
+Pure stdlib so headless callers can import it without Qt.
 """
 import json
 import re
@@ -95,21 +96,6 @@ def _resolve_present(data: DatasetCharacters, tokens) -> list:
     return [by_token[t] for t in tokens if t in by_token]
 
 
-def present_for_image(data: DatasetCharacters, image_name: str) -> list:
-    """Cast to send to the vision model for one image.
-
-    No assignment -> the full roster (the model auto-matches whoever it sees).
-    Assigned       -> exactly the ticked roster characters + this image's one-offs
-                      (an explicitly empty assignment yields []).
-    """
-    entry = data.assignments.get(image_name)
-    if entry is None:
-        return list(data.roster)
-    present = _resolve_present(data, entry.get("present", []))
-    oneoffs = [Character.from_dict(o) for o in entry.get("oneoffs", [])]
-    return present + oneoffs
-
-
 def explicit_tokens_for_image(data: DatasetCharacters, image_name: str) -> list:
     """Tokens that are *confirmed* present (explicit assignment only) — for the deterministic net.
 
@@ -121,18 +107,6 @@ def explicit_tokens_for_image(data: DatasetCharacters, image_name: str) -> list:
     toks = [c.token for c in _resolve_present(data, entry.get("present", []))]
     toks += [o.get("token", "") for o in entry.get("oneoffs", [])]
     return [t for t in toks if t.strip()]
-
-
-def build_character_block(chars, style_anchor: str = "") -> str:
-    """Assemble the <characters>/<style_anchor> prompt text; omit empty blocks."""
-    parts = []
-    if chars:
-        lines = [(f"{c.token}: {c.description.strip()}" if c.description.strip() else c.token)
-                 for c in chars]
-        parts.append("<characters>\n" + "\n".join(lines) + "\n</characters>")
-    if style_anchor.strip():
-        parts.append(f"<style_anchor>{style_anchor.strip()}</style_anchor>")
-    return "\n".join(parts)
 
 
 def enforce_anchors_in_tags(tags: str, tokens, style_anchor: str = "") -> str:

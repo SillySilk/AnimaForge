@@ -23,11 +23,11 @@ def test_roundtrip_typed(tmp_path):
     a.set("default_network_dim", 32)
     a.set("save_every_n_steps", 100)
     a.set("logit_mean", 0.5)
-    a.set("lmstudio_model", "my-model")
+    a.set("model_scan_dir", "C:/models")
     assert a.get("default_network_dim") == 32 and isinstance(a.get("default_network_dim"), int)
     assert a.get("save_every_n_steps") == 100 and isinstance(a.get("save_every_n_steps"), int)
     assert a.get("logit_mean") == 0.5
-    assert a.get("lmstudio_model") == "my-model"
+    assert a.get("model_scan_dir") == "C:/models"
 
 
 def test_sample_prompts_session_only_not_persisted(tmp_path):

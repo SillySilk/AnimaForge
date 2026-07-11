@@ -58,22 +58,6 @@ def _sample():
     )
 
 
-def test_present_unassigned_returns_full_roster():
-    data = _sample()
-    toks = [c.token for c in C.present_for_image(data, "never_seen.png")]
-    assert toks == ["asuka", "rei"]
-
-
-def test_present_assigned_resolves_present_and_oneoffs():
-    data = _sample()
-    toks = [c.token for c in C.present_for_image(data, "assigned.png")]
-    assert toks == ["asuka", "gendo"]
-
-
-def test_present_empty_assignment_returns_nothing():
-    assert C.present_for_image(_sample(), "empty.png") == []
-
-
 def test_explicit_tokens_unassigned_is_empty():
     assert C.explicit_tokens_for_image(_sample(), "never_seen.png") == []
 
@@ -88,25 +72,6 @@ def test_explicit_tokens_skips_unknown_present_token():
         assignments={"x.png": {"present": ["asuka", "ghost"], "oneoffs": []}},
     )
     assert C.explicit_tokens_for_image(data, "x.png") == ["asuka"]
-
-
-def test_build_character_block_full():
-    data = _sample()
-    block = C.build_character_block(C.present_for_image(data, "assigned.png"), data.style_anchor)
-    assert "<characters>" in block
-    assert "asuka: red hair" in block
-    assert "gendo: older man" in block
-    assert "<style_anchor>@mystyle</style_anchor>" in block
-
-
-def test_build_character_block_omits_empty():
-    assert C.build_character_block([], "") == ""
-    assert C.build_character_block([], "@only") == "<style_anchor>@only</style_anchor>"
-
-
-def test_build_character_block_token_without_description():
-    block = C.build_character_block([C.Character("solo", "")], "")
-    assert "<characters>\nsolo\n</characters>" == block
 
 
 # ----------------------------------------------------------------------

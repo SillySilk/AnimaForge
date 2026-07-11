@@ -92,12 +92,6 @@ class SetupTab(QWidget):
     def get_output_dir(self) -> str:
         return self._output_edit.text().strip()
 
-    def get_lmstudio_url(self) -> str:
-        return self._lms_url_edit.text().strip() or "http://localhost:1234/v1"
-
-    def get_lmstudio_model(self) -> str:
-        return self._lms_model_edit.text().strip()
-
     def is_environment_valid(self) -> tuple:
         """Returns (is_valid: bool, message: str)."""
         sd = self.get_sdscripts_path()
@@ -262,56 +256,6 @@ class SetupTab(QWidget):
         torch_layout.addWidget(self._torch_log)
         layout.addWidget(torch_group)
 
-        # LM Studio group (caption refinement)
-        lms_group = QGroupBox("LM Studio (caption refinement)")
-        lms_layout = QVBoxLayout(lms_group)
-        lms_layout.setSpacing(8)
-        lms_hint = QLabel(
-            "Vision-LLM endpoint used by the Dataset tab's 'LLM Pass' caption refiner. "
-            "Start the LM Studio server and load an uncensored vision model (e.g. Gemma-4)."
-        )
-        lms_hint.setObjectName("label_field")
-        lms_hint.setWordWrap(True)
-        lms_layout.addWidget(lms_hint)
-
-        url_row = QHBoxLayout()
-        url_row.addWidget(QLabel("Base URL:"))
-        self._lms_url_edit = QLineEdit()
-        self._lms_url_edit.setPlaceholderText("http://localhost:1234/v1")
-        url_row.addWidget(self._lms_url_edit)
-        lms_layout.addLayout(url_row)
-
-        model_row = QHBoxLayout()
-        model_row.addWidget(QLabel("Model id:"))
-        self._lms_model_edit = QLineEdit()
-        self._lms_model_edit.setPlaceholderText("(blank = server's loaded model)")
-        self._lms_model_edit.setToolTip(
-            "Optional. Must be a VISION model for caption refine. Recommended: "
-            "qwen2.5-vl-7b-instruct (e.g. huihui-ai's abliterated build for adult content). "
-            "Leave blank to use whatever model LM Studio currently has loaded."
-        )
-        model_row.addWidget(self._lms_model_edit)
-        test_btn = QPushButton("Test connection")
-        test_btn.setFixedWidth(152)
-        test_btn.clicked.connect(self._test_lmstudio)
-        model_row.addWidget(test_btn)
-        lms_layout.addLayout(model_row)
-
-        self._lms_status = QLabel("")
-        self._lms_status.setWordWrap(True)
-        self._lms_status.setStyleSheet("font-size: 11px; color: #8a8a93;")
-        lms_layout.addWidget(self._lms_status)
-
-        self._lms_in_process_check = QCheckBox(
-            "Include AI Refine step in one-click Process & auto-pipeline runs"
-        )
-        self._lms_in_process_check.setToolTip(
-            "Off by default. The ✨ Refine button on the Dataset tab still works regardless. "
-            "When on, ▶ Process and the Home auto-pipeline add the LM Studio refine pass — "
-            "LM Studio must be running with a vision model."
-        )
-        lms_layout.addWidget(self._lms_in_process_check)
-        layout.addWidget(lms_group)
 
         # Output group
         output_group = QGroupBox("Output Directory")
@@ -334,7 +278,7 @@ class SetupTab(QWidget):
         output_layout.addLayout(output_row)
         layout.addWidget(output_group)
 
-        # The Bench — optional service (stays visible, like LM Studio).
+        # The Bench — optional service.
         layout.addWidget(self._build_forge_group())
 
         # Fine Tuning — the heavy set-once config is popped into modals so the Workshop
@@ -384,7 +328,7 @@ class SetupTab(QWidget):
 
         # Auto-save wiring
         for edit in (self._sdscripts_edit, self._dit_edit, self._qwen3_edit,
-                     self._vae_edit, self._output_edit, self._lms_url_edit, self._lms_model_edit):
+                     self._vae_edit, self._output_edit):
             edit.textChanged.connect(self._on_text_changed)
 
     def _make_status_dot(self) -> QLabel:
@@ -635,24 +579,6 @@ class SetupTab(QWidget):
             label.setStyleSheet("color: #d4af37; font-size: 18px;")
         else:
             label.setStyleSheet("color: #d9534f; font-size: 18px;")
-
-    def _test_lmstudio(self):
-        import json
-        import urllib.request
-        url = self.get_lmstudio_url().rstrip("/") + "/models"
-        try:
-            with urllib.request.urlopen(url, timeout=5) as r:
-                data = json.loads(r.read().decode("utf-8"))
-            ids = [m.get("id") for m in data.get("data", [])]
-            if ids:
-                self._lms_status.setText("✔ Connected. Loaded: " + ", ".join(str(i) for i in ids))
-                self._lms_status.setStyleSheet("font-size: 11px; color: #d4af37;")
-            else:
-                self._lms_status.setText("Reachable, but no model loaded — load a vision model.")
-                self._lms_status.setStyleSheet("font-size: 11px; color: #d4972b;")
-        except Exception as e:
-            self._lms_status.setText(f"✘ Cannot reach LM Studio: {e}")
-            self._lms_status.setStyleSheet("font-size: 11px; color: #d9534f;")
 
     # ------------------------------------------------------------------
     # Settings control center (Forge / Advanced / Defaults) — via AppSettings
@@ -925,7 +851,7 @@ class SetupTab(QWidget):
         self._min_vram_spin.setSuffix(" MB")
         self._min_vram_spin.setToolTip(
             "Before training, warn if free VRAM is below this (0 disables). "
-            "Catches LM Studio / Forge holding the GPU.")
+            "Catches another app (e.g. Forge) holding the GPU.")
         vr.addWidget(self._min_vram_spin)
         vr.addStretch()
         v.addLayout(vr)
@@ -1193,9 +1119,6 @@ class SetupTab(QWidget):
         self._settings.setValue("qwen3_path", to_portable(self._qwen3_edit.text()))
         self._settings.setValue("vae_path", to_portable(self._vae_edit.text()))
         self._settings.setValue("output_dir", to_portable(self._output_edit.text()))
-        self._settings.setValue("lmstudio_url", self._lms_url_edit.text())
-        self._settings.setValue("lmstudio_model", self._lms_model_edit.text())
-        self._settings.setValue("lmstudio_refine_in_process", self._lms_in_process_check.isChecked())
         self._settings.sync()
 
     def _load_settings(self):
@@ -1222,17 +1145,6 @@ class SetupTab(QWidget):
         if not saved_out or in_other_install(saved_out):
             saved_out = default_out
         self._output_edit.setText(saved_out)
-
-        self._lms_url_edit.setText(
-            self._settings.value("lmstudio_url", "http://localhost:1234/v1", type=str)
-            or "http://localhost:1234/v1"
-        )
-        self._lms_model_edit.setText(
-            self._settings.value("lmstudio_model", "qwen2.5-vl-7b-instruct", type=str)
-        )
-        self._lms_in_process_check.setChecked(
-            self._settings.value("lmstudio_refine_in_process", False, type=bool)
-        )
 
     # ------------------------------------------------------------------
     # Install dialog

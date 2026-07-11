@@ -43,8 +43,8 @@ def test_dataset_tab_builds_process_panel():
     # The caption controls are still built here (engine wiring intact) but the panel is now
     # exposed via caption_controls() for relocation onto Home, not parented into the splitter.
     for attr in ("_process_btn", "_phase_label", "_autotag_btn", "_describe_btn",
-                 "_llm_btn", "_combine_btn", "_stop_caption_btn",
-                 "_step1_status", "_step2_status", "_step3_status", "_step4_status",
+                 "_combine_btn", "_stop_caption_btn",
+                 "_step1_status", "_step2_status", "_step4_status",
                  "_hsplit", "_vsplit"):
         assert hasattr(t, attr), attr
     assert t._hsplit.count() == 1          # gallery only — caption panel relocated to Home
@@ -60,19 +60,17 @@ def test_dataset_tab_builds_process_panel():
 
 
 def test_refresh_step_status_no_folder():
-    _set_refine_in_process(False)
     t = DatasetTab()
     t._refresh_step_status()
     assert t._step1_status.text() == "— not run"
-    assert "manual only" in t._step3_status.text().lower()
 
 
 def test_process_steps_and_phase_text():
     from ui.dataset_tab import PROCESS_STEPS, STEP_NAMES, phase_text
-    assert PROCESS_STEPS == ["tag", "describe", "refine", "combine"]
-    assert STEP_NAMES["refine"] == "Refine"
-    assert phase_text("tag") == "Step 1/4 · Tag…"
-    assert phase_text("combine") == "Step 4/4 · Combine…"
+    assert PROCESS_STEPS == ["tag", "describe", "combine"]
+    assert STEP_NAMES["combine"] == "Combine"
+    assert phase_text("tag") == "Step 1/3 · Tag…"
+    assert phase_text("combine") == "Step 3/3 · Combine…"
 
 
 def test_phase_text_numbers_against_actual_chain():
@@ -82,38 +80,9 @@ def test_phase_text_numbers_against_actual_chain():
     assert phase_text("combine", three) == "Step 3/3 · Combine…"
 
 
-def _set_refine_in_process(value: bool):
-    from PySide6.QtCore import QSettings
-    from core.settings import SETTINGS_ORG, SETTINGS_APP
-    QSettings(SETTINGS_ORG, SETTINGS_APP).setValue("lmstudio_refine_in_process", value)
-
-
-def test_build_process_chain_default_skips_refine():
-    _set_refine_in_process(False)
+def test_build_process_chain_is_tag_describe_combine():
     t = DatasetTab()
     assert t._build_process_chain() == ["tag", "describe", "combine"]
-
-
-def test_build_process_chain_includes_refine_when_enabled():
-    _set_refine_in_process(True)
-    t = DatasetTab()
-    assert t._build_process_chain() == ["tag", "describe", "refine", "combine"]
-    _set_refine_in_process(False)
-
-
-def test_refine_reflection_label_off_by_default():
-    _set_refine_in_process(False)
-    t = DatasetTab()
-    t._refresh_refine_reflection()
-    assert "manual only" in t._step3_status.text().lower()
-
-
-def test_refine_reflection_label_when_enabled():
-    _set_refine_in_process(True)
-    t = DatasetTab()
-    t._refresh_refine_reflection()
-    assert "in process" in t._step3_status.text().lower()
-    _set_refine_in_process(False)
 
 
 def test_read_tagger_defaults_fallbacks():
@@ -132,7 +101,6 @@ def test_process_run_hands_job_to_runner(tmp_path: Path):
     # tab's job now is to snapshot settings into a CaptionJob and hand it to the runner.
     from PIL import Image
     from core.caption_policy import OVERWRITE
-    _set_refine_in_process(False)
     Image.new("RGB", (8, 8), (10, 10, 10)).save(tmp_path / "a.png")
     t = DatasetTab()
     t._folder_path = str(tmp_path)

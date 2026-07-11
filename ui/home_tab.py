@@ -2,7 +2,7 @@ import os
 import json
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal, QThread
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QFileDialog, QFrame, QGridLayout, QHBoxLayout, QInputDialog,
@@ -11,26 +11,6 @@ from PySide6.QtWidgets import (
 
 from ui.forge_modal import ForgeModal
 from ui.run_progress import RunProgress
-
-
-class _LmsPing(QThread):
-    """Background reachability check for an LM Studio (OpenAI-compatible) server."""
-    done = Signal(bool)
-
-    def __init__(self, url, parent=None):
-        super().__init__(parent)
-        self._url = url
-
-    def run(self):
-        ok = False
-        try:
-            import urllib.request
-            base = self._url.rstrip("/")
-            with urllib.request.urlopen(base + "/models", timeout=2.5) as r:
-                ok = 200 <= getattr(r, "status", r.getcode()) < 500
-        except Exception:
-            ok = False
-        self.done.emit(ok)
 
 
 class _ClickTile(QFrame):
@@ -85,25 +65,17 @@ class HomeTab(QWidget):
     # Subject type keys, parallel to the cockpit combo entries.
     _TYPE_KEYS = ["character", "concept", "style"]
     _TYPE_LABELS = ["Character", "Object / Concept", "Style"]
-    # The six "core envt" rows surfaced in the header Ready pill / checklist modal.
+    # The core envt rows surfaced in the header Ready pill / checklist modal.
     _READY_CORE = ["sd-scripts", "DiT model", "Qwen3 encoder", "VAE",
-                   "PyTorch 2.5+", "LM Studio"]
+                   "PyTorch 2.5+"]
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._ready_labels = {}
         self._recent_label = None
         self._recover_btn = None
-        self._lms_thread = None
         self._last_ctx = {}
         self._build_ui()
-        # A live LM Studio ping is a QThread; if the app tears down while one is
-        # running, Qt aborts the process (nonzero exit). Wait them out on quit so
-        # the marketing capture / release build and run_tests exit cleanly.
-        from PySide6.QtWidgets import QApplication
-        app = QApplication.instance()
-        if app is not None:
-            app.aboutToQuit.connect(self._stop_lms_pings)
 
     # ---- pure logic (unit-tested) ----
     def _readiness_rows(self, ctx):
@@ -118,11 +90,6 @@ class HomeTab(QWidget):
             ("PyTorch 2.5+", "ok" if ctx.get("torch_ok") else "idle"),
             ("Dataset", "ok" if (ctx.get("dataset_folder") and ctx.get("image_count", 0) > 0) else "idle"),
         ]
-        lms_ok = ctx.get("lms_ok")
-        if ctx.get("lms_url"):
-            rows.append(("LM Studio", "ok" if lms_ok else ("err" if lms_ok is False else "idle")))
-        else:
-            rows.append(("LM Studio", "idle"))
         return rows
 
     def _recent_outputs(self, output_dir, limit=5):
@@ -188,7 +155,7 @@ class HomeTab(QWidget):
         root.setSpacing(22)
 
         # detached readiness labels (surfaced in the Ready modal; kept live for
-        # _set_row / the LM Studio ping regardless of whether the modal is open)
+        # _set_row regardless of whether the modal is open)
         for label, _ in self._readiness_rows({}):
             row = QLabel()
             row.setObjectName("ready_row_idle")
@@ -793,8 +760,7 @@ class HomeTab(QWidget):
             self.window(), title="Ready to Forge",
             subtitle="What's lit, and what's still cold.", max_width=440)
         for label, state in rows:
-            r = QLabel(f"{self._GLYPH.get(state, '–')}   {label}"
-                       + ("   (optional)" if label == "LM Studio" else ""))
+            r = QLabel(f"{self._GLYPH.get(state, '–')}   {label}")
             r.setObjectName(self._OBJ.get(state, "ready_row_idle"))
             modal.body.addWidget(r)
         ctx = self._last_ctx or {}
@@ -993,11 +959,6 @@ class HomeTab(QWidget):
         self._last_ctx = dict(context)
         for label, state in self._readiness_rows(context):
             self._set_row(label, state)
-        # live LM Studio reachability (non-blocking background ping)
-        url = context.get("lms_url")
-        if url:
-            self._set_row("LM Studio", "idle", "  (checking…)")
-            self._start_lms_ping(url)
         names = self._recent_outputs(context.get("output", ""))
         self._recent_label.setText(
             "Recent:  " + "   ·   ".join(names) if names else "No runs yet.")
@@ -1018,25 +979,3 @@ class HomeTab(QWidget):
             self._recover_btn.setVisible(rd is not None)
         except Exception:
             self._recover_btn.setVisible(False)
-
-    def _start_lms_ping(self, url):
-        prev = self._lms_thread
-        if prev is not None and prev.isRunning():
-            return  # a check is already in flight
-        t = _LmsPing(url, self)
-        t.done.connect(self._on_lms_ping)
-        self._lms_thread = t
-        t.start()
-
-    def _stop_lms_pings(self):
-        """Wait for every in-flight LM Studio ping QThread to finish so the process
-        never tears down with a running QThread — Qt aborts the process on that,
-        which broke the marketing capture / release build and made run_tests exit
-        nonzero on a passing suite. run() self-terminates at its 2.5s urlopen
-        timeout, so each wait() returns within a few seconds."""
-        for t in self.findChildren(_LmsPing):
-            if t.isRunning():
-                t.wait(3000)
-
-    def _on_lms_ping(self, ok):
-        self._set_row("LM Studio", "ok" if ok else "err")

@@ -1,4 +1,5 @@
 import os
+import re
 from pathlib import Path
 
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"}
@@ -119,6 +120,39 @@ def write_sidecar(image_path: str, ext: str, text: str) -> bool:
         return False
 
 
+# A booru "score" tag keeps its underscore (score_7); every other tag uses spaces.
+_SCORE_TAG_RE = re.compile(r"^score_\d", re.I)
+
+
+def normalize_tags(tags: str) -> str:
+    """Mechanically tidy a comma-separated booru-tag tail (no LLM, no image check).
+
+    This is the deterministic replacement for the tag-hygiene the old LLM refine pass
+    used to do: lowercase, spaces-not-underscores (score_N excepted), collapsed internal
+    whitespace, empties dropped, and case-insensitive de-duplication that preserves first
+    appearance. Order is otherwise left untouched — reordering needed the model, this does not.
+
+    The WD14 tagger already emits lowercase, underscore-free tags, so on a clean run this is
+    mostly a no-op; it earns its keep on hand-edited or repeated tags and when .nl + .tags are
+    merged. Prose is never passed here — deduping words out of a sentence would wreck it.
+    """
+    out, seen = [], set()
+    for raw in (tags or "").split(","):
+        t = raw.strip()
+        if not t:
+            continue
+        t = t.lower()
+        if not _SCORE_TAG_RE.match(t):
+            t = t.replace("_", " ")
+        t = re.sub(r"\s{2,}", " ", t).strip()
+        if not t:
+            continue
+        if t not in seen:
+            seen.add(t)
+            out.append(t)
+    return ", ".join(out)
+
+
 def combine_caption(nl: str, tags: str, prefix: str = "", order: str = "nl_first",
                     lead: str = "", rules=None) -> str:
     """
@@ -142,6 +176,7 @@ def combine_caption(nl: str, tags: str, prefix: str = "", order: str = "nl_first
         from core.caption_rules import apply_caption_rules
         nl = apply_caption_rules(nl, rules)
         tags = apply_caption_rules(tags, rules)
+    tags = normalize_tags(tags)  # deterministic tag hygiene (was the LLM refine pass's job)
     prefix = (prefix or "").strip().strip(",").strip()
     lead = (lead or "").strip().strip(",").strip()
 
