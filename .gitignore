@@ -38,8 +38,8 @@ desktop.ini
 *.tmp
 *.log
 
-# Runtime training sets (user data / crash-recovery marker) — not source
-/sets/*.json
+# Runtime training sets (user datasets, captions, crash-recovery marker) — not source
+/sets/
 
 # Release tooling — private/dev only, never shipped to the public storefront
 publish-release.bat
