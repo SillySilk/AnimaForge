@@ -556,3 +556,66 @@ def test_describe_joycaption_refused_when_gpu_busy_elsewhere(tmp_path, monkeypat
     monkeypatch.setattr(t, "_start_describe", lambda: launched.append("describe"))
     t._describe_joycaption()
     assert launched == []
+
+
+def test_start_describe_passes_overwrite_to_joycaption(tmp_path, monkeypatch):
+    # 'Redo all' must reach JoyCaption as overwrite=True — otherwise an already-
+    # captioned set silently skips every image and nothing streams in the log.
+    t = _ready_tab(tmp_path)
+    calls = {}
+    monkeypatch.setattr(t._joycaption, "start", lambda **kw: calls.update(kw))
+    t._start_describe(overwrite=True)
+    assert calls.get("overwrite") is True
+
+
+def test_start_describe_default_is_skip_existing(tmp_path, monkeypatch):
+    t = _ready_tab(tmp_path)
+    calls = {}
+    monkeypatch.setattr(t._joycaption, "start", lambda **kw: calls.update(kw))
+    t._start_describe()
+    assert calls.get("overwrite") is False
+
+
+def _click_describe_button(monkeypatch, needle):
+    """Answer the Describe dialog by clicking the button whose label contains needle."""
+    import ui.dataset_tab as dt_mod
+    monkeypatch.setattr(dt_mod.QMessageBox, "exec", lambda self: 0)
+    monkeypatch.setattr(
+        dt_mod.QMessageBox, "clickedButton",
+        lambda self: next((b for b in self.buttons() if needle in b.text()), None))
+
+
+def test_describe_dialog_redo_all_overwrites(tmp_path, monkeypatch):
+    from PIL import Image
+    Image.new("RGB", (8, 8), (10, 10, 10)).save(tmp_path / "a.png")
+    (tmp_path / "a.nl").write_text("old prose", encoding="utf-8")
+    t = _ready_tab(tmp_path)
+    _click_describe_button(monkeypatch, "Redo")
+    seen = {}
+    monkeypatch.setattr(t, "_start_describe",
+                        lambda overwrite=False: seen.setdefault("ow", overwrite))
+    t._describe_joycaption()
+    assert seen.get("ow") is True
+
+
+def test_describe_dialog_missing_only_skips_existing(tmp_path, monkeypatch):
+    from PIL import Image
+    Image.new("RGB", (8, 8), (10, 10, 10)).save(tmp_path / "a.png")
+    (tmp_path / "a.nl").write_text("old prose", encoding="utf-8")
+    t = _ready_tab(tmp_path)
+    _click_describe_button(monkeypatch, "missing")
+    seen = {}
+    monkeypatch.setattr(t, "_start_describe",
+                        lambda overwrite=False: seen.setdefault("ow", overwrite))
+    t._describe_joycaption()
+    assert seen.get("ow") is False
+
+
+def test_describe_dialog_cancel_launches_nothing(tmp_path, monkeypatch):
+    t = _ready_tab(tmp_path)
+    _click_describe_button(monkeypatch, "NO-SUCH-BUTTON")   # clickedButton -> None
+    launched = []
+    monkeypatch.setattr(t, "_start_describe",
+                        lambda overwrite=False: launched.append(overwrite))
+    t._describe_joycaption()
+    assert launched == []

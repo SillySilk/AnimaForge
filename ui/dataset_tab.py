@@ -1324,22 +1324,33 @@ class DatasetTab(QWidget):
         if self._captioning_blocked():
             QMessageBox.information(self, "Busy", self._busy_message())
             return
+        c = self._step_status_counts()
+        missing = max(0, c["total"] - c["nl"])
         msg = QMessageBox(self)
         msg.setWindowTitle("Describe with JoyCaption")
         msg.setIcon(QMessageBox.Question)
         msg.setText(
-            f"Generate natural-language captions for {len(self._image_data)} images?\n\n"
-            "Captions are written to .nl sidecar files (your tags and .txt are untouched).\n"
+            f"Generate natural-language captions for {c['total']} images?\n\n"
+            f"{c['nl']} of {c['total']} already have a description (.nl). Redo all rewrites "
+            "every description; missing-only leaves existing ones alone. Captions go to .nl "
+            "sidecar files (your tags and .txt are untouched).\n"
             "The JoyCaption model (~17GB) downloads on first use."
         )
-        msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-        msg.setDefaultButton(QMessageBox.No)
-        if msg.exec() != QMessageBox.Yes:
-            return
-        self._start_describe()
+        only_btn = msg.addButton(f"Caption missing only ({missing})", QMessageBox.AcceptRole)
+        redo_btn = msg.addButton(f"Redo all ({c['total']})", QMessageBox.DestructiveRole)
+        msg.addButton(QMessageBox.Cancel)
+        msg.setDefaultButton(only_btn)
+        msg.exec()
+        clicked = msg.clickedButton()
+        if clicked is redo_btn:
+            self._start_describe(overwrite=True)
+        elif clicked is only_btn:
+            self._start_describe(overwrite=False)
 
-    def _start_describe(self):
-        """Start JoyCaption (no confirm). Reused by Process."""
+    def _start_describe(self, overwrite: bool = False):
+        """Start JoyCaption (no confirm). overwrite=True re-describes every image —
+        the live per-image caption stream in the log only happens for images that
+        actually run, so 'Redo all' is what makes an already-captioned set stream."""
         self._tagger_log.setVisible(True)
         self._tagger_log.clear()
         self._tagger_log.append("⚠ Do not close the app while captioning/downloading is in progress.\n")
@@ -1348,6 +1359,7 @@ class DatasetTab(QWidget):
         self._joycaption.start(
             sdscripts_path=self._sdscripts_path,
             image_folder=self._folder_path,
+            overwrite=overwrite,
         )
         self._begin_caption(self._joycaption)
 
