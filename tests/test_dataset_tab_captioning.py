@@ -63,6 +63,34 @@ def test_filename_and_set_processing_property():
     assert c.property("processing") == "false"
 
 
+def test_recombine_one_rebuilds_txt_from_sidecars(tmp_path, monkeypatch):
+    """The editor's per-image Rebuild: .nl + .tags -> .txt for one image only,
+    with the same trigger/prefix/order the folder-wide Combine uses — and the
+    mechanical tag cleanup (dedup) along the way."""
+    from ui.dataset_tab import DatasetTab
+    import ui.dataset_tab as dt_mod
+    monkeypatch.setattr(dt_mod, "parse_rules", lambda _json: [])
+
+    img = tmp_path / "a.png"; img.write_bytes(b"x")
+    other = tmp_path / "b.png"; other.write_bytes(b"x")
+    (tmp_path / "a.nl").write_text("a girl in a park", encoding="utf-8")
+    (tmp_path / "a.tags").write_text("1girl, park, park", encoding="utf-8")
+    (tmp_path / "b.txt").write_text("untouched", encoding="utf-8")
+
+    t = DatasetTab()
+    t._folder_path = str(tmp_path)
+    t._trigger_edit.setText("trig")
+    t._prefix_edit.setText("")
+
+    new_text = t._recombine_one(str(img))
+    txt = (tmp_path / "a.txt").read_text(encoding="utf-8")
+    assert new_text == txt
+    assert txt.startswith("trig, ")
+    assert "a girl in a park" in txt
+    assert txt.count("park") == 2          # once in prose, once in tags (deduped)
+    assert (tmp_path / "b.txt").read_text(encoding="utf-8") == "untouched"
+
+
 def test_set_processing_frame_moves_highlight():
     from ui.dataset_tab import DatasetTab
     t = DatasetTab()
@@ -96,6 +124,7 @@ def test_gallery_click_opens_editor_with_card_captions(monkeypatch):
                 pass
         caption_saved = _Sig()
         cast_changed = _Sig()
+        recombine_requested = _Sig()
 
         def __init__(self, items, index, characters, parent):
             opened["items"], opened["index"] = items, index

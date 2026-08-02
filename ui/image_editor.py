@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QTextEdit, QVBoxLayout, QWidget,
 )
 
+from core.caption_lint import format_warning, lint_caption
 from core.dataset_manager import save_caption
 from core import characters as characters_mod
 from ui.collapsible import CollapsibleBox
@@ -22,8 +23,9 @@ PREVIEW = 540
 
 
 class ImageEditorDialog(QDialog):
-    caption_saved = Signal(str, str)   # (txt_path, text)
-    cast_changed = Signal(str)         # (image_name)
+    caption_saved = Signal(str, str)     # (txt_path, text)
+    cast_changed = Signal(str)           # (image_name)
+    recombine_requested = Signal(str)    # (image_path) — rebuild .txt from sidecars
 
     def __init__(self, items, index, characters, parent=None):
         super().__init__(parent)
@@ -36,6 +38,11 @@ class ImageEditorDialog(QDialog):
         self._save_timer.setSingleShot(True)
         self._save_timer.setInterval(400)
         self._save_timer.timeout.connect(self._flush_caption)
+
+        self._sidecar_timer = QTimer(self)
+        self._sidecar_timer.setSingleShot(True)
+        self._sidecar_timer.setInterval(400)
+        self._sidecar_timer.timeout.connect(self._flush_sidecars)
 
         self.setWindowTitle("Edit Image")
         self.setMinimumSize(940, 640)
@@ -93,20 +100,44 @@ class ImageEditorDialog(QDialog):
         self._caption_edit.textChanged.connect(self._on_caption_changed)
         right.addWidget(self._caption_edit, 1)
 
-        # Read-only sidecar accordions (view the .tags / .nl the caption was built from).
+        # Soft conflict warning (e.g. "black hair" + "brown hair" in one caption).
+        self._lint_label = QLabel("")
+        self._lint_label.setWordWrap(True)
+        self._lint_label.setStyleSheet(
+            "color: #e0a93c; font-size: 11px; padding: 2px 4px; "
+            "background-color: #241a0a; border: 1px solid #6e5320; border-radius: 4px;"
+        )
+        self._lint_label.setVisible(False)
+        right.addWidget(self._lint_label)
+
+        # Editable sidecar accordions — the pristine sources Combine rebuilds .txt from.
+        # Edits autosave to the sidecar files; the .txt only changes on Rebuild.
         self._tags_box = CollapsibleBox("Tags · .tags")
-        self._tags_view = QLabel("—")
-        self._tags_view.setWordWrap(True)
-        self._tags_view.setObjectName("label_field")
-        self._tags_box.content_layout().addWidget(self._tags_view)
+        self._tags_edit = QTextEdit()
+        self._tags_edit.setPlaceholderText("— none —")
+        self._tags_edit.setFixedHeight(64)
+        self._tags_edit.textChanged.connect(self._on_sidecar_changed)
+        self._tags_box.content_layout().addWidget(self._tags_edit)
         right.addWidget(self._tags_box)
 
         self._nl_box = CollapsibleBox("Description · .nl")
-        self._nl_view = QLabel("—")
-        self._nl_view.setWordWrap(True)
-        self._nl_view.setObjectName("label_field")
-        self._nl_box.content_layout().addWidget(self._nl_view)
+        self._nl_edit = QTextEdit()
+        self._nl_edit.setPlaceholderText("— none —")
+        self._nl_edit.setFixedHeight(72)
+        self._nl_edit.textChanged.connect(self._on_sidecar_changed)
+        self._nl_box.content_layout().addWidget(self._nl_edit)
         right.addWidget(self._nl_box)
+
+        recombine_row = QHBoxLayout()
+        self._recombine_btn = QPushButton("⟲ Rebuild caption from sidecars")
+        self._recombine_btn.setToolTip(
+            "Re-run Combine for this image only: merge .nl + .tags (with trigger, "
+            "prefix and tag cleanup) into the training .txt above."
+        )
+        self._recombine_btn.clicked.connect(self._on_recombine_clicked)
+        recombine_row.addWidget(self._recombine_btn)
+        recombine_row.addStretch()
+        right.addLayout(recombine_row)
 
         cast_title = QLabel("CHARACTERS IN THIS IMAGE")
         cast_title.setObjectName("label_section")
@@ -150,6 +181,7 @@ class ImageEditorDialog(QDialog):
         if not self._items:
             return
         self._flush_caption()
+        self._flush_sidecars()
         self._index = (self._index + delta) % len(self._items)
         self._load_current()
 
@@ -174,21 +206,25 @@ class ImageEditorDialog(QDialog):
         self._caption_edit.blockSignals(True)
         self._caption_edit.setPlainText(c.get("caption", ""))
         self._caption_edit.blockSignals(False)
+        self._update_lint()
         self._load_sidecars(c["image_path"])
         self._rebuild_cast()
 
     def _load_sidecars(self, image_path: str):
         stem = Path(image_path)
-        for ext, view in ((".tags", self._tags_view), (".nl", self._nl_view)):
+        for ext, edit in ((".tags", self._tags_edit), (".nl", self._nl_edit)):
             side = stem.with_suffix(ext)
             try:
                 text = side.read_text(encoding="utf-8", errors="ignore").strip() if side.exists() else ""
             except OSError:
                 text = ""
-            view.setText(text or "— none —")
+            edit.blockSignals(True)
+            edit.setPlainText(text)
+            edit.blockSignals(False)
 
     # ---- caption ----
     def _on_caption_changed(self):
+        self._update_lint()
         self._save_timer.start()
 
     def _flush_caption(self):
@@ -200,6 +236,52 @@ class ImageEditorDialog(QDialog):
         c["caption"] = text
         save_caption(c["txt_path"], text)
         self.caption_saved.emit(c["txt_path"], text)
+
+    def set_caption_text(self, text: str):
+        """Push a disk-sourced caption (e.g. a fresh Rebuild) into the editor without
+        triggering the debounced re-save of what was just read."""
+        self._save_timer.stop()
+        self._caption_edit.blockSignals(True)
+        self._caption_edit.setPlainText(text)
+        self._caption_edit.blockSignals(False)
+        c = self._current()
+        if c:
+            c["caption"] = text
+        self._update_lint()
+
+    def _update_lint(self):
+        warning = format_warning(lint_caption(self._caption_edit.toPlainText()))
+        self._lint_label.setText(warning)
+        self._lint_label.setVisible(bool(warning))
+
+    # ---- sidecars ----
+    def _on_sidecar_changed(self):
+        self._sidecar_timer.start()
+
+    def _flush_sidecars(self):
+        """Autosave .tags/.nl edits. A sidecar that never existed is not created for
+        empty text — datasets captioned outside AnimaForge stay sidecar-free."""
+        self._sidecar_timer.stop()
+        c = self._current()
+        if not c:
+            return
+        stem = Path(c["image_path"])
+        for ext, edit in ((".tags", self._tags_edit), (".nl", self._nl_edit)):
+            side = stem.with_suffix(ext)
+            text = edit.toPlainText()
+            if not text.strip() and not side.exists():
+                continue
+            try:
+                side.write_text(text, encoding="utf-8")
+            except OSError:
+                pass
+
+    def _on_recombine_clicked(self):
+        c = self._current()
+        if not c:
+            return
+        self._flush_sidecars()   # combine reads from disk — edits must land first
+        self.recombine_requested.emit(c["image_path"])
 
     # ---- cast ----
     def _rebuild_cast(self):
@@ -247,8 +329,10 @@ class ImageEditorDialog(QDialog):
     # ------------------------------------------------------------------
     def reject(self):
         self._flush_caption()
+        self._flush_sidecars()
         super().reject()
 
     def accept(self):
         self._flush_caption()
+        self._flush_sidecars()
         super().accept()

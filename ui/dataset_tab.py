@@ -949,15 +949,37 @@ class DatasetTab(QWidget):
         This is what makes the caption boxes reflect what training will actually read.
         Returns (written, errors).
         """
+        full_prefix, order, rules = self._combine_params()
+        written, errors = combine_all(self._folder_path, prefix=full_prefix, order=order,
+                                      rules=rules)
+        self._refresh_all_captions()
+        return written, errors
+
+    def _combine_params(self) -> tuple:
+        """(full_prefix, order, rules) — the one recipe every Combine path shares."""
         order = "tags_first" if QSettings(SETTINGS_ORG, SETTINGS_APP).value("combine_order", 0, type=int) == 1 else "nl_first"
         trigger = self._trigger_edit.text().strip()
         prefix = self._prefix_edit.text().strip()
         full_prefix = ", ".join(b for b in [trigger, prefix] if b)
         rules = parse_rules(AppSettings().get("caption_rules_json"))
-        written, errors = combine_all(self._folder_path, prefix=full_prefix, order=order,
-                                      rules=rules)
-        self._refresh_all_captions()
-        return written, errors
+        return full_prefix, order, rules
+
+    def _recombine_one(self, image_path: str) -> str:
+        """The editor's per-image Rebuild: merge this image's .nl + .tags into its .txt
+        with the same trigger/prefix/order/rules a folder-wide Combine would use.
+        Returns the rebuilt caption text (read back from disk)."""
+        full_prefix, order, rules = self._combine_params()
+        combine_all(self._folder_path, prefix=full_prefix, order=order,
+                    rules=rules, only=[image_path])
+        txt = Path(image_path).with_suffix(".txt")
+        try:
+            text = txt.read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
+            text = ""
+        card = self._cards_by_name.get(Path(image_path).name)
+        if card:
+            card.refresh_caption(text)
+        return text
 
     def _begin_caption(self, proc):
         """Enter captioning mode: track the process, enable Stop, start the live-refresh timer."""
@@ -1451,6 +1473,8 @@ class DatasetTab(QWidget):
         dlg = ImageEditorDialog(items, index, self._characters, self)
         dlg.caption_saved.connect(self._on_modal_caption_saved)
         dlg.cast_changed.connect(self._on_modal_cast_changed)
+        dlg.recombine_requested.connect(
+            lambda path, d=dlg: d.set_caption_text(self._recombine_one(path)))
         dlg.exec()
 
     def _on_modal_caption_saved(self, txt_path: str, text: str):
