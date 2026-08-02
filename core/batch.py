@@ -53,9 +53,12 @@ class RunDefinition:
     network_alpha: int = 8
     train_text_encoder: bool = False
     target_steps: int = 500
+    resolution: int = 1024            # base training resolution (square)
     enable_bucket: bool = True
     save_state: bool = True
     save_every_n_steps: int = 250
+    save_every_n_epochs: int = 0      # LoRA epoch-save cadence; 0 = auto (epochs // 5)
+    save_last_n_epochs: int = 3       # epoch saves to keep; 0 = keep all
     network_weights: str = ""
     embed_metadata: bool = True
     # Full-restore extras (so a loaded set repopulates the Train tab exactly)
@@ -348,9 +351,12 @@ class BatchRunner(QObject):
                 network_dim=run.network_dim,
                 network_alpha=run.network_alpha,
                 train_text_encoder=run.train_text_encoder,
+                resolution=run.resolution,
                 enable_bucket=enable_bucket,
                 save_state=run.save_state,
                 save_every_n_steps=run.save_every_n_steps,
+                save_every_n_epochs=run.save_every_n_epochs,
+                save_last_n_epochs=run.save_last_n_epochs,
                 network_weights=(run.network_weights or None),
                 training_comment=(run.trigger_word if run.embed_metadata and run.trigger_word else None),
                 extra_args=extra,

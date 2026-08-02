@@ -11,7 +11,6 @@ HARDCODED_CONFIG = {
     "save_model_as": "safetensors",
     "save_precision": "bf16",
     # Training
-    "resolution": "1024,1024",
     "batch_size": 4,
     "mixed_precision": "bf16",
     "gradient_checkpointing": True,
@@ -53,6 +52,20 @@ PRODIGY_OPTIMIZER_ARGS = [
 ]
 
 
+def _saving_block(epochs: int, save_every_n_epochs, save_last_n_epochs) -> dict:
+    """Epoch-save cadence. every: None/0 → auto (a fifth of the run); keep-last:
+    None → 3 (legacy default), 0 → keep all (key omitted so sd-scripts never prunes)."""
+    block = {
+        "save_every_n_epochs": int(save_every_n_epochs) if save_every_n_epochs
+        else max(1, epochs // 5),
+    }
+    if save_last_n_epochs is None:
+        block["save_last_n_epochs"] = 3
+    elif int(save_last_n_epochs) > 0:
+        block["save_last_n_epochs"] = int(save_last_n_epochs)
+    return block
+
+
 def generate_configs(
     output_dir: str,
     lora_name: str,
@@ -67,9 +80,12 @@ def generate_configs(
     network_dim: int = None,
     network_alpha: int = None,
     train_text_encoder: bool = False,
+    resolution: int = None,
     enable_bucket: bool = True,
     save_state: bool = True,
     save_every_n_steps: int = None,
+    save_every_n_epochs: int = None,
+    save_last_n_epochs: int = None,
     resume_state_path: str = None,
     network_weights: str = None,
     training_comment: str = None,
@@ -90,6 +106,11 @@ def generate_configs(
                     and schedule-free) or "adamw8bit"
         learning_rate: only used for adamw8bit (defaults to 1e-4)
         train_text_encoder: if True, also train the Qwen3 encoder (no TE-output caching)
+        resolution: base training resolution (square). None/0 → 1024. The bucket window
+                    stays 512–1536 (Anima's supported span) regardless.
+        save_every_n_epochs: LoRA epoch-save cadence. None/0 → auto (max(1, epochs//5)).
+        save_last_n_epochs:  how many epoch saves to keep. None → 3 (legacy default);
+                    0 → keep all (key omitted).
 
     Returns (main_config_path, dataset_config_path). Raises on error.
     """
@@ -101,6 +122,7 @@ def generate_configs(
     # Low-VRAM: micro-batch shrinks GPU activation memory; gradient accumulation keeps the
     # effective batch (and thus training dynamics / quality / step count) unchanged.
     batch = micro_batch if micro_batch else HARDCODED_CONFIG["batch_size"]
+    res = int(resolution) if resolution else 1024
 
     # ---- Dataset config ----
     # shuffle_caption is OFF: combined captions contain natural-language sentences
@@ -114,7 +136,7 @@ def generate_configs(
         },
         "datasets": [
             {
-                "resolution": 1024,
+                "resolution": res,
                 "batch_size": batch,
                 "subsets": [
                     {
@@ -173,7 +195,7 @@ def generate_configs(
         "output_name": lora_name,
         "save_model_as": HARDCODED_CONFIG["save_model_as"],
         "save_precision": HARDCODED_CONFIG["save_precision"],
-        "resolution": HARDCODED_CONFIG["resolution"],
+        "resolution": f"{res},{res}",
         "train_batch_size": batch,
         "mixed_precision": HARDCODED_CONFIG["mixed_precision"],
         "gradient_checkpointing": HARDCODED_CONFIG["gradient_checkpointing"],
@@ -233,10 +255,7 @@ def generate_configs(
         "dataset_arguments": {
             "dataset_config": str(dataset_toml_path.as_posix()),
         },
-        "saving_arguments": {
-            "save_every_n_epochs": max(1, epochs // 5),
-            "save_last_n_epochs": 3,
-        },
+        "saving_arguments": _saving_block(epochs, save_every_n_epochs, save_last_n_epochs),
     }
 
     with open(main_config_path, "w", encoding="utf-8") as f:
@@ -246,16 +265,18 @@ def generate_configs(
 
 
 def get_config_summary(optimizer: str = "prodigy", network_dim: int = None,
-                       network_alpha: int = None, train_text_encoder: bool = False) -> str:
+                       network_alpha: int = None, train_text_encoder: bool = False,
+                       resolution: int = None) -> str:
     """Return a human-readable summary of the Anima training settings."""
     dim = network_dim if network_dim is not None else HARDCODED_CONFIG["network_dim"]
     alpha = network_alpha if network_alpha is not None else HARDCODED_CONFIG["network_alpha"]
+    res = int(resolution) if resolution else 1024
     opt_label = "Prodigy+ ScheduleFree (auto LR)" if optimizer.lower() == "prodigy" else "AdamW8bit"
     te_label = "DiT + Text Encoder" if train_text_encoder else "DiT only"
     lines = [
         "── Anima Training Settings ──",
         f"  Architecture : Anima (DiT + Qwen3 + Qwen VAE)",
-        f"  Resolution   : {HARDCODED_CONFIG['resolution']}",
+        f"  Resolution   : {res},{res}",
         f"  Batch Size   : {HARDCODED_CONFIG['batch_size']}",
         f"  Precision    : {HARDCODED_CONFIG['mixed_precision']}",
         f"  Optimizer    : {opt_label}",

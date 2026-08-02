@@ -50,6 +50,18 @@ def test_rundefinition_new_fields_default_and_roundtrip():
     assert back.subject_type == "character"
 
 
+def test_rundefinition_resolution_and_epoch_save_defaults():
+    rd = _rd()
+    assert rd.resolution == 1024
+    assert rd.save_every_n_epochs == 0     # 0 = auto (epochs // 5)
+    assert rd.save_last_n_epochs == 3      # legacy default; 0 = keep all
+    back = RunDefinition.from_dict(_rd(resolution=1536, save_every_n_epochs=1,
+                                       save_last_n_epochs=0).to_dict())
+    assert back.resolution == 1536
+    assert back.save_every_n_epochs == 1
+    assert back.save_last_n_epochs == 0
+
+
 def test_from_dict_ignores_unknown_keys():
     rd = RunDefinition.from_dict({"lora_name": "x", "dataset_folder": "C:/d",
                                   "image_count": 5, "bogus_key": 123})
@@ -192,6 +204,28 @@ def _caption_run(tmp_path, name, captioned=False, **kw):
                 output_dir=str(tmp_path / "out"), image_count=4, target_steps=100)
     base.update(kw)
     return RunDefinition(**base)
+
+
+def test_start_training_passes_resolution_and_epoch_cadence(tmp_path, monkeypatch):
+    """The queue must train with the run's own snapshot of the new knobs."""
+    from core.batch import BatchRunner
+    import core.batch as batch_mod
+
+    seen = {}
+    def _capture(**kw):
+        seen.update(kw)
+        return ("cfg", None)
+    monkeypatch.setattr(batch_mod, "generate_configs", _capture)
+
+    runner = BatchRunner()
+    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd: None)
+    run = _caption_run(tmp_path, "ds0", captioned=True, resolution=1536,
+                       save_every_n_epochs=1, save_last_n_epochs=0)
+    runner.start([run])
+
+    assert seen["resolution"] == 1536
+    assert seen["save_every_n_epochs"] == 1
+    assert seen["save_last_n_epochs"] == 0
 
 
 def test_uncaptioned_run_emits_captioning_then_training(tmp_path, monkeypatch):

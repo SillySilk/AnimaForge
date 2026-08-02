@@ -131,6 +131,66 @@ def test_optimizer_preset_round_trips_adamw8bit():
     assert t._lr_row_widget.isHidden()
 
 
+def test_resolution_and_epoch_cadence_round_trip(tmp_path: Path):
+    """Customer feedback round 2: training resolution + epoch-save cadence must
+    survive a RunDefinition load -> widget -> build cycle."""
+    sd = tmp_path / "sd"; sd.mkdir()
+    dit = tmp_path / "dit.safetensors"; dit.write_bytes(b"x")
+    q = tmp_path / "q.safetensors"; q.write_bytes(b"x")
+    vae = tmp_path / "vae.safetensors"; vae.write_bytes(b"x")
+    out = tmp_path / "out"; out.mkdir()
+    ds = tmp_path / "ds"; ds.mkdir()
+
+    rd = RunDefinition(lora_name="R", dataset_folder=str(ds), image_count=3,
+                       resolution=1536, save_every_n_epochs=1, save_last_n_epochs=0)
+    t = TrainTab()
+    t.set_environment(str(sd), str(dit), str(q), str(vae), str(out))
+    t.apply_run_definition(rd)
+    assert t._resolution_combo.currentData() == 1536
+    assert t._save_epochs_spin.value() == 1
+    assert t._keep_epochs_spin.value() == 0
+
+    rd2, msg = t.build_run_definition()
+    assert rd2 is not None, msg
+    assert rd2.resolution == 1536
+    assert rd2.save_every_n_epochs == 1
+    assert rd2.save_last_n_epochs == 0
+
+
+def test_resolution_defaults_to_1024_and_cadence_to_auto():
+    t = TrainTab()
+    assert t._resolution_combo.currentData() == 1024
+    assert t._save_epochs_spin.value() == 0    # "auto"
+    assert t._keep_epochs_spin.value() == 3
+
+
+def test_generated_config_carries_resolution_and_cadence(tmp_path: Path):
+    sd = tmp_path / "sd"; sd.mkdir()
+    dit = tmp_path / "dit.safetensors"; dit.write_bytes(b"x")
+    q = tmp_path / "q.safetensors"; q.write_bytes(b"x")
+    vae = tmp_path / "vae.safetensors"; vae.write_bytes(b"x")
+    out = tmp_path / "out"; out.mkdir()
+    ds = tmp_path / "ds"; ds.mkdir()
+    (ds / "a.png").write_bytes(b"x")
+
+    t = TrainTab()
+    t.set_environment(str(sd), str(dit), str(q), str(vae), str(out))
+    t.set_dataset(str(ds), 12)
+    t._lora_name_edit.setText("Demo")
+    t._set_resolution(512)
+    t._save_epochs_spin.setValue(2)
+    t._keep_epochs_spin.setValue(5)
+
+    import toml
+    t._generate_config()
+    cfg = toml.load(t._config_path)
+    assert cfg["training_arguments"]["resolution"] == "512,512"
+    assert cfg["saving_arguments"]["save_every_n_epochs"] == 2
+    assert cfg["saving_arguments"]["save_last_n_epochs"] == 5
+    ds_cfg = toml.load(t._dataset_config_path)
+    assert ds_cfg["datasets"][0]["resolution"] == 512
+
+
 def test_build_run_definition_fills_empty_prompts_from_captions(tmp_path: Path):
     # load -> caption -> train: the box is empty at launch (load-time autofill ran
     # before captions existed), so the snapshot must self-fill from the dataset.

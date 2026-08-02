@@ -582,6 +582,23 @@ class TrainTab(QWidget):
         run_layout = run_box.content_layout()
         run_layout.setSpacing(6)
 
+        # Training resolution — customer feedback round 2: expose the base bucket
+        # resolution instead of hardwiring 1024. Buckets still span 512–1536.
+        res_row = QHBoxLayout()
+        res_row.addWidget(QLabel("Training resolution:"))
+        self._resolution_combo = QComboBox()
+        for r in (512, 768, 1024, 1280, 1536):
+            label = f"{r} × {r}" + ("  (default)" if r == 1024 else "")
+            self._resolution_combo.addItem(label, r)
+        self._set_resolution(1024)
+        self._resolution_combo.setToolTip(
+            "Base resolution the images are bucketed around. Higher values capture more "
+            "detail but cost VRAM and time; aspect-ratio buckets always span 512–1536."
+        )
+        self._resolution_combo.currentIndexChanged.connect(self._update_config_summary)
+        res_row.addWidget(self._resolution_combo, 1)
+        run_layout.addLayout(res_row)
+
         self._bucket_check = QCheckBox("Enable aspect-ratio bucketing (no cropping)")
         self._bucket_check.setChecked(True)
         run_layout.addWidget(self._bucket_check)
@@ -610,6 +627,33 @@ class TrainTab(QWidget):
         self._save_state_check.toggled.connect(
             lambda b: self._ckpt_steps_spin.setEnabled(b)
         )
+
+        # LoRA epoch-save cadence — customer feedback round 2: user-set instead of the
+        # fixed epochs//5 formula, and "keep last N" so early epochs prune themselves.
+        epoch_save_row = QHBoxLayout()
+        epoch_save_row.addWidget(QLabel("Save LoRA every"))
+        self._save_epochs_spin = QSpinBox()
+        self._save_epochs_spin.setRange(0, 99)
+        self._save_epochs_spin.setValue(0)
+        self._save_epochs_spin.setSpecialValueText("auto")
+        self._save_epochs_spin.setToolTip(
+            "Write a .safetensors LoRA every N epochs. auto = a fifth of the run "
+            "(the old behavior)."
+        )
+        epoch_save_row.addWidget(self._save_epochs_spin)
+        epoch_save_row.addWidget(QLabel("epochs, keep last"))
+        self._keep_epochs_spin = QSpinBox()
+        self._keep_epochs_spin.setRange(0, 99)
+        self._keep_epochs_spin.setValue(3)
+        self._keep_epochs_spin.setSpecialValueText("all")
+        self._keep_epochs_spin.setToolTip(
+            "Older epoch saves are deleted so only the newest N remain — early epochs "
+            "you'll never ship clean themselves up. all = never delete."
+        )
+        epoch_save_row.addWidget(self._keep_epochs_spin)
+        epoch_save_row.addWidget(QLabel("saves"))
+        epoch_save_row.addStretch()
+        run_layout.addLayout(epoch_save_row)
 
         self._resume_check = QCheckBox("Resume from last saved state")
         self._resume_check.setChecked(False)
@@ -983,6 +1027,11 @@ class TrainTab(QWidget):
         idx = self._optimizer_combo.findData((optimizer or "prodigy").lower())
         self._optimizer_combo.setCurrentIndex(idx if idx >= 0 else 0)
 
+    def _set_resolution(self, resolution: int):
+        idx = self._resolution_combo.findData(int(resolution or 1024))
+        # Unknown value (hand-edited set JSON) falls back to the 1024 default entry.
+        self._resolution_combo.setCurrentIndex(idx if idx >= 0 else 2)
+
     def _on_optimizer_changed(self, *_):
         opt = self._current_optimizer()
         self._lr_row_widget.setVisible(opt == "adamw8bit")
@@ -996,6 +1045,7 @@ class TrainTab(QWidget):
             network_dim=self._dim_spin.value(),
             network_alpha=self._alpha_spin.value(),
             train_text_encoder=self._train_text_encoder,
+            resolution=self._resolution_combo.currentData(),
         ))
 
     def _on_subject_changed(self):
@@ -1119,9 +1169,12 @@ class TrainTab(QWidget):
             network_alpha=self._alpha_spin.value(),
             train_text_encoder=self._train_text_encoder,
             target_steps=self._target_steps_spin.value(),
+            resolution=self._resolution_combo.currentData(),
             enable_bucket=self._bucket_check.isChecked(),
             save_state=self._save_state_check.isChecked(),
             save_every_n_steps=self._ckpt_steps_spin.value(),
+            save_every_n_epochs=self._save_epochs_spin.value(),
+            save_last_n_epochs=self._keep_epochs_spin.value(),
             network_weights=self._network_weights_edit.text().strip(),
             embed_metadata=self._metadata_check.isChecked(),
             sample_enabled=self._sample_enable_check.isChecked(),
@@ -1151,9 +1204,12 @@ class TrainTab(QWidget):
         self._alpha_spin.setValue(rd.network_alpha)
         self._train_text_encoder = rd.train_text_encoder
         self._target_steps_spin.setValue(rd.target_steps)
+        self._set_resolution(getattr(rd, "resolution", 1024))
         self._bucket_check.setChecked(rd.enable_bucket)
         self._save_state_check.setChecked(rd.save_state)
         self._ckpt_steps_spin.setValue(rd.save_every_n_steps)
+        self._save_epochs_spin.setValue(getattr(rd, "save_every_n_epochs", 0))
+        self._keep_epochs_spin.setValue(getattr(rd, "save_last_n_epochs", 3))
         self._network_weights_edit.setText(rd.network_weights or "")
         self._metadata_check.setChecked(rd.embed_metadata)
         self._sample_enable_check.setChecked(rd.sample_enabled)
@@ -1506,9 +1562,12 @@ class TrainTab(QWidget):
                 network_dim=self._dim_spin.value(),
                 network_alpha=self._alpha_spin.value(),
                 train_text_encoder=self._train_text_encoder,
+                resolution=self._resolution_combo.currentData(),
                 enable_bucket=self._bucket_check.isChecked(),
                 save_state=self._save_state_check.isChecked(),
                 save_every_n_steps=self._ckpt_steps_spin.value(),
+                save_every_n_epochs=self._save_epochs_spin.value(),
+                save_last_n_epochs=self._keep_epochs_spin.value(),
                 resume_state_path=self._resume_state_path if self._resume_check.isChecked() else None,
                 network_weights=(self._network_weights_edit.text().strip() or None),
                 training_comment=(self._trigger_word if self._metadata_check.isChecked() and self._trigger_word else None),

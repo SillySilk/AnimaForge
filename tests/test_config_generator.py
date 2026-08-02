@@ -206,6 +206,56 @@ def test_no_lowvram_keys_by_default(tmp_path):
     assert "fp8_base" not in t
 
 
+def test_resolution_default_1024(tmp_path):
+    main, ds = _gen(tmp_path)
+    assert main["training_arguments"]["resolution"] == "1024,1024"
+    assert ds["datasets"][0]["resolution"] == 1024
+
+
+def test_resolution_choice_flows_to_both_tomls(tmp_path):
+    main, ds = _gen(tmp_path, resolution=1536)
+    assert main["training_arguments"]["resolution"] == "1536,1536"
+    assert ds["datasets"][0]["resolution"] == 1536
+
+
+def test_resolution_leaves_bucket_range_alone(tmp_path):
+    # The bucket window is Anima's supported span, independent of the base resolution.
+    _, ds = _gen(tmp_path, resolution=512)
+    g = ds["general"]
+    assert g["min_bucket_reso"] == 512 and g["max_bucket_reso"] == 1536
+
+
+def test_epoch_save_cadence_defaults_to_auto_formula(tmp_path):
+    main, _ = _gen(tmp_path)  # epochs=10 -> every 2, keep last 3
+    s = main["saving_arguments"]
+    assert s["save_every_n_epochs"] == 2
+    assert s["save_last_n_epochs"] == 3
+
+
+def test_epoch_save_cadence_override(tmp_path):
+    main, _ = _gen(tmp_path, save_every_n_epochs=1, save_last_n_epochs=8)
+    s = main["saving_arguments"]
+    assert s["save_every_n_epochs"] == 1
+    assert s["save_last_n_epochs"] == 8
+
+
+def test_epoch_save_zero_means_auto(tmp_path):
+    # 0 is the UI spinner's "auto" sentinel — same as not passing it.
+    main, _ = _gen(tmp_path, save_every_n_epochs=0)
+    assert main["saving_arguments"]["save_every_n_epochs"] == 2
+
+
+def test_keep_all_epoch_saves_when_last_n_zero(tmp_path):
+    # 0 = keep every epoch save (omit the pruning key entirely).
+    main, _ = _gen(tmp_path, save_every_n_epochs=1, save_last_n_epochs=0)
+    assert "save_last_n_epochs" not in main["saving_arguments"]
+
+
+def test_summary_shows_chosen_resolution():
+    s = get_config_summary(resolution=1536)
+    assert "1536,1536" in s
+
+
 def test_training_comment(tmp_path):
     main, _ = _gen(tmp_path, training_comment="mychar")
     assert main["training_arguments"]["training_comment"] == "mychar"
