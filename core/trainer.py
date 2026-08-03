@@ -39,6 +39,43 @@ def training_env_overrides(existing=None, windows=None) -> dict:
     return env
 
 
+def libuv_status(existing=None, windows=None) -> str:
+    """One line for the training log: the USE_LIBUV the subprocess really gets, and why.
+
+    Worth logging because the two failure modes are indistinguishable from outside.
+    We deliberately never clobber a USE_LIBUV already in the user's environment, so a
+    stray `USE_LIBUV=1` there silently defeats the fix and the run still dies at exit
+    code 1 — looking exactly like the fix never shipped.
+    """
+    if windows is None:
+        windows = sys.platform.startswith("win")
+    if existing is None:
+        existing = os.environ
+    inherited = existing.get("USE_LIBUV")
+    if inherited:
+        return (f"USE_LIBUV={inherited} (from your environment — AnimaForge left it "
+                f"alone; unset it to let AnimaForge choose)")
+    if windows:
+        return "USE_LIBUV=0 (set by AnimaForge for this run)"
+    return "USE_LIBUV=1 (torch default; not Windows)"
+
+
+def failure_hint(line: str):
+    """Plain-English explanation for a known-cryptic launch failure, else None.
+
+    torch's wording ("PyTorch was build without libuv support") is both misspelled and
+    meaningless to a user whose only other evidence is exit code 1.
+    """
+    low = (line or "").lower()
+    if "libuv" in low and "without libuv" in low:
+        return ("[AnimaForge] That means this PyTorch build has no libuv support. "
+                "AnimaForge normally sets USE_LIBUV=0 to avoid it — seeing this anyway "
+                "means a USE_LIBUV variable in your own Windows environment is "
+                "overriding that. Delete it (System Properties → Environment "
+                "Variables) and relaunch. Rebuilding PyTorch is not necessary.")
+    return None
+
+
 class TrainingProcess(QObject):
     progress_updated = Signal(int)   # current step (0-based int)
     log_line = Signal(str)           # raw log line string
@@ -106,6 +143,7 @@ class TrainingProcess(QObject):
         self._process.start(program, args)
         self.training_started.emit()
         self.log_line.emit(f"[AnimaForge] Launching: {program} {' '.join(args)}")
+        self.log_line.emit(f"[AnimaForge] {libuv_status()}")
 
     def stop(self):
         """Terminate the running training process."""
@@ -135,6 +173,9 @@ class TrainingProcess(QObject):
                 if "impl_abstract" in line:
                     continue
                 self.log_line.emit(line)
+                hint = failure_hint(line)
+                if hint:
+                    self.log_line.emit(hint)
                 step = self._parse_progress(line)
                 if step is not None:
                     self._current_step = step

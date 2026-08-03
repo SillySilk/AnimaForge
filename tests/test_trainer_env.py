@@ -35,3 +35,49 @@ def test_utf8_and_allocator_settings_are_still_applied():
 def test_defaults_read_the_real_environment_without_raising():
     env = training_env_overrides()
     assert env["PYTHONUTF8"] == "1"
+
+
+# --- launch-time diagnostic -------------------------------------------------
+# Training has no on-disk log, so when a run dies at exit code 1 the only evidence
+# is the Train tab's log pane. It must say which USE_LIBUV the subprocess actually
+# got, and where that value came from — "we set it" and "your environment set it,
+# so we left it alone" are the two cases that look identical from the outside.
+
+from core.trainer import libuv_status
+
+
+def test_status_says_animaforge_set_it():
+    s = libuv_status(existing={}, windows=True)
+    assert "USE_LIBUV=0" in s and "AnimaForge" in s
+
+
+def test_status_calls_out_an_inherited_value_that_defeats_the_fix():
+    s = libuv_status(existing={"USE_LIBUV": "1"}, windows=True)
+    assert "USE_LIBUV=1" in s
+    assert "your environment" in s
+
+
+def test_status_reports_an_inherited_zero_as_inherited():
+    s = libuv_status(existing={"USE_LIBUV": "0"}, windows=True)
+    assert "USE_LIBUV=0" in s and "your environment" in s
+
+
+def test_status_on_non_windows_reports_the_torch_default():
+    s = libuv_status(existing={}, windows=False)
+    assert "USE_LIBUV=1" in s
+
+
+from core.trainer import failure_hint
+
+
+def test_the_libuv_error_gets_a_plain_english_hint():
+    line = ("RuntimeError: use_libuv was requested but PyTorch was build without "
+            "libuv support")
+    hint = failure_hint(line)
+    assert hint and "USE_LIBUV" in hint
+    assert "Rebuilding PyTorch is not necessary" in hint
+
+
+def test_ordinary_lines_get_no_hint():
+    assert failure_hint("steps:  33%|###  | 100/3000 [01:32<24:17]") is None
+    assert failure_hint("") is None
