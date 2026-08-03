@@ -35,7 +35,7 @@ A true **one-click pipeline** — **Auto-Tag → Describe → Combine → Train*
 | | |
 |---|---|
 | **🏷 Auto-Tag (WD14)** | Fast, accurate booru-style tags for every image. |
-| **📝 Describe (JoyCaption)** | Natural-language captions that capture what tags miss. |
+| **📝 Describe** | Natural-language captions that capture what tags miss. JoyCaption by default; pick a lighter model in Setup if your GPU is smaller. |
 | **🧩 Combine** | Merges both into clean, training-ready captions. |
 | **🔥 Train** | Kicks off training with the Anima-tuned settings already set. |
 | **🎭 Name Cast** | Name the people in your set once; trigger words stay consistent across the whole dataset. |
