@@ -147,6 +147,13 @@ def test_to_caption_job_sets_tagger_use_onnx_and_combine_prefix():
     assert job.combine_prefix() == "manbag, masterpiece"
 
 
+def test_to_caption_job_carries_describe_model_fields():
+    rd = _rd(describe_model_id="some/repo", describe_cache_dir="D:/m")
+    job = rd.to_caption_job(sdscripts_path="C:/sd", characters_file="", policy="keep")
+    assert job.describe_model_id == "some/repo"
+    assert job.describe_cache_dir == "D:/m"
+
+
 def test_from_dict_on_json_lacking_new_keys_yields_documented_defaults():
     """Old sets/*.json (written before Task 10) carry none of the new caption fields —
     they must still load, falling back to the dataclass defaults."""
@@ -160,6 +167,8 @@ def test_from_dict_on_json_lacking_new_keys_yields_documented_defaults():
     assert rd.tagger_use_onnx is True
     assert rd.style_anchor == ""
     assert rd.caption_policy == "ask"
+    assert rd.describe_model_id == ""
+    assert rd.describe_cache_dir == ""
 
 
 # ----------------------------------------------------------------------------

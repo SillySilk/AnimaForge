@@ -72,6 +72,8 @@ class RunDefinition:
     tagger_model_id: str = ""
     tagger_threshold: float = 0.35
     tagger_use_onnx: bool = True
+    describe_model_id: str = ""
+    describe_cache_dir: str = ""
     style_anchor: str = ""
     caption_policy: str = ASK
     caption_rules: list = field(default_factory=list)
@@ -103,7 +105,10 @@ class RunDefinition:
             order=self.caption_order, chain=chain, policy=policy,
             characters_file=characters_file,
             tagger_model_id=self.tagger_model_id, tagger_threshold=self.tagger_threshold,
-            tagger_use_onnx=self.tagger_use_onnx, caption_rules=self.caption_rules)
+            tagger_use_onnx=self.tagger_use_onnx,
+            describe_model_id=self.describe_model_id,
+            describe_cache_dir=self.describe_cache_dir,
+            caption_rules=self.caption_rules)
 
 
 def resolve_sample_prompts(run: RunDefinition):

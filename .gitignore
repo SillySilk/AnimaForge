@@ -37,6 +37,7 @@ desktop.ini
 *.swp
 *.tmp
 *.log
+logs/
 
 # Runtime training sets (user datasets, captions, crash-recovery marker) — not source
 /sets/

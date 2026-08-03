@@ -461,6 +461,10 @@ class MainWindow(QMainWindow):
         # 📜 beside Start → the same config preview the Options modal offers
         self._home_tab.preview_config_requested.connect(self._train_tab._preview_config)
 
+        # Setup owns the describe-model choice; Home only mirrors it.
+        self._setup_tab.describe_model_changed.connect(
+            self._home_tab.refresh_describe_model)
+
         # Dashboard quick actions
         self._home_tab.navigate.connect(self._switch_tab)
         self._home_tab.autodetect_requested.connect(self._on_home_autodetect)

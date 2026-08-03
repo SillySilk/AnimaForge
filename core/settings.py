@@ -81,6 +81,13 @@ DEFAULTS = {
     # image as done and skips it entirely. Batch resolves "ask" up front, once,
     # for the whole queue; headless has no GUI and degrades "ask" to "keep".
     "caption_existing_policy": ASK,
+    # Describe (natural-language caption) model. index -1 == custom repo ID.
+    # describe_cache_dir "" means auto: let Hugging Face use HF_HUB_CACHE /
+    # HF_HOME / ~/.cache/huggingface/hub, so an already-downloaded model (or a
+    # junction to one) is found instead of re-downloaded.
+    "describe_model_index": 0,
+    "describe_model_custom_id": "",
+    "describe_cache_dir": "",
     "default_train_text_encoder": False,
     # Advanced training (Anima-honored only)
     "weighting_scheme": "sigmoid",

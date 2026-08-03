@@ -53,6 +53,30 @@ def test_plan_stages_honours_chain_order():
     assert got == ["tag", "describe", "combine"]
 
 
+def test_job_carries_describe_model_fields():
+    job = _job(describe_model_id="some/repo", describe_cache_dir="D:/models")
+    assert job.describe_model_id == "some/repo"
+    assert job.describe_cache_dir == "D:/models"
+
+
+def test_job_describe_fields_default_to_empty():
+    job = _job()
+    assert job.describe_model_id == ""
+    assert job.describe_cache_dir == ""
+
+
+def test_describe_stage_passes_model_and_cache_to_the_process(monkeypatch):
+    seen = {}
+    runner = CaptionRunner()
+    monkeypatch.setattr(runner._joy, "start", lambda **kw: seen.update(kw))
+    runner._job = _job(describe_model_id="some/repo", describe_cache_dir="D:/models")
+    runner._stages = [("describe", ["a.png"])]
+    runner._running = True
+    runner._next()
+    assert seen["model_id"] == "some/repo"
+    assert seen["cache_dir"] == "D:/models"
+
+
 def test_plan_stages_raises_on_unknown_stage():
     import pytest
     job = _job(chain=["tag", "bogus", "combine"])

@@ -384,6 +384,8 @@ class HomeTab(QWidget):
         cl.addSpacing(14)
         # stage chips carry their own live done/total counts (per-caption during a run)
         cl.addLayout(self._stage_chip_row())
+        cl.addSpacing(8)
+        cl.addLayout(self._describe_model_row())
         cl.addStretch()
         # primary action; the mass of options lives in the Options modal
         self._run_caption_btn = QPushButton("📝  Run Captioning")
@@ -538,6 +540,39 @@ class HomeTab(QWidget):
                 arr.setStyleSheet("color:#8a5a12;")
                 row.addWidget(arr)
         return row
+
+    def _describe_model_row(self) -> QHBoxLayout:
+        """Read-only note of which model DESCRIBE will use, plus a jump to Setup.
+
+        Display and navigation only — the choice itself is a machine-level setting
+        owned by Setup, so nothing is duplicated off the front.
+        """
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        self._describe_model_line = QLabel("")
+        self._describe_model_line.setObjectName("af_eyebrow_mute")
+        self._describe_model_line.setWordWrap(True)
+        row.addWidget(self._describe_model_line, 1)
+        btn = QPushButton("Change in Setup →")
+        btn.setObjectName("af_btn_ghost")
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.setToolTip("The describe model is a machine-level setting — it lives on Setup.")
+        btn.clicked.connect(lambda: self.navigate.emit(1))
+        row.addWidget(btn, 0)
+        self.refresh_describe_model()
+        return row
+
+    def refresh_describe_model(self):
+        """Show which describe model a run will use. Setup owns the choice."""
+        from core.describe_models import model_is_present, read_describe_defaults
+        try:
+            repo_id, _cache_dir, label = read_describe_defaults()
+            short = label.split(" —")[0]
+            if not model_is_present(repo_id):
+                short += "  ·  not downloaded yet"
+        except Exception:
+            short = "—"
+        self._describe_model_line.setText(f"Describe: {short}")
 
     @staticmethod
     def _stage_count_text(done: int, total: int) -> str:
