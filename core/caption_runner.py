@@ -39,6 +39,11 @@ class CaptionJob:
     tagger_model_id: str = ""
     tagger_threshold: float = 0.35
     tagger_use_onnx: bool = True
+    # Describe model. Empty describe_model_id lets the run script use its own
+    # default; empty describe_cache_dir means auto (Hugging Face decides where
+    # to look), which is what makes an already-downloaded model get found.
+    describe_model_id: str = ""
+    describe_cache_dir: str = ""
     caption_rules: list = field(default_factory=list)
 
     def combine_prefix(self) -> str:
@@ -156,7 +161,9 @@ class CaptionRunner(QObject):
         elif stage == "describe":
             self._joy.start(sdscripts_path=job.sdscripts_path,
                             image_folder=job.dataset_folder,
-                            overwrite=(job.policy == cp.OVERWRITE))
+                            overwrite=(job.policy == cp.OVERWRITE),
+                            model_id=job.describe_model_id,
+                            cache_dir=job.describe_cache_dir)
         elif stage == "combine":
             written, errors = combine_all(
                 job.dataset_folder, prefix=job.combine_prefix(), order=job.order,

@@ -37,6 +37,7 @@ from core.dataset_manager import (
 )
 from core.tagger import TaggerProcess, TAGGER_MODELS, read_tagger_defaults
 from core.joycaption import JoyCaptionProcess
+from core.describe_models import read_describe_defaults
 from core.settings import SETTINGS_ORG, SETTINGS_APP, AppSettings
 from ui.image_editor import ImageEditorDialog
 
@@ -1200,6 +1201,7 @@ class DatasetTab(QWidget):
         model_index, threshold, _overwrite = read_tagger_defaults()
         _label, model_id, use_onnx = TAGGER_MODELS[model_index]
         order = "tags_first" if s.value("combine_order", 0, type=int) == 1 else "nl_first"
+        describe_id, describe_cache, _describe_label = read_describe_defaults()
         return CaptionJob(
             dataset_folder=self._folder_path,
             sdscripts_path=self._sdscripts_path,
@@ -1212,6 +1214,8 @@ class DatasetTab(QWidget):
             tagger_model_id=model_id,
             tagger_threshold=threshold,
             tagger_use_onnx=use_onnx,
+            describe_model_id=describe_id,
+            describe_cache_dir=describe_cache or "",
             caption_rules=parse_rules(AppSettings().get("caption_rules_json")),
         )
 
