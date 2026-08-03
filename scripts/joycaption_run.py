@@ -4,20 +4,57 @@ Writes one sidecar caption file per image (default extension '.nl'), leaving the
 booru-tag '.tags' files and the merged '.txt' files untouched. Intended to be
 launched as a subprocess by core/joycaption.py inside the sd-scripts venv.
 
-Model: fancyfeast/llama-joycaption-beta-one-hf-llava (anime/booru-aware, uncensored).
-The model (~17GB) downloads to a local cache on first run.
+Default model: fancyfeast/llama-joycaption-beta-one-hf-llava (anime/booru-aware,
+uncensored); --model_id takes any Hugging Face vision-language repo that loads
+through AutoModelForImageTextToText. Setup owns the choice; see core/describe_models.py.
+
+Pass --cache_dir ONLY to override where models live. Omitting it lets Hugging Face
+use HF_HUB_CACHE / HF_HOME / ~/.cache/huggingface/hub, so a model already on disk
+(including via a directory junction) is found instead of re-downloaded.
 """
 import argparse
+import subprocess
 import sys
+import traceback
 from pathlib import Path
 
 SUPPORTED = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"}
-MODEL_ID = "fancyfeast/llama-joycaption-beta-one-hf-llava"
+DEFAULT_MODEL_ID = "fancyfeast/llama-joycaption-beta-one-hf-llava"
 DEFAULT_PROMPT = "Write a descriptive caption for this image in a formal tone."
+
+# bf16 needs roughly 2 bytes per parameter plus activations; 4-bit needs about a
+# quarter of that. Used only to decide whether an unquantized fallback is viable.
+_BF16_MIN_FREE_MB = 15000
 
 
 def log(msg: str):
     print(msg, flush=True)
+
+
+def _transformers_version() -> str:
+    try:
+        import transformers
+        return transformers.__version__
+    except Exception:
+        return "unknown"
+
+
+def _free_vram_mb():
+    """Free VRAM in MB, or None when nvidia-smi is absent or unparseable."""
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.free",
+             "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=10)
+        if out.returncode != 0:
+            return None
+        for line in out.stdout.splitlines():
+            digits = "".join(c for c in line if c.isdigit())
+            if digits:
+                return int(digits)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    return None
 
 
 def main():
@@ -27,6 +64,8 @@ def main():
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--prompt", default=DEFAULT_PROMPT)
     parser.add_argument("--cache_dir", default=None, help="model cache directory")
+    parser.add_argument("--model_id", default=DEFAULT_MODEL_ID,
+                        help="Hugging Face repo ID of the describe model")
     parser.add_argument("--max_new_tokens", type=int, default=256)
     parser.add_argument("--max_time", type=float, default=90.0,
                         help="max seconds to spend generating one caption before moving on")
@@ -59,24 +98,37 @@ def main():
         log("[JoyCaption] All images already have captions (use overwrite to redo).")
         return 0
 
-    log(f"[JoyCaption] Loading model {MODEL_ID} (first run downloads ~17GB)…")
+    model_id = args.model_id
+    log(f"[JoyCaption] Loading model {model_id}…")
     try:
         import torch
         from PIL import Image
-        from transformers import LlavaForConditionalGeneration, AutoProcessor
-    except Exception as e:
-        log(f"[JoyCaption] ERROR importing dependencies: {e}")
+        from transformers import AutoModelForImageTextToText, AutoProcessor
+    except Exception:
+        log("[JoyCaption] ERROR importing dependencies:")
+        log(traceback.format_exc())
         return 1
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    cache_dir = args.cache_dir or str(Path(__file__).resolve().parents[1] / "joycaption_model")
+    # cache_dir is only passed when explicitly given. Passing one unconditionally
+    # overrides HF_HUB_CACHE / HF_HOME / ~/.cache/huggingface/hub, which made an
+    # already-downloaded model (or a junction to one) invisible and triggered a
+    # redundant ~17GB download. No flag == Hugging Face looks where it normally does.
+    cache_kw = {"cache_dir": args.cache_dir} if args.cache_dir else {}
+
+    free_mb = _free_vram_mb()
+    log(f"[JoyCaption] device={device} "
+        f"vram_free={'unknown' if free_mb is None else str(free_mb) + 'MB'} "
+        f"torch={torch.__version__} transformers={_transformers_version()}")
+    log(f"[JoyCaption] cache_dir={args.cache_dir or 'auto (Hugging Face default)'}")
 
     try:
-        processor = AutoProcessor.from_pretrained(MODEL_ID, cache_dir=cache_dir)
+        processor = AutoProcessor.from_pretrained(model_id, **cache_kw)
+        model = None
         loaded_4bit = False
-        # JoyCaption Beta One is ~8B params (~16GB in bf16) — too large to run
-        # comfortably on a 16GB GPU, where it spills into shared memory and crawls.
-        # Load it 4-bit (NF4) so it fits in ~6GB and runs fast.
+        # The big describe models are ~8B params (~17GB in bf16) — too large to run
+        # comfortably on a 16GB GPU, where they spill into shared memory and crawl.
+        # Load 4-bit (NF4) so they fit in ~6GB and run fast.
         if device == "cuda" and not args.no_4bit:
             try:
                 from transformers import BitsAndBytesConfig
@@ -90,24 +142,36 @@ def main():
                     # Llava's vision path doesn't dequantize 4-bit weights.
                     llm_int8_skip_modules=["vision_tower", "multi_modal_projector"],
                 )
-                model = LlavaForConditionalGeneration.from_pretrained(
-                    MODEL_ID,
+                model = AutoModelForImageTextToText.from_pretrained(
+                    model_id,
                     quantization_config=bnb,
                     torch_dtype=torch.bfloat16,
                     device_map={"": 0},
-                    cache_dir=cache_dir,
+                    **cache_kw,
                 )
                 loaded_4bit = True
-                log("[JoyCaption] Loaded in 4-bit NF4 (fits 16GB VRAM).")
-            except Exception as e:
-                log(f"[JoyCaption] 4-bit load failed ({e}); falling back to full bf16.")
-        if not loaded_4bit:
-            model = LlavaForConditionalGeneration.from_pretrained(
-                MODEL_ID, torch_dtype=torch.bfloat16, cache_dir=cache_dir,
+                log("[JoyCaption] Loaded in 4-bit NF4.")
+            except Exception:
+                log("[JoyCaption] 4-bit load failed:")
+                log(traceback.format_exc())
+                # Falling through to bf16 silently was the old behaviour, and on a
+                # card that can't hold ~17GB it doesn't fail — it spills to shared
+                # memory and crawls, which looks identical to a hang. Fail fast.
+                if free_mb is not None and free_mb < _BF16_MIN_FREE_MB:
+                    log(f"[JoyCaption] ERROR: only {free_mb}MB VRAM free; the "
+                        f"unquantized fallback needs ~{_BF16_MIN_FREE_MB}MB and would "
+                        f"run unusably slowly. Fix the 4-bit load (is bitsandbytes "
+                        f"installed?) or pick a smaller model in Setup.")
+                    return 1
+        if model is None:
+            model = AutoModelForImageTextToText.from_pretrained(
+                model_id, torch_dtype=torch.bfloat16, **cache_kw,
             ).to(device)
         model.eval()
-    except Exception as e:
-        log(f"[JoyCaption] ERROR loading model: {e}")
+    except Exception:
+        log(f"[JoyCaption] ERROR loading model {model_id}:")
+        log(traceback.format_exc())
+        log("[JoyCaption] Full detail is in logs/caption.log.")
         return 1
 
     log(f"[JoyCaption] Model ready on {device} ({'4-bit' if loaded_4bit else 'bf16'}). "
