@@ -1,3 +1,4 @@
+import os
 import re
 import sys
 from pathlib import Path
@@ -5,6 +6,37 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QProcess, Signal
 
 from utils.proc import apply_no_window
+
+
+def training_env_overrides(existing=None, windows=None) -> dict:
+    """Environment the training subprocess needs on top of the inherited one.
+
+    USE_LIBUV is the important one. `accelerate launch` always builds a c10d TCPStore,
+    and since torch 2.4 the store asks for the libuv backend unless USE_LIBUV=0
+    (torch/distributed/rendezvous.py reads exactly that variable). Plenty of Windows
+    PyTorch wheels are compiled without libuv, so the rendezvous raises "use_libuv was
+    requested but PyTorch was build without libuv support" and the whole run exits with
+    code 1 before a single training step — with nothing on screen but the exit code.
+    The legacy store it falls back to is equivalent here: we launch --num_processes=1,
+    so the store is a single-rank formality either way.
+
+    An explicit USE_LIBUV in the user's own environment always wins, so anyone with a
+    libuv-enabled build can opt back in.
+    """
+    if windows is None:
+        windows = sys.platform.startswith("win")
+    if existing is None:
+        existing = os.environ
+    env = {
+        # Force UTF-8 and suppress known harmless warnings from the subprocess
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUTF8": "1",
+        "PYTHONWARNINGS": "ignore::UserWarning",
+        "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
+    }
+    if windows and not existing.get("USE_LIBUV"):
+        env["USE_LIBUV"] = "0"
+    return env
 
 
 class TrainingProcess(QObject):
@@ -64,13 +96,10 @@ class TrainingProcess(QObject):
         self._process.readyReadStandardOutput.connect(self._on_ready_read)
         self._process.finished.connect(self._on_finished)
 
-        # Force UTF-8 and suppress known harmless warnings from the subprocess
         from PySide6.QtCore import QProcessEnvironment
         env = QProcessEnvironment.systemEnvironment()
-        env.insert("PYTHONIOENCODING", "utf-8")
-        env.insert("PYTHONUTF8", "1")
-        env.insert("PYTHONWARNINGS", "ignore::UserWarning")
-        env.insert("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+        for key, value in training_env_overrides().items():
+            env.insert(key, value)
         self._process.setProcessEnvironment(env)
 
         self._current_step = 0

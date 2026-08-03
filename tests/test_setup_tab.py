@@ -114,6 +114,77 @@ def test_setup_tab_survives_an_unrecognized_policy_in_the_store():
         app.set("caption_existing_policy", prev)
 
 
+class _FakeProc:
+    """Stands in for the QProcess the version probe reads from."""
+    def __init__(self, text):
+        self._text = text.encode("utf-8")
+
+    def readAllStandardOutput(self):
+        return self._text
+
+
+def test_parse_torch_probe_reads_the_version_line():
+    from ui.setup_tab import parse_torch_probe
+    assert parse_torch_probe("torch 2.5.1+cu121 cuda 12.1") == (2, 5)
+    assert parse_torch_probe("torch 2.10.0+cu128 cuda 12.8") == (2, 10)
+    assert parse_torch_probe("ModuleNotFoundError: No module named 'torch'") is None
+    assert parse_torch_probe("") is None
+
+
+def test_detected_pytorch_survives_a_restart():
+    """Home's health row read an in-memory flag that reset to False on every launch, so
+    PyTorch showed as missing until the user clicked Check PyTorch Version — every time.
+    A successful probe is now remembered."""
+    s = SetupTab()
+    prev = s._settings.value("torch_version", "", type=str)
+    try:
+        s._handle_torch_check_output(_FakeProc("torch 2.5.1+cu121 cuda 12.1"))
+        assert s.is_pytorch_ok()
+        assert SetupTab().is_pytorch_ok()        # a fresh instance == an app restart
+    finally:
+        s._settings.setValue("torch_version", prev)
+        s._settings.sync()
+
+
+def test_a_too_old_torch_is_remembered_as_not_ok():
+    s = SetupTab()
+    prev = s._settings.value("torch_version", "", type=str)
+    try:
+        s._handle_torch_check_output(_FakeProc("torch 2.1.0+cu118 cuda 11.8"))
+        assert not s.is_pytorch_ok()
+        assert not SetupTab().is_pytorch_ok()
+    finally:
+        s._settings.setValue("torch_version", prev)
+        s._settings.sync()
+
+
+def test_unparseable_output_does_not_erase_a_known_good_result():
+    """A probe that fails to run (interpreter missing, import error) must not flip a
+    previously-detected PyTorch to 'missing' on the Home health row."""
+    s = SetupTab()
+    prev = s._settings.value("torch_version", "", type=str)
+    try:
+        s._handle_torch_check_output(_FakeProc("torch 2.5.1+cu121 cuda 12.1"))
+        s._handle_torch_check_output(_FakeProc("Traceback (most recent call last):"))
+        assert s.is_pytorch_ok()
+    finally:
+        s._settings.setValue("torch_version", prev)
+        s._settings.sync()
+
+
+def test_probe_emits_status_change_so_home_can_refresh():
+    s = SetupTab()
+    prev = s._settings.value("torch_version", "", type=str)
+    seen = []
+    s.pytorch_status_changed.connect(lambda: seen.append(True))
+    try:
+        s._handle_torch_check_output(_FakeProc("torch 2.5.1+cu121 cuda 12.1"))
+        assert seen
+    finally:
+        s._settings.setValue("torch_version", prev)
+        s._settings.sync()
+
+
 def test_startup_update_toggle_roundtrips():
     s = SetupTab()
     prev = s._app.get("startup_update_check")

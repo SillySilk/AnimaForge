@@ -435,6 +435,11 @@ class MainWindow(QMainWindow):
         # When setup settings change, sync to train tab
         self._setup_tab.settings_changed.connect(self._sync_environment_to_train)
 
+        # The PyTorch probe finishes a couple of seconds after launch — redraw Home's
+        # health row when it lands rather than waiting for a tab switch.
+        self._setup_tab.pytorch_status_changed.connect(
+            lambda: self._home_tab.refresh(self._collect_home_context()))
+
         # Train tab status messages
         self._train_tab.status_message.connect(self._status_bar.showMessage)
 
@@ -973,6 +978,14 @@ class MainWindow(QMainWindow):
             f"AnimaForge updated to the latest main.\nRestart AnimaForge to finish.{extra}")
 
     # ---- self-update (silent startup check) ----
+
+    def start_background_checks(self):
+        """Kick off the startup probes that need a live app (see main.build_app).
+
+        Deliberately not in __init__: it spawns a real `import torch` subprocess, which
+        every widget test that builds a MainWindow would otherwise pay for.
+        """
+        self._setup_tab.start_background_torch_check()
 
     def _app_root(self):
         from pathlib import Path

@@ -49,6 +49,9 @@ def build_app(argv=None):
     apply_app_font(app)
 
     window = MainWindow()
+    # Detect PyTorch in the background so Home's health row is accurate on arrival —
+    # it used to need a manual Check PyTorch Version click on every launch.
+    window.start_background_checks()
     return app, window
 
 

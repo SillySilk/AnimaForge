@@ -49,6 +49,21 @@ QWEN_VAE_FILENAME = "qwen_image_vae.safetensors"
 PREFERRED_DIT = "anima-base-v1.0.safetensors"
 
 
+# Minimum PyTorch the trainer needs.
+MIN_TORCH = (2, 5)
+
+
+def parse_torch_probe(text: str):
+    """(major, minor) from a `torch X.Y.Z cuda A.B` probe line, or None when absent.
+
+    None means "the probe told us nothing" (interpreter missing, import error, a
+    traceback) — deliberately distinct from "an old torch", so a failed probe never
+    erases a previously detected install.
+    """
+    m = re.search(r"torch\s+(\d+)\.(\d+)", text or "")
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
 def torch_upgrade_plan(rtx50: bool) -> tuple:
     """(pip requirement, wheel index, human label) for the PyTorch upgrade.
 
@@ -64,6 +79,7 @@ def torch_upgrade_plan(rtx50: bool) -> tuple:
 class SetupTab(QWidget):
     settings_changed = Signal()
     describe_model_changed = Signal()
+    pytorch_status_changed = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -73,7 +89,10 @@ class SetupTab(QWidget):
         self._save_timer.setInterval(1000)
         self._save_timer.timeout.connect(self._save_settings)
         self._torch_process = None
-        self._pytorch_ok = False
+        # Restored from the last successful probe, not reset to False: Home reads this
+        # for its health row, and starting cold made PyTorch look missing on every
+        # launch until the user clicked Check PyTorch Version again.
+        self._pytorch_ok = self._cached_pytorch_ok()
         self._app = AppSettings()
         self._build_ui()
         self._load_settings()
@@ -476,13 +495,30 @@ class SetupTab(QWidget):
         proc.readyReadStandardOutput.connect(lambda p=proc: self._handle_torch_check_output(p))
         proc.start(py, ["-c", "import torch;print('torch',torch.__version__,'cuda',torch.version.cuda)"])
 
+    def start_background_torch_check(self):
+        """Probe PyTorch once at app start so Home's health row is right without a click.
+
+        Runs off the UI thread (QProcess), so the ~2s `import torch` never blocks startup.
+        The cached result from the previous run is already showing by then; this only
+        corrects it when the user's install actually changed.
+        """
+        self._check_torch_version()
+
+    def _cached_pytorch_ok(self) -> bool:
+        ver = parse_torch_probe(self._settings.value("torch_version", "", type=str))
+        return bool(ver and ver >= MIN_TORCH)
+
     def _handle_torch_check_output(self, p):
         text = bytes(p.readAllStandardOutput()).decode("utf-8", "replace").strip()
         if text:
             self._torch_log.append(text)
-        m = re.search(r"torch\s+(\d+)\.(\d+)", text)
-        if m:
-            self._pytorch_ok = (int(m.group(1)), int(m.group(2))) >= (2, 5)
+        ver = parse_torch_probe(text)
+        if ver:
+            self._pytorch_ok = ver >= MIN_TORCH
+            # Remember it across restarts (see __init__), then tell Home to redraw.
+            self._settings.setValue("torch_version", text)
+            self._settings.sync()
+            self.pytorch_status_changed.emit()
         # Blackwell needs cu128 wheels: a cu121/cu124 torch on an RTX 50-series card
         # fails at run time with "no kernel image is available".
         cu = re.search(r"cuda\s+(\d+)\.(\d+)", text)
@@ -536,7 +572,8 @@ class SetupTab(QWidget):
     def _on_torch_finished(self, exit_code, _status):
         self._upgrade_torch_btn.setEnabled(True)
         if exit_code == 0:
-            self._torch_log.append("✔ PyTorch upgrade finished. Click 'Check PyTorch Version' to confirm.")
+            self._torch_log.append("✔ PyTorch upgrade finished. Re-checking version…")
+            self._check_torch_version()   # keeps the remembered version honest
         else:
             self._torch_log.append(f"✘ Upgrade failed (exit code {exit_code}).")
 
