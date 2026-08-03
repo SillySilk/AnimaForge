@@ -30,7 +30,12 @@ from PySide6.QtWidgets import (
 )
 
 from core.caption_rules import dump_rules, parse_rules
+from core.describe_models import (
+    CUSTOM_INDEX, DESCRIBE_MODELS, entry_for_repo, model_is_present,
+    read_describe_defaults, valid_repo_id,
+)
 from core.env import subprocess_python
+from core.gpu_check import free_vram_mb
 from core.settings import AppSettings
 from ui.forge_modal import ForgeModal
 from utils.proc import apply_no_window
@@ -58,6 +63,7 @@ def torch_upgrade_plan(rtx50: bool) -> tuple:
 
 class SetupTab(QWidget):
     settings_changed = Signal()
+    describe_model_changed = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -277,6 +283,9 @@ class SetupTab(QWidget):
         output_row.addWidget(output_browse)
         output_layout.addLayout(output_row)
         layout.addWidget(output_group)
+
+        # Which model writes the natural-language captions.
+        layout.addWidget(self._build_describe_group())
 
         # The Bench — optional service.
         layout.addWidget(self._build_forge_group())
@@ -753,6 +762,118 @@ class SetupTab(QWidget):
         self._app.set(tp.SETTINGS_KEY, tp.remove_custom(self._app.get(tp.SETTINGS_KEY), name))
         self._refresh_presets_list()
 
+    def _build_describe_group(self) -> QGroupBox:
+        """Which model writes the .nl captions, and where its weights live.
+
+        This is a machine-level setting, not a per-run one — it belongs here for the
+        same reason the sd-scripts path does. Home shows the choice read-only and
+        links back here, so no control is duplicated off the front.
+        """
+        g = QGroupBox("Describe Model (natural-language captions)")
+        v = QVBoxLayout(g)
+        v.setSpacing(8)
+        hint = QLabel(
+            "The model that writes the .nl sentence for each image. If you already have "
+            "it in your Hugging Face cache — including through a junction — it is used "
+            "as-is, with no re-download.")
+        hint.setObjectName("label_field")
+        hint.setWordWrap(True)
+        v.addWidget(hint)
+
+        model_row = QHBoxLayout()
+        model_row.addWidget(QLabel("Model:"))
+        self._describe_combo = QComboBox()
+        for label, _repo, _vram, _quant in DESCRIBE_MODELS:
+            self._describe_combo.addItem(label)
+        self._describe_combo.addItem("Custom (Hugging Face repo ID)…")
+        model_row.addWidget(self._describe_combo, 1)
+        v.addLayout(model_row)
+
+        custom_row = QHBoxLayout()
+        custom_row.addWidget(QLabel("Repo ID:"))
+        self._describe_custom = QLineEdit()
+        self._describe_custom.setPlaceholderText("org/model-name")
+        custom_row.addWidget(self._describe_custom, 1)
+        v.addLayout(custom_row)
+
+        cache_row = QHBoxLayout()
+        cache_row.addWidget(QLabel("Model folder:"))
+        self._describe_cache = QLineEdit()
+        self._describe_cache.setPlaceholderText("Auto — Hugging Face cache")
+        cache_browse = QPushButton("Browse…")
+        cache_browse.setFixedWidth(108)
+        cache_browse.clicked.connect(self._browse_describe_cache)
+        cache_clear = QPushButton("Clear")
+        cache_clear.setFixedWidth(80)
+        cache_clear.clicked.connect(self._clear_describe_cache)
+        cache_row.addWidget(self._describe_cache, 1)
+        cache_row.addWidget(cache_browse)
+        cache_row.addWidget(cache_clear)
+        v.addLayout(cache_row)
+
+        self._describe_status = QLabel("")
+        self._describe_status.setObjectName("label_field")
+        self._describe_status.setWordWrap(True)
+        v.addWidget(self._describe_status)
+
+        self._describe_combo.currentIndexChanged.connect(self._on_describe_changed)
+        self._describe_custom.editingFinished.connect(self._on_describe_changed)
+        self._describe_cache.editingFinished.connect(self._on_describe_changed)
+
+        self._load_describe_settings()
+        return g
+
+    def _load_describe_settings(self):
+        idx = self._app.get("describe_model_index")
+        custom_row = self._describe_combo.count() - 1
+        self._describe_combo.setCurrentIndex(custom_row if idx == CUSTOM_INDEX else idx)
+        self._describe_custom.setText(self._app.get("describe_model_custom_id"))
+        self._describe_cache.setText(self._app.get("describe_cache_dir"))
+        self._on_describe_changed()
+
+    def _browse_describe_cache(self):
+        d = QFileDialog.getExistingDirectory(
+            self, "Describe model folder", self._describe_cache.text().strip())
+        if d:
+            self._describe_cache.setText(d)
+            self._on_describe_changed()
+
+    def _clear_describe_cache(self):
+        self._describe_cache.clear()
+        self._on_describe_changed()
+
+    def _on_describe_changed(self):
+        """Persist the picker, then report what a run would actually load."""
+        custom_row = self._describe_combo.count() - 1
+        is_custom = self._describe_combo.currentIndex() == custom_row
+        self._describe_custom.setEnabled(is_custom)
+        index = CUSTOM_INDEX if is_custom else self._describe_combo.currentIndex()
+
+        custom_id = self._describe_custom.text().strip()
+        if is_custom and custom_id and not valid_repo_id(custom_id):
+            self._describe_status.setText(
+                "⚠ A Hugging Face repo ID looks like 'org/model-name'.")
+            return
+
+        explicit = self._describe_cache.text().strip()
+        self._app.set("describe_model_index", index)
+        self._app.set("describe_model_custom_id", custom_id)
+        self._app.set("describe_cache_dir", explicit)
+
+        repo_id, cache_dir, _label = read_describe_defaults(self._app)
+        where = cache_dir or "Hugging Face cache (HF_HUB_CACHE / HF_HOME / ~/.cache)"
+        parts = [f"{repo_id} → {where}",
+                 "Already downloaded."
+                 if model_is_present(repo_id, explicit) else "Downloads on first use."]
+
+        entry = entry_for_repo(repo_id)
+        free_mb = free_vram_mb()
+        if entry and free_mb is not None and free_mb < entry[2] * 1024:
+            parts.append(f"⚠ {free_mb // 1024}GB VRAM free; this model wants "
+                         f"{entry[2]}GB. It may be slow or fail to load.")
+        self._describe_status.setText("   ".join(parts))
+        self.describe_model_changed.emit()
+
     def _build_forge_group(self) -> QGroupBox:
         g = QGroupBox("Forge / Stable Diffusion API (deliver + test-render)")
         v = QVBoxLayout(g)
@@ -1187,8 +1308,9 @@ class SetupTab(QWidget):
             "    • Qwen3 text encoder: qwen_3_06b_base.safetensors\n"
             "    • Qwen-Image VAE: qwen_image_vae.safetensors\n"
             "    From https://huggingface.co/circlestone-labs/Anima\n\n"
-            "Step 7 — JoyCaption (natural-language captions)\n"
-            "    Already uses transformers in the venv; the model downloads on first use.\n\n"
+            "Step 7 — Describe model (natural-language captions)\n"
+            "    Pick it in 'Describe Model' above. If you already have the model in your\n"
+            "    Hugging Face cache (including via a junction), it is used as-is.\n\n"
             "Note: xformers is NOT used by Anima (it uses SDPA).\n"
         )
         layout.addWidget(instructions)

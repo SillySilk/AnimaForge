@@ -57,8 +57,39 @@ def resolve_model_id(index: int, custom_id: str) -> str:
     return DEFAULT_MODEL_ID
 
 
-def legacy_has_snapshot(cache_dir, repo_id: str) -> bool:
-    """True when `cache_dir` already holds a non-empty snapshot for `repo_id`.
+# Weight file extensions. A snapshot without one of these is not loadable no
+# matter what else it contains.
+_WEIGHT_SUFFIXES = (".safetensors", ".bin", ".pth", ".gguf")
+
+
+def _revision_is_loadable(rev_dir: Path) -> bool:
+    """True when a snapshot revision holds a config AND real, non-empty weights.
+
+    "Any file present" is far too weak a test. An aborted download leaves the
+    full cache skeleton behind — refs/main pointing at a valid revision whose
+    snapshot holds nothing but a stray 195-byte processor_config.json. Treating
+    that as "already downloaded" is exactly how a run reaches from_pretrained and
+    dies there, which is the "won't initialize" symptom this module exists to fix.
+    Symlinks are followed (is_file/stat), so Linux blob-linked caches work too.
+    """
+    try:
+        files = [f for f in rev_dir.rglob("*") if f.is_file()]
+    except OSError:
+        return False
+    if not any(f.name == "config.json" for f in files):
+        return False
+    for f in files:
+        if f.suffix.lower() in _WEIGHT_SUFFIXES:
+            try:
+                if f.stat().st_size > 0:
+                    return True
+            except OSError:
+                continue
+    return False
+
+
+def has_model_snapshot(cache_dir, repo_id: str) -> bool:
+    """True when `cache_dir` already holds a loadable snapshot for `repo_id`.
 
     Repo-specific on purpose: a folder holding a DIFFERENT model must not be
     reused, or switching models would silently load the wrong weights.
@@ -67,7 +98,8 @@ def legacy_has_snapshot(cache_dir, repo_id: str) -> bool:
     if not snapshots.is_dir():
         return False
     try:
-        return any(any(rev.iterdir()) for rev in snapshots.iterdir() if rev.is_dir())
+        return any(_revision_is_loadable(rev)
+                   for rev in snapshots.iterdir() if rev.is_dir())
     except OSError:
         return False
 
@@ -83,7 +115,7 @@ def resolve_cache_dir(explicit: str, legacy_dir, repo_id: str):
     explicit = (explicit or "").strip()
     if explicit:
         return explicit
-    if legacy_has_snapshot(legacy_dir, repo_id):
+    if has_model_snapshot(legacy_dir, repo_id):
         return str(legacy_dir)
     return None
 
@@ -110,9 +142,9 @@ def model_is_present(repo_id: str, explicit: str = "") -> bool:
     """True when this model is already downloaded wherever it would be loaded from."""
     explicit = (explicit or "").strip()
     if explicit:
-        return legacy_has_snapshot(Path(explicit), repo_id)
-    return (legacy_has_snapshot(legacy_cache_dir(), repo_id)
-            or legacy_has_snapshot(hf_default_cache_dir(), repo_id))
+        return has_model_snapshot(Path(explicit), repo_id)
+    return (has_model_snapshot(legacy_cache_dir(), repo_id)
+            or has_model_snapshot(hf_default_cache_dir(), repo_id))
 
 
 def read_describe_defaults(settings=None):
