@@ -12,7 +12,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal
 
-from core import caption_manifest, caption_policy as cp
+from core import af_log, caption_manifest, caption_policy as cp
 from core.caption_progress import parse_progress
 from core.dataset_manager import combine_all
 from core.joycaption import JoyCaptionProcess
@@ -132,6 +132,7 @@ class CaptionRunner(QObject):
             self._only_file = None
 
     def _on_log(self, line: str):
+        af_log.append(line)
         self.log_line.emit(line)
         t = parse_progress(line)
         if t is not None:
