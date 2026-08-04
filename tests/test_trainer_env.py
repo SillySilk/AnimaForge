@@ -115,3 +115,81 @@ def test_status_with_force_but_nothing_to_override_reads_normally():
 def test_status_on_non_windows_still_reports_an_inherited_value():
     s = libuv_status(existing={"USE_LIBUV": "1"}, windows=False)
     assert "USE_LIBUV=1" in s and "your environment" in s
+
+
+# --- Windows registry helpers -------------------------------------------
+# The persisted (registry) USE_LIBUV is distinct from os.environ: a running
+# AnimaForge process only sees the value it inherited at launch. `reg` is
+# injectable so these tests never touch the real Windows registry.
+
+from core.trainer import (
+    clear_windows_user_env_libuv,
+    windows_system_env_libuv,
+    windows_user_env_libuv,
+)
+
+
+class _FakeKey:
+    def __init__(self, store):
+        self._store = store
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+class _FakeWinReg:
+    """Stands in for the winreg module's shape: HKEY_* constants, OpenKey/QueryValueEx/
+    DeleteValue. Two independent stores model the User vs. System registry hives."""
+    HKEY_CURRENT_USER = "HKCU"
+    HKEY_LOCAL_MACHINE = "HKLM"
+    KEY_SET_VALUE = 0x2
+
+    def __init__(self, user=None, system=None):
+        self._user = dict(user or {})
+        self._system = dict(system or {})
+
+    def OpenKey(self, hive, subkey, *args, **kwargs):
+        store = self._user if hive == self.HKEY_CURRENT_USER else self._system
+        return _FakeKey(store)
+
+    def QueryValueEx(self, key, name):
+        if name not in key._store:
+            raise FileNotFoundError(name)
+        return key._store[name], 1
+
+    def DeleteValue(self, key, name):
+        if name not in key._store:
+            raise FileNotFoundError(name)
+        del key._store[name]
+
+
+def test_reads_a_user_scope_value():
+    reg = _FakeWinReg(user={"USE_LIBUV": "1"})
+    assert windows_user_env_libuv(reg=reg) == "1"
+
+
+def test_returns_none_when_nothing_is_set():
+    assert windows_user_env_libuv(reg=_FakeWinReg()) is None
+    assert windows_system_env_libuv(reg=_FakeWinReg()) is None
+
+
+def test_reads_a_system_scope_value_separately_from_user_scope():
+    reg = _FakeWinReg(system={"USE_LIBUV": "1"})
+    assert windows_system_env_libuv(reg=reg) == "1"
+    assert windows_user_env_libuv(reg=reg) is None
+
+
+def test_clear_deletes_the_user_scope_value_only():
+    reg = _FakeWinReg(user={"USE_LIBUV": "1"}, system={"USE_LIBUV": "1"})
+    clear_windows_user_env_libuv(reg=reg, broadcast=False)
+    assert windows_user_env_libuv(reg=reg) is None
+    assert windows_system_env_libuv(reg=reg) == "1"   # system scope is never touched
+
+
+def test_clear_is_safe_to_call_when_nothing_is_set():
+    reg = _FakeWinReg()
+    clear_windows_user_env_libuv(reg=reg, broadcast=False)   # must not raise
+    assert windows_user_env_libuv(reg=reg) is None

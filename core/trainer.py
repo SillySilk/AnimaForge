@@ -1,6 +1,10 @@
 import os
 import re
 import sys
+try:
+    import winreg
+except ImportError:  # pragma: no cover - winreg only exists on Windows
+    winreg = None
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QProcess, Signal
@@ -80,6 +84,79 @@ def failure_hint(line: str):
                 "overriding that. Delete it (System Properties → Environment "
                 "Variables) and relaunch. Rebuilding PyTorch is not necessary.")
     return None
+
+
+_USER_ENV_SUBKEY = "Environment"
+_SYSTEM_ENV_SUBKEY = r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"
+
+
+def _read_registry_env_value(hive_attr: str, subkey: str, reg=None):
+    """USE_LIBUV from one registry hive, or None if unset/off Windows.
+
+    `reg` defaults to the real `winreg` module; tests inject a fake so nothing here
+    ever touches the actual Windows registry.
+    """
+    reg = reg or winreg
+    if reg is None:
+        return None
+    hive = getattr(reg, hive_attr)
+    try:
+        with reg.OpenKey(hive, subkey) as key:
+            value, _ = reg.QueryValueEx(key, "USE_LIBUV")
+            return str(value)
+    except (FileNotFoundError, OSError):
+        return None
+
+
+def windows_user_env_libuv(reg=None):
+    """USE_LIBUV persisted in the Windows *User* environment, or None if unset.
+
+    This is the registry value, not the current process's os.environ — a running
+    AnimaForge inherited its environment at launch and won't see a later registry
+    edit until it restarts.
+    """
+    return _read_registry_env_value("HKEY_CURRENT_USER", _USER_ENV_SUBKEY, reg)
+
+
+def windows_system_env_libuv(reg=None):
+    """USE_LIBUV persisted in the Windows *System* environment, or None if unset.
+
+    Read-only: AnimaForge never clears this scope (it needs admin elevation and
+    affects every app on the machine, not just training).
+    """
+    return _read_registry_env_value("HKEY_LOCAL_MACHINE", _SYSTEM_ENV_SUBKEY, reg)
+
+
+def clear_windows_user_env_libuv(reg=None, broadcast=True) -> None:
+    """Delete USE_LIBUV from the Windows *User* environment. No-op if unset or off Windows.
+
+    Only ever touches HKEY_CURRENT_USER — never System scope. The caller is
+    responsible for confirming with the user first; this performs the deletion
+    unconditionally. `broadcast=False` skips notifying other processes (tests only).
+    """
+    reg = reg or winreg
+    if reg is None:
+        return
+    try:
+        with reg.OpenKey(reg.HKEY_CURRENT_USER, _USER_ENV_SUBKEY, 0, reg.KEY_SET_VALUE) as key:
+            reg.DeleteValue(key, "USE_LIBUV")
+    except (FileNotFoundError, OSError):
+        return
+    if broadcast:
+        _broadcast_environment_change()
+
+
+def _broadcast_environment_change() -> None:
+    """Tell other running processes the environment changed. Best-effort, never raises."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        result = ctypes.c_long()
+        ctypes.windll.user32.SendMessageTimeoutW(
+            0xFFFF, 0x1A, 0, "Environment", 0x0002, 5000, ctypes.byref(result))
+    except Exception:
+        pass
 
 
 class TrainingProcess(QObject):
