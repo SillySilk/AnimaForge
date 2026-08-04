@@ -528,20 +528,28 @@ class SetupTab(QWidget):
         # even though training worked fine.
         return subprocess_python(self.get_sdscripts_path())
 
-    def _check_torch_version(self):
+    def _check_torch_version(self) -> bool:
+        """Launch the async version probe. Returns whether a probe was actually
+        started — False on either early-return path (no interpreter found, or a
+        PyTorch operation already in flight) means `_handle_torch_check_output`
+        will never be called for this invocation. Callers that need to know
+        whether a re-probe is genuinely in flight (e.g. Reset's deferred cache
+        clear) rely on this return value.
+        """
         py = self._venv_python()
         if not py or not Path(py).is_file():
             self._torch_log.append("Could not find a training python interpreter. Check the install (.venv) or set the sd-scripts path.")
-            return
+            return False
         if self._torch_process is not None and self._torch_process.state() != QProcess.NotRunning:
             self._torch_log.append("A PyTorch operation is already running.")
-            return
+            return False
         self._torch_log.append("Checking PyTorch version…")
         proc = QProcess(self)
         apply_no_window(proc)  # no console window pop-up on Windows
         proc.setProcessChannelMode(QProcess.MergedChannels)
         proc.readyReadStandardOutput.connect(lambda p=proc: self._handle_torch_check_output(p))
         proc.start(py, ["-c", "import torch;print('torch',torch.__version__,'cuda',torch.version.cuda)"])
+        return True
 
     def start_background_torch_check(self):
         """Probe PyTorch once at app start so Home's health row is right without a click.
@@ -593,10 +601,15 @@ class SetupTab(QWidget):
         # Defer the cache clear until the re-probe actually resolves (see
         # _handle_torch_check_output) — clearing it here, before the async probe has
         # even started, could strand the last known-good state if the probe bails
-        # early (no interpreter) or never calls back at all.
-        self._reset_pending = True
+        # early (no interpreter) or never calls back at all. Only arm the pending
+        # flag when _check_torch_version actually launched a probe: if it took an
+        # early-return path instead, there is no re-probe coming for THIS call, and
+        # leaving the flag set would let some later, unrelated probe (a manual Check
+        # PyTorch Version click, a post-Upgrade re-check) get misread as Reset's own
+        # re-probe — and destructively clear known-good state if that unrelated
+        # probe's output happens to be ambiguous.
         self._torch_log.append("Resetting training environment…")
-        self._check_torch_version()
+        self._reset_pending = self._check_torch_version()
         self._refresh_libuv_status()
 
     def _handle_torch_check_output(self, p):

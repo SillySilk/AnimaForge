@@ -275,15 +275,22 @@ def test_clear_libuv_logs_a_failure_message_when_the_delete_fails(monkeypatch):
 
 
 def test_reset_training_environment_clears_cached_version_and_reprobes(monkeypatch):
+    """_check_torch_version's real QProcess callback is asynchronous — it fires well
+    after _check_torch_version() itself has returned and _reset_pending has been set.
+    Mock it that way here (return True = "a probe launched") rather than calling
+    _handle_torch_check_output synchronously from inside the mock, which would race
+    the `self._reset_pending = self._check_torch_version()` assignment in
+    _reset_training_environment and consume the flag before it's ever set."""
     s = SetupTab()
     prev = s._settings.value("torch_version", "", type=str)
     try:
         s._handle_torch_check_output(_FakeProc("torch 2.5.1+cu121 cuda 12.1"))
         assert s.is_pytorch_ok()
-        def fake_check():
-            s._handle_torch_check_output(_FakeProc("Traceback (most recent call last):"))
-        monkeypatch.setattr(s, "_check_torch_version", fake_check)
+        monkeypatch.setattr(s, "_check_torch_version", lambda: True)  # simulates a probe launching
         s._reset_training_environment()
+        assert s._reset_pending is True
+        # ...simulate that probe's async callback resolving later, with unparseable output.
+        s._handle_torch_check_output(_FakeProc("Traceback (most recent call last):"))
         assert s._settings.value("torch_version", "", type=str) == ""
         assert not s.is_pytorch_ok()
     finally:
@@ -303,6 +310,29 @@ def test_reset_training_environment_does_not_strand_a_known_good_result_if_the_r
         assert s.is_pytorch_ok()
         monkeypatch.setattr(s, "_check_torch_version", lambda: None)  # never calls back
         s._reset_training_environment()
+        assert s.is_pytorch_ok()
+        assert s._settings.value("torch_version", "", type=str) != ""
+    finally:
+        s._settings.setValue("torch_version", prev)
+        s._settings.sync()
+
+
+def test_reset_training_environment_does_not_leak_pending_state_to_a_later_unrelated_probe(monkeypatch):
+    """A Reset whose own probe never launches (broken interpreter) must not leave
+    _reset_pending set for some LATER, unrelated probe to consume — that would let
+    an unrelated ambiguous probe destructively clear known-good state, which is
+    exactly the bug Finding 1 was fixed to prevent for this call site."""
+    s = SetupTab()
+    prev = s._settings.value("torch_version", "", type=str)
+    try:
+        s._handle_torch_check_output(_FakeProc("torch 2.5.1+cu121 cuda 12.1"))
+        assert s.is_pytorch_ok()
+        monkeypatch.setattr(s, "_venv_python", lambda: "")  # forces the "no interpreter" early return
+        s._reset_training_environment()
+        assert s._reset_pending is False
+        # A later, entirely unrelated probe (e.g. a manual "Check PyTorch Version"
+        # click) whose output happens to be ambiguous must NOT wipe the cache.
+        s._handle_torch_check_output(_FakeProc("Traceback (most recent call last):"))
         assert s.is_pytorch_ok()
         assert s._settings.value("torch_version", "", type=str) != ""
     finally:
