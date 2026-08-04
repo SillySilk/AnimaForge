@@ -37,6 +37,7 @@ from core.describe_models import (
 from core.env import subprocess_python
 from core.gpu_check import free_vram_mb
 from core.trainer import (
+    clear_windows_user_env_libuv,
     libuv_status,
     windows_system_env_libuv,
     windows_user_env_libuv,
@@ -315,6 +316,7 @@ class SetupTab(QWidget):
 
         libuv_btn_row = QHBoxLayout()
         self._clear_libuv_btn = QPushButton("Clear USE_LIBUV from Windows")
+        self._clear_libuv_btn.clicked.connect(self._clear_libuv_from_windows)
         self._reset_env_btn = QPushButton("🔄 Reset Training Environment")
         libuv_btn_row.addWidget(self._clear_libuv_btn)
         libuv_btn_row.addWidget(self._reset_env_btn)
@@ -560,6 +562,20 @@ class SetupTab(QWidget):
                      "scope; remove it via System Properties.")
         self._libuv_status_label.setText(text)
         self._clear_libuv_btn.setEnabled(user_val is not None)
+
+    def _clear_libuv_from_windows(self):
+        current = windows_user_env_libuv()
+        if current is None:
+            return
+        if QMessageBox.question(
+            self, "Clear USE_LIBUV",
+            f"Delete USE_LIBUV={current} from your Windows user environment?\n\n"
+            "New processes elsewhere will see the change immediately — restart "
+            "AnimaForge for it to apply here.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+            return
+        clear_windows_user_env_libuv()
+        self._refresh_libuv_status()
 
     def _handle_torch_check_output(self, p):
         text = bytes(p.readAllStandardOutput()).decode("utf-8", "replace").strip()
