@@ -216,13 +216,15 @@ def test_env_overrides_honor_the_force_setting():
         AppSettings().set("force_use_libuv_off", prev)
 
 
-def test_libuv_log_status_reflects_the_force_setting():
+def test_libuv_log_status_reflects_the_force_setting(monkeypatch):
+    monkeypatch.setenv("USE_LIBUV", "1")
     prev = AppSettings().get("force_use_libuv_off")
     try:
         AppSettings().set("force_use_libuv_off", False)
         unforced = TrainingProcess()._libuv_log_status()
+        assert "forced" not in unforced
         AppSettings().set("force_use_libuv_off", True)
         forced = TrainingProcess()._libuv_log_status()
-        assert forced != unforced or "forced" not in unforced
+        assert "forced" in forced and "USE_LIBUV=0" in forced
     finally:
         AppSettings().set("force_use_libuv_off", prev)
