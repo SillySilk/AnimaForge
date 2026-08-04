@@ -54,16 +54,16 @@ def libuv_status(existing=None, windows=None, force=False) -> str:
         windows = sys.platform.startswith("win")
     if existing is None:
         existing = os.environ
-    if not windows:
-        return "USE_LIBUV=1 (torch default; not Windows)"
     inherited = existing.get("USE_LIBUV")
-    if inherited and force:
+    if inherited and windows and force:
         return (f"USE_LIBUV=0 (forced — your Setup override replaces your "
                  f"environment's USE_LIBUV={inherited})")
     if inherited:
         return (f"USE_LIBUV={inherited} (from your environment — AnimaForge left it "
                 f"alone; unset it to let AnimaForge choose)")
-    return "USE_LIBUV=0 (set by AnimaForge for this run)"
+    if windows:
+        return "USE_LIBUV=0 (set by AnimaForge for this run)"
+    return "USE_LIBUV=1 (torch default; not Windows)"
 
 
 def failure_hint(line: str):

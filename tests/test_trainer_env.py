@@ -110,3 +110,8 @@ def test_status_reports_a_forced_override():
 def test_status_with_force_but_nothing_to_override_reads_normally():
     s = libuv_status(existing={}, windows=True, force=True)
     assert "USE_LIBUV=0" in s and "AnimaForge" in s
+
+
+def test_status_on_non_windows_still_reports_an_inherited_value():
+    s = libuv_status(existing={"USE_LIBUV": "1"}, windows=False)
+    assert "USE_LIBUV=1" in s and "your environment" in s
