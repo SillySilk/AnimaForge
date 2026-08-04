@@ -99,6 +99,11 @@ class SetupTab(QWidget):
         # for its health row, and starting cold made PyTorch look missing on every
         # launch until the user clicked Check PyTorch Version again.
         self._pytorch_ok = self._cached_pytorch_ok()
+        # Set by _reset_training_environment; consumed exactly once by the next
+        # _handle_torch_check_output so a Reset only clears the cached known-good
+        # torch_version once the re-probe actually comes back and fails to parse —
+        # never preemptively (see both methods below).
+        self._reset_pending = False
         self._app = AppSettings()
         self._build_ui()
         self._load_settings()
@@ -575,14 +580,21 @@ class SetupTab(QWidget):
             "AnimaForge for it to apply here.",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
             return
-        clear_windows_user_env_libuv()
+        if clear_windows_user_env_libuv():
+            self._torch_log.append(
+                f"Cleared USE_LIBUV={current} from your Windows user environment. "
+                "Restart AnimaForge for it to take effect here.")
+        else:
+            self._torch_log.append(
+                "Could not clear USE_LIBUV from Windows — check your permissions and try again.")
         self._refresh_libuv_status()
 
     def _reset_training_environment(self):
-        self._settings.remove("torch_version")
-        self._settings.sync()
-        self._pytorch_ok = False
-        self.pytorch_status_changed.emit()
+        # Defer the cache clear until the re-probe actually resolves (see
+        # _handle_torch_check_output) — clearing it here, before the async probe has
+        # even started, could strand the last known-good state if the probe bails
+        # early (no interpreter) or never calls back at all.
+        self._reset_pending = True
         self._torch_log.append("Resetting training environment…")
         self._check_torch_version()
         self._refresh_libuv_status()
@@ -592,11 +604,21 @@ class SetupTab(QWidget):
         if text:
             self._torch_log.append(text)
         ver = parse_torch_probe(text)
+        reset_pending = getattr(self, "_reset_pending", False)
+        self._reset_pending = False
         if ver:
             self._pytorch_ok = ver >= MIN_TORCH
             # Remember it across restarts (see __init__), then tell Home to redraw.
             self._settings.setValue("torch_version", text)
             self._settings.sync()
+            self.pytorch_status_changed.emit()
+        elif reset_pending:
+            # An explicit Reset whose re-probe came back with nothing parseable: the
+            # stale cached value is no longer trustworthy, so clear it now — but only
+            # now that we know the re-probe genuinely ran and failed, not preemptively.
+            self._settings.remove("torch_version")
+            self._settings.sync()
+            self._pytorch_ok = False
             self.pytorch_status_changed.emit()
         # Blackwell needs cu128 wheels: a cu121/cu124 torch on an RTX 50-series card
         # fails at run time with "no kernel image is available".

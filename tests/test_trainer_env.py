@@ -184,14 +184,14 @@ def test_reads_a_system_scope_value_separately_from_user_scope():
 
 def test_clear_deletes_the_user_scope_value_only():
     reg = _FakeWinReg(user={"USE_LIBUV": "1"}, system={"USE_LIBUV": "1"})
-    clear_windows_user_env_libuv(reg=reg, broadcast=False)
+    assert clear_windows_user_env_libuv(reg=reg, broadcast=False) is True
     assert windows_user_env_libuv(reg=reg) is None
     assert windows_system_env_libuv(reg=reg) == "1"   # system scope is never touched
 
 
 def test_clear_is_safe_to_call_when_nothing_is_set():
     reg = _FakeWinReg()
-    clear_windows_user_env_libuv(reg=reg, broadcast=False)   # must not raise
+    assert clear_windows_user_env_libuv(reg=reg, broadcast=False) is False   # must not raise
     assert windows_user_env_libuv(reg=reg) is None
 
 

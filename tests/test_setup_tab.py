@@ -233,10 +233,11 @@ def test_clear_libuv_confirms_then_clears(monkeypatch):
     monkeypatch.setattr("ui.setup_tab.windows_user_env_libuv", lambda: "1")
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Yes))
     calls = []
-    monkeypatch.setattr("ui.setup_tab.clear_windows_user_env_libuv", lambda: calls.append(True))
+    monkeypatch.setattr("ui.setup_tab.clear_windows_user_env_libuv", lambda: calls.append(True) or True)
     s = SetupTab()
     s._clear_libuv_from_windows()
     assert calls == [True]
+    assert "Cleared USE_LIBUV" in s._torch_log.toPlainText()
 
 
 def test_clear_libuv_declines_without_confirmation(monkeypatch):
@@ -263,24 +264,59 @@ def test_clear_libuv_is_a_no_op_when_nothing_is_set(monkeypatch):
     assert calls == []   # and the real clear function is never reached either
 
 
+def test_clear_libuv_logs_a_failure_message_when_the_delete_fails(monkeypatch):
+    monkeypatch.setattr("ui.setup_tab.windows_user_env_libuv", lambda: "1")
+    monkeypatch.setattr("ui.setup_tab.windows_system_env_libuv", lambda: None)
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Yes))
+    monkeypatch.setattr("ui.setup_tab.clear_windows_user_env_libuv", lambda: False)
+    s = SetupTab()
+    s._clear_libuv_from_windows()
+    assert "Could not clear" in s._torch_log.toPlainText()
+
+
 def test_reset_training_environment_clears_cached_version_and_reprobes(monkeypatch):
     s = SetupTab()
     prev = s._settings.value("torch_version", "", type=str)
     try:
         s._handle_torch_check_output(_FakeProc("torch 2.5.1+cu121 cuda 12.1"))
         assert s.is_pytorch_ok()
-        called = []
-        monkeypatch.setattr(s, "_check_torch_version", lambda: called.append(True))
+        def fake_check():
+            s._handle_torch_check_output(_FakeProc("Traceback (most recent call last):"))
+        monkeypatch.setattr(s, "_check_torch_version", fake_check)
         s._reset_training_environment()
         assert s._settings.value("torch_version", "", type=str) == ""
         assert not s.is_pytorch_ok()
-        assert called == [True]
     finally:
         s._settings.setValue("torch_version", prev)
         s._settings.sync()
 
 
-def test_reset_training_environment_emits_status_change(monkeypatch):
+def test_reset_training_environment_does_not_strand_a_known_good_result_if_the_reprobe_never_runs(monkeypatch):
+    """A Reset whose probe subprocess never actually calls back (e.g. missing
+    interpreter — _check_torch_version's own early return) must not erase the
+    last known-good state. Only a probe that actually comes back and fails to
+    parse should clear it."""
+    s = SetupTab()
+    prev = s._settings.value("torch_version", "", type=str)
+    try:
+        s._handle_torch_check_output(_FakeProc("torch 2.5.1+cu121 cuda 12.1"))
+        assert s.is_pytorch_ok()
+        monkeypatch.setattr(s, "_check_torch_version", lambda: None)  # never calls back
+        s._reset_training_environment()
+        assert s.is_pytorch_ok()
+        assert s._settings.value("torch_version", "", type=str) != ""
+    finally:
+        s._settings.setValue("torch_version", prev)
+        s._settings.sync()
+
+
+def test_reset_training_environment_does_not_emit_status_change_before_the_reprobe_resolves(monkeypatch):
+    """With the deferred-clear behavior, _reset_training_environment itself no longer
+    emits pytorch_status_changed synchronously — that only happens once a probe
+    actually resolves, inside _handle_torch_check_output (see the parse/reset-pending
+    branches there). A mocked _check_torch_version that never calls back (e.g. the
+    real method's early return when no interpreter is found) must not see the signal
+    fire from the reset call itself."""
     s = SetupTab()
     prev = s._settings.value("torch_version", "", type=str)
     try:
@@ -288,7 +324,7 @@ def test_reset_training_environment_emits_status_change(monkeypatch):
         seen = []
         s.pytorch_status_changed.connect(lambda: seen.append(True))
         s._reset_training_environment()
-        assert seen
+        assert not seen
     finally:
         s._settings.setValue("torch_version", prev)
         s._settings.sync()

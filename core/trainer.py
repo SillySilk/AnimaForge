@@ -127,23 +127,27 @@ def windows_system_env_libuv(reg=None):
     return _read_registry_env_value("HKEY_LOCAL_MACHINE", _SYSTEM_ENV_SUBKEY, reg)
 
 
-def clear_windows_user_env_libuv(reg=None, broadcast=True) -> None:
+def clear_windows_user_env_libuv(reg=None, broadcast=True) -> bool:
     """Delete USE_LIBUV from the Windows *User* environment. No-op if unset or off Windows.
 
     Only ever touches HKEY_CURRENT_USER — never System scope. The caller is
     responsible for confirming with the user first; this performs the deletion
     unconditionally. `broadcast=False` skips notifying other processes (tests only).
+    Returns True if a value was actually deleted, False if there was nothing to
+    delete or the delete failed (e.g. a permissions error) — the caller uses this
+    to tell the user whether anything happened.
     """
     reg = reg or winreg
     if reg is None:
-        return
+        return False
     try:
         with reg.OpenKey(reg.HKEY_CURRENT_USER, _USER_ENV_SUBKEY, 0, reg.KEY_SET_VALUE) as key:
             reg.DeleteValue(key, "USE_LIBUV")
     except (FileNotFoundError, OSError):
-        return
+        return False
     if broadcast:
         _broadcast_environment_change()
+    return True
 
 
 def _broadcast_environment_change() -> None:
