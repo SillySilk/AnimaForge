@@ -203,6 +203,15 @@ class TrainingProcess(QObject):
         ]
         return python, args
 
+    def _env_overrides(self) -> dict:
+        """This launch's subprocess env overrides, honoring the Setup 'force' toggle."""
+        from core.settings import AppSettings
+        return training_env_overrides(force=AppSettings().get("force_use_libuv_off"))
+
+    def _libuv_log_status(self) -> str:
+        from core.settings import AppSettings
+        return libuv_status(force=AppSettings().get("force_use_libuv_off"))
+
     def start(self, config_path: str, sdscripts_path: str):
         """Start the training process."""
         if self._process is not None and self._process.state() != QProcess.NotRunning:
@@ -218,7 +227,7 @@ class TrainingProcess(QObject):
 
         from PySide6.QtCore import QProcessEnvironment
         env = QProcessEnvironment.systemEnvironment()
-        for key, value in training_env_overrides().items():
+        for key, value in self._env_overrides().items():
             env.insert(key, value)
         self._process.setProcessEnvironment(env)
 
@@ -226,7 +235,7 @@ class TrainingProcess(QObject):
         self._process.start(program, args)
         self.training_started.emit()
         self.log_line.emit(f"[AnimaForge] Launching: {program} {' '.join(args)}")
-        self.log_line.emit(f"[AnimaForge] {libuv_status()}")
+        self.log_line.emit(f"[AnimaForge] {self._libuv_log_status()}")
 
     def stop(self):
         """Terminate the running training process."""

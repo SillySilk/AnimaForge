@@ -101,6 +101,11 @@ DEFAULTS = {
     "save_every_n_steps": 250,
     # Pre-launch guard: warn if free VRAM is below this many MB before training (0 disables).
     "min_free_vram_mb": 12000,
+    # Windows only: force USE_LIBUV=0 for training even when the user's own
+    # environment already sets one (Setup → Training Environment). Off by default —
+    # training_env_overrides() normally leaves an explicit USE_LIBUV alone so a
+    # libuv-enabled build can opt in.
+    "force_use_libuv_off": False,
     # Sample images during training (on by default so progress previews "just happen").
     # Every epoch by default: the workflow is watching per-epoch previews and stopping
     # at the earliest-best — a sparse default hid progress for whole runs (user feedback).

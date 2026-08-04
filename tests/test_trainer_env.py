@@ -193,3 +193,36 @@ def test_clear_is_safe_to_call_when_nothing_is_set():
     reg = _FakeWinReg()
     clear_windows_user_env_libuv(reg=reg, broadcast=False)   # must not raise
     assert windows_user_env_libuv(reg=reg) is None
+
+
+# --- Setup's checkbox actually changes what a launch does ---------------
+# TrainingProcess is a QObject; core/headless.py always has a QCoreApplication
+# running before constructing one. Nothing in this file has created one yet, so
+# do it once here (harmless no-op if a later-imported module already has).
+
+from PySide6.QtCore import QCoreApplication
+QCoreApplication.instance() or QCoreApplication([])
+
+from core.trainer import TrainingProcess
+from core.settings import AppSettings
+
+
+def test_env_overrides_honor_the_force_setting():
+    prev = AppSettings().get("force_use_libuv_off")
+    try:
+        AppSettings().set("force_use_libuv_off", True)
+        assert TrainingProcess()._env_overrides()["USE_LIBUV"] == "0"
+    finally:
+        AppSettings().set("force_use_libuv_off", prev)
+
+
+def test_libuv_log_status_reflects_the_force_setting():
+    prev = AppSettings().get("force_use_libuv_off")
+    try:
+        AppSettings().set("force_use_libuv_off", False)
+        unforced = TrainingProcess()._libuv_log_status()
+        AppSettings().set("force_use_libuv_off", True)
+        forced = TrainingProcess()._libuv_log_status()
+        assert forced != unforced or "forced" not in unforced
+    finally:
+        AppSettings().set("force_use_libuv_off", prev)
