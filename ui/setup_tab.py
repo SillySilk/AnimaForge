@@ -36,6 +36,11 @@ from core.describe_models import (
 )
 from core.env import subprocess_python
 from core.gpu_check import free_vram_mb
+from core.trainer import (
+    libuv_status,
+    windows_system_env_libuv,
+    windows_user_env_libuv,
+)
 from core.settings import AppSettings
 from ui.forge_modal import ForgeModal
 from utils.proc import apply_no_window
@@ -97,6 +102,7 @@ class SetupTab(QWidget):
         self._build_ui()
         self._load_settings()
         self._bind_app_widgets()
+        self._refresh_libuv_status()
 
     # ------------------------------------------------------------------
     # Public helpers
@@ -281,6 +287,40 @@ class SetupTab(QWidget):
         torch_layout.addWidget(self._torch_log)
         layout.addWidget(torch_group)
 
+        # Training Environment group — self-service USE_LIBUV controls. Lives next to
+        # PyTorch Runtime above (same "set-once environment diagnostics" category as
+        # Check/Upgrade PyTorch — not a per-run control, so it stays off Home).
+        libuv_group = QGroupBox("Training Environment")
+        libuv_layout = QVBoxLayout(libuv_group)
+        libuv_layout.setSpacing(8)
+        libuv_hint = QLabel(
+            "Windows PyTorch builds without libuv make training die at exit code 1 "
+            "before the first step unless USE_LIBUV=0. AnimaForge sets that "
+            "automatically — unless your own Windows environment already has a "
+            "USE_LIBUV, which AnimaForge leaves alone by default. Use these if that's "
+            "still causing crashes."
+        )
+        libuv_hint.setObjectName("label_field")
+        libuv_hint.setWordWrap(True)
+        libuv_layout.addWidget(libuv_hint)
+
+        self._libuv_status_label = QLabel("")
+        self._libuv_status_label.setWordWrap(True)
+        self._libuv_status_label.setObjectName("label_field")
+        libuv_layout.addWidget(self._libuv_status_label)
+
+        self._force_libuv_check = QCheckBox(
+            "Ignore my environment — always let AnimaForge set USE_LIBUV")
+        libuv_layout.addWidget(self._force_libuv_check)
+
+        libuv_btn_row = QHBoxLayout()
+        self._clear_libuv_btn = QPushButton("Clear USE_LIBUV from Windows")
+        self._reset_env_btn = QPushButton("🔄 Reset Training Environment")
+        libuv_btn_row.addWidget(self._clear_libuv_btn)
+        libuv_btn_row.addWidget(self._reset_env_btn)
+        libuv_btn_row.addStretch()
+        libuv_layout.addLayout(libuv_btn_row)
+        layout.addWidget(libuv_group)
 
         # Output group
         output_group = QGroupBox("Output Directory")
@@ -507,6 +547,19 @@ class SetupTab(QWidget):
     def _cached_pytorch_ok(self) -> bool:
         ver = parse_torch_probe(self._settings.value("torch_version", "", type=str))
         return bool(ver and ver >= MIN_TORCH)
+
+    def _on_force_libuv_toggled(self, checked: bool):
+        self._app.set("force_use_libuv_off", checked)
+        self._refresh_libuv_status()
+
+    def _refresh_libuv_status(self):
+        text = libuv_status(force=self._app.get("force_use_libuv_off"))
+        user_val = windows_user_env_libuv()
+        if user_val is None and windows_system_env_libuv() is not None:
+            text += ("  Found at System scope — AnimaForge can only clear the User "
+                     "scope; remove it via System Properties.")
+        self._libuv_status_label.setText(text)
+        self._clear_libuv_btn.setEnabled(user_val is not None)
 
     def _handle_torch_check_output(self, p):
         text = bytes(p.readAllStandardOutput()).decode("utf-8", "replace").strip()
@@ -1186,6 +1239,7 @@ class SetupTab(QWidget):
         self._forge_deliver_check.setChecked(a.get("forge_auto_deliver"))
         self._forge_test_check.setChecked(a.get("forge_auto_test"))
         self._startup_update_check.setChecked(a.get("startup_update_check"))
+        self._force_libuv_check.setChecked(a.get("force_use_libuv_off"))
         self._weighting_combo.setCurrentText(a.get("weighting_scheme"))
         self._logit_mean_spin.setValue(a.get("logit_mean"))
         self._logit_std_spin.setValue(a.get("logit_std"))
@@ -1221,6 +1275,7 @@ class SetupTab(QWidget):
         self._forge_deliver_check.toggled.connect(lambda b: a.set("forge_auto_deliver", b))
         self._forge_test_check.toggled.connect(lambda b: a.set("forge_auto_test", b))
         self._startup_update_check.toggled.connect(lambda b: a.set("startup_update_check", b))
+        self._force_libuv_check.toggled.connect(self._on_force_libuv_toggled)
         self._weighting_combo.currentTextChanged.connect(lambda t: a.set("weighting_scheme", t))
         self._logit_mean_spin.valueChanged.connect(lambda val: a.set("logit_mean", val))
         self._logit_std_spin.valueChanged.connect(lambda val: a.set("logit_std", val))

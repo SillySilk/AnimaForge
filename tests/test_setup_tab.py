@@ -195,3 +195,35 @@ def test_startup_update_toggle_roundtrips():
         assert s._app.get("startup_update_check") is True
     finally:
         s._app.set("startup_update_check", prev)
+
+
+def test_force_libuv_checkbox_roundtrips():
+    s = SetupTab()
+    prev = s._app.get("force_use_libuv_off")
+    try:
+        s._force_libuv_check.setChecked(True)
+        assert s._app.get("force_use_libuv_off") is True
+        s._force_libuv_check.setChecked(False)
+        assert s._app.get("force_use_libuv_off") is False
+    finally:
+        s._app.set("force_use_libuv_off", prev)
+
+
+def test_libuv_status_label_reflects_the_registry_probe(monkeypatch):
+    s = SetupTab()
+    monkeypatch.setattr("ui.setup_tab.windows_user_env_libuv", lambda: "1")
+    monkeypatch.setattr("ui.setup_tab.windows_system_env_libuv", lambda: None)
+    s._refresh_libuv_status()
+    assert s._clear_libuv_btn.isEnabled()
+    monkeypatch.setattr("ui.setup_tab.windows_user_env_libuv", lambda: None)
+    s._refresh_libuv_status()
+    assert not s._clear_libuv_btn.isEnabled()
+
+
+def test_libuv_status_label_explains_a_system_scope_only_value(monkeypatch):
+    s = SetupTab()
+    monkeypatch.setattr("ui.setup_tab.windows_user_env_libuv", lambda: None)
+    monkeypatch.setattr("ui.setup_tab.windows_system_env_libuv", lambda: "1")
+    s._refresh_libuv_status()
+    assert not s._clear_libuv_btn.isEnabled()
+    assert "System scope" in s._libuv_status_label.text()
