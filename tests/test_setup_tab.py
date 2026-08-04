@@ -251,6 +251,7 @@ def test_clear_libuv_declines_without_confirmation(monkeypatch):
 
 def test_clear_libuv_is_a_no_op_when_nothing_is_set(monkeypatch):
     monkeypatch.setattr("ui.setup_tab.windows_user_env_libuv", lambda: None)
+    monkeypatch.setattr("ui.setup_tab.windows_system_env_libuv", lambda: None)
     asked = []
     monkeypatch.setattr(QMessageBox, "question",
                          staticmethod(lambda *a, **k: asked.append(True) or QMessageBox.Yes))
