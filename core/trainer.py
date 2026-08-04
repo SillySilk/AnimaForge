@@ -279,9 +279,13 @@ class TrainingProcess(QObject):
 
     def _on_finished(self, exit_code: int, exit_status):
         success = exit_code == 0
-        self.training_finished.emit(success)
+        # The exit-code line goes out BEFORE training_finished. The Train tab closes
+        # its on-disk run log when that signal arrives, and on a failed run the exit
+        # code is the single line a bug report most needs — emitting it afterwards
+        # dropped it from the file.
         status = "completed successfully" if success else f"finished with exit code {exit_code}"
         self.log_line.emit(f"[AnimaForge] Training process {status}.")
+        self.training_finished.emit(success)
 
     def _parse_progress(self, line: str):
         """

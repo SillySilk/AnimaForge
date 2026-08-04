@@ -49,9 +49,11 @@ from utils.proc import apply_no_window
 # Shared QSettings ids (single source of truth in core.settings).
 from core.settings import SETTINGS_ORG, SETTINGS_APP  # noqa: E402
 
+# Canonical filenames, for the setup instructions only. Auto-detect no longer keys
+# off them — core.model_locations identifies each file by its safetensors header,
+# so renamed files and non-Forge folder layouts are found too.
 QWEN3_FILENAME = "qwen_3_06b_base.safetensors"
 QWEN_VAE_FILENAME = "qwen_image_vae.safetensors"
-# Official Anima DiT filename; auto-detect also matches any 'anima*.safetensors' rename.
 PREFERRED_DIT = "anima-base-v1.0.safetensors"
 
 
@@ -471,49 +473,44 @@ class SetupTab(QWidget):
     # ------------------------------------------------------------------
 
     def _auto_detect_models(self):
-        found = []
-        missing = []
+        """Fill the three model paths from whatever is under the scan folder.
+
+        Detection is delegated to core.model_locations, which identifies each file
+        by its safetensors header rather than by folder and filename. The old
+        lookups here were hardcoded to the A1111/Forge tree with exact names, so
+        the official circlestone-labs/Anima download — published in the ComfyUI
+        tree — matched only the VAE, and any renamed file matched nothing.
+        """
+        from core.model_locations import detect_model_files
+
         scan_root = Path(self._scan_edit.text().strip() or self._app.first_run_scan_default())
+        if not scan_root.is_dir():
+            self._autodetect_label.setText("Model scan folder not found — set it above.")
+            self._verify_environment()
+            return
 
-        qwen3 = scan_root / "text_encoder" / QWEN3_FILENAME
-        if qwen3.is_file():
-            self._qwen3_edit.setText(str(qwen3))
-            found.append("Qwen3 encoder")
-        else:
-            missing.append("Qwen3 encoder")
-
-        vae = scan_root / "VAE" / QWEN_VAE_FILENAME
-        if vae.is_file():
-            self._vae_edit.setText(str(vae))
-            found.append("Qwen-Image VAE")
-        else:
-            missing.append("Qwen-Image VAE")
-
-        ckpt_dir = scan_root / "Stable-diffusion"
-        dit = None
-        if ckpt_dir.is_dir():
-            preferred = ckpt_dir / PREFERRED_DIT
-            if preferred.is_file():
-                dit = preferred
+        got = detect_model_files(scan_root)
+        found, missing = [], []
+        for key, label, edit in (
+            ("dit", "Anima DiT checkpoint", self._dit_edit),
+            ("text_encoder", "Qwen3 encoder", self._qwen3_edit),
+            ("vae", "Qwen-Image VAE", self._vae_edit),
+        ):
+            if got.get(key):
+                edit.setText(got[key])
+                found.append(f"{label} ({Path(got[key]).name})")
             else:
-                anima_ckpts = sorted(
-                    f for f in ckpt_dir.glob("*.safetensors") if "anima" in f.name.lower()
-                )
-                if anima_ckpts:
-                    dit = anima_ckpts[0]
-        if dit:
-            self._dit_edit.setText(str(dit))
-            found.append(f"DiT ({dit.name})")
-        else:
-            missing.append("Anima DiT checkpoint")
+                missing.append(label)
 
         parts = []
         if found:
             parts.append("Found: " + ", ".join(found) + ".")
         if missing:
-            parts.append("Not found: " + ", ".join(missing) + " — set manually.")
-        if not found and not missing:
-            parts.append("Model scan folder not found — set it above.")
+            parts.append(
+                "Not found: " + ", ".join(missing) + ". Download them from "
+                "huggingface.co/circlestone-labs/Anima (split_files/) into the scan "
+                "folder, or set each one manually."
+            )
         self._autodetect_label.setText(" ".join(parts))
         self._verify_environment()
 
@@ -1449,18 +1446,21 @@ class SetupTab(QWidget):
             "    pip install \"torch>=2.5\" torchvision --index-url https://download.pytorch.org/whl/cu121\n"
             "  RTX 50-series (Blackwell) cards need the CUDA 12.8 build instead:\n"
             "    pip install \"torch>=2.7\" torchvision --index-url https://download.pytorch.org/whl/cu128\n"
-            "  RTX 50-series (Blackwell) cards need the CUDA 12.8 build instead:\n"
-            "    pip install \"torch>=2.7\" torchvision --index-url https://download.pytorch.org/whl/cu128\n"
             "  (or use the 'Upgrade PyTorch' button above)\n\n"
             "Step 5 — sd-scripts dependencies\n"
             "    pip install -r requirements.txt\n"
             "    pip install prodigy-plus-schedule-free   (Prodigy+ ScheduleFree optimizer)\n"
             "    pip install accelerate && accelerate config\n\n"
-            "Step 6 — Anima model files (or use Auto-detect from Forge Neo)\n"
-            "    • Anima DiT checkpoint (e.g. anima_baseV10.safetensors)\n"
-            "    • Qwen3 text encoder: qwen_3_06b_base.safetensors\n"
-            "    • Qwen-Image VAE: qwen_image_vae.safetensors\n"
-            "    From https://huggingface.co/circlestone-labs/Anima\n\n"
+            "Step 6 — Anima model files (or use Auto-detect)\n"
+            "  From https://huggingface.co/circlestone-labs/Anima, under split_files/:\n"
+            f"    • DiT checkpoint:    diffusion_models/{PREFERRED_DIT}   (~3.9 GB)\n"
+            f"    • Qwen3 text encoder: text_encoders/{QWEN3_FILENAME}   (~1.1 GB)\n"
+            f"    • Qwen-Image VAE:     vae/{QWEN_VAE_FILENAME}   (~242 MB)\n"
+            "  Put them anywhere under your model scan folder — Auto-detect reads each\n"
+            "  file's contents, so the folder names and any renames don't matter.\n\n"
+            "  NOT interchangeable: an Anima checkpoint downloaded from elsewhere may be\n"
+            "  saved in ComfyUI's wrapped layout ('model.diffusion_model.…' weights).\n"
+            "  This trainer needs the 'net.…' layout, i.e. the split_files copy above.\n\n"
             "Step 7 — Describe model (natural-language captions)\n"
             "    Pick it in 'Describe Model' above. If you already have the model in your\n"
             "    Hugging Face cache (including via a junction), it is used as-is.\n\n"

@@ -4,4 +4,4 @@ Bump this on every release users would notice; the sidebar version stamp and
 anything else that needs the number read it from here.
 """
 
-__version__ = "2.9.3"
+__version__ = "2.10.0"

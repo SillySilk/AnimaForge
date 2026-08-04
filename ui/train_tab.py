@@ -1872,7 +1872,7 @@ class TrainTab(QWidget):
         )
         if reply == QMessageBox.Yes:
             self._trainer.stop()
-            self._log_edit.append("\n[AnimaForge] Training stopped by user.")
+            self._on_log_line("[AnimaForge] Training stopped by user.")
             self._on_training_finished(False)
 
     # ------------------------------------------------------------------
@@ -2171,6 +2171,10 @@ class TrainTab(QWidget):
         self._stepping = False
         self._manifest_step = 0
         self._denoiser = LogDenoiser()
+        from core.af_log import RunLog
+        from core.version import __version__
+        self._run_log = RunLog()
+        self._run_log.open(f"AnimaForge v{__version__} — training run started")
         self.status_message.emit("Training started…")
         self._last_preview = []
         self._preview_timer.start()
@@ -2200,6 +2204,16 @@ class TrainTab(QWidget):
                     self._test_in_forge(save_dir=str(Path(self._run_dir()) / "forge_test"))
         else:
             self._rp(kind="error", label="Stopped")
+            # A run that stops this early usually never reached a training step, and
+            # the reason is a traceback well above the visible end of the log pane.
+            # Name the file so it can just be attached to a bug report.
+            run_log = getattr(self, "_run_log", None)
+            if run_log is not None:
+                self._log_edit.append(
+                    f"\n[AnimaForge] Full log of this run saved to {run_log.path}"
+                    "\n[AnimaForge] Attach that file when reporting a problem — it "
+                    "holds the launch command and the error above."
+                )
             # A state was just written before the process exited. Surface it and
             # arm resume so the next Start continues from the last checkpoint
             # instead of restarting from zero (uncheck the box to start fresh).
@@ -2213,9 +2227,17 @@ class TrainTab(QWidget):
                 )
             else:
                 self.status_message.emit("Training stopped or failed.")
+        run_log = getattr(self, "_run_log", None)
+        if run_log is not None:
+            run_log.close("Run ended: " + ("success" if success else "stopped or failed"))
 
     @Slot(str)
     def _on_log_line(self, line: str):
+        # To disk before the denoiser, and unfiltered: the pane is for watching a
+        # run, the file is for diagnosing one.
+        run_log = getattr(self, "_run_log", None)
+        if run_log is not None:
+            run_log.write(line)
         shown = self._denoiser.filter(line)
         if shown is not None:
             metrics = parse_tqdm(line)
@@ -2285,13 +2307,23 @@ class TrainTab(QWidget):
             return False, "sd-scripts path is not set. Go to Setup tab."
         if not Path(self._setup_path).is_dir():
             return False, "sd-scripts path does not exist."
-        for label, p in (
-            ("Anima DiT checkpoint", self._dit_path),
-            ("Qwen3 text encoder", self._qwen3_path),
-            ("Qwen-Image VAE", self._vae_path),
+        from core import model_check
+        for label, p, role in (
+            ("Anima DiT checkpoint", self._dit_path, model_check.ROLE_DIT),
+            ("Qwen3 text encoder", self._qwen3_path, model_check.ROLE_TEXT_ENCODER),
+            ("Qwen-Image VAE", self._vae_path, model_check.ROLE_VAE),
         ):
             if not p or not Path(p).exists():
                 return False, f"{label} is not set or does not exist. Go to Setup tab."
+            # Existence alone used to be the whole check, so a wrong file reached the
+            # trainer and died there with "Missing keys in checkpoint" — exit code 1
+            # a second or two in, which the UI could only show as Preparing → Stopped.
+            # model_check reads the safetensors header and says so in English instead.
+            # It only ever reports a *positive* mismatch, so an odd-but-valid setup
+            # can still start.
+            problem = model_check.check_model_file(p, role)
+            if problem:
+                return False, problem
         if not self._output_dir:
             return False, "Output directory is not set. Go to Setup tab."
         if not self._dataset_path or not Path(self._dataset_path).is_dir():
