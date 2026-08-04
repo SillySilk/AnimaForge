@@ -318,6 +318,7 @@ class SetupTab(QWidget):
         self._clear_libuv_btn = QPushButton("Clear USE_LIBUV from Windows")
         self._clear_libuv_btn.clicked.connect(self._clear_libuv_from_windows)
         self._reset_env_btn = QPushButton("🔄 Reset Training Environment")
+        self._reset_env_btn.clicked.connect(self._reset_training_environment)
         libuv_btn_row.addWidget(self._clear_libuv_btn)
         libuv_btn_row.addWidget(self._reset_env_btn)
         libuv_btn_row.addStretch()
@@ -575,6 +576,15 @@ class SetupTab(QWidget):
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
             return
         clear_windows_user_env_libuv()
+        self._refresh_libuv_status()
+
+    def _reset_training_environment(self):
+        self._settings.remove("torch_version")
+        self._settings.sync()
+        self._pytorch_ok = False
+        self.pytorch_status_changed.emit()
+        self._torch_log.append("Resetting training environment…")
+        self._check_torch_version()
         self._refresh_libuv_status()
 
     def _handle_torch_check_output(self, p):

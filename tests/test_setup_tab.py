@@ -261,3 +261,34 @@ def test_clear_libuv_is_a_no_op_when_nothing_is_set(monkeypatch):
     s._clear_libuv_from_windows()
     assert asked == []   # no dialog when there's nothing to clear
     assert calls == []   # and the real clear function is never reached either
+
+
+def test_reset_training_environment_clears_cached_version_and_reprobes(monkeypatch):
+    s = SetupTab()
+    prev = s._settings.value("torch_version", "", type=str)
+    try:
+        s._handle_torch_check_output(_FakeProc("torch 2.5.1+cu121 cuda 12.1"))
+        assert s.is_pytorch_ok()
+        called = []
+        monkeypatch.setattr(s, "_check_torch_version", lambda: called.append(True))
+        s._reset_training_environment()
+        assert s._settings.value("torch_version", "", type=str) == ""
+        assert not s.is_pytorch_ok()
+        assert called == [True]
+    finally:
+        s._settings.setValue("torch_version", prev)
+        s._settings.sync()
+
+
+def test_reset_training_environment_emits_status_change(monkeypatch):
+    s = SetupTab()
+    prev = s._settings.value("torch_version", "", type=str)
+    try:
+        monkeypatch.setattr(s, "_check_torch_version", lambda: None)
+        seen = []
+        s.pytorch_status_changed.connect(lambda: seen.append(True))
+        s._reset_training_environment()
+        assert seen
+    finally:
+        s._settings.setValue("torch_version", prev)
+        s._settings.sync()
