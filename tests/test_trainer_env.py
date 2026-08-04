@@ -74,8 +74,18 @@ def test_the_libuv_error_gets_a_plain_english_hint():
     line = ("RuntimeError: use_libuv was requested but PyTorch was build without "
             "libuv support")
     hint = failure_hint(line)
-    assert hint and "USE_LIBUV" in hint
+    assert hint and "libuv support" in hint
     assert "Rebuilding PyTorch is not necessary" in hint
+
+
+def test_the_hint_does_not_blame_the_users_environment():
+    """This error arrives via torch's static TCP rendezvous, which never reads
+    USE_LIBUV. The old hint told users to go delete a Windows variable that was not
+    set and would not have helped — a real user lost a session to that advice."""
+    line = "torch.distributed.DistStoreError: use_libuv was requested but PyTorch was built without libuv support"
+    hint = failure_hint(line)
+    assert "Environment Variables" not in hint
+    assert "USE_LIBUV" not in hint
 
 
 def test_ordinary_lines_get_no_hint():

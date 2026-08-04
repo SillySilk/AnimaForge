@@ -15,14 +15,18 @@ from utils.proc import apply_no_window
 def training_env_overrides(existing=None, windows=None, force=False) -> dict:
     """Environment the training subprocess needs on top of the inherited one.
 
-    USE_LIBUV is the important one. `accelerate launch` always builds a c10d TCPStore,
-    and since torch 2.4 the store asks for the libuv backend unless USE_LIBUV=0
-    (torch/distributed/rendezvous.py reads exactly that variable). Plenty of Windows
-    PyTorch wheels are compiled without libuv, so the rendezvous raises "use_libuv was
-    requested but PyTorch was build without libuv support" and the whole run exits with
-    code 1 before a single training step — with nothing on screen but the exit code.
-    The legacy store it falls back to is equivalent here: we launch --num_processes=1,
-    so the store is a single-rank formality either way.
+    USE_LIBUV is the important one. Since torch 2.4 a c10d TCPStore asks for the libuv
+    backend unless USE_LIBUV=0 (torch/distributed/rendezvous.py reads exactly that
+    variable). Plenty of Windows PyTorch wheels are compiled without libuv, so building
+    one raises "use_libuv was requested but PyTorch was build without libuv support" and
+    the whole run exits with code 1 before a single training step — with nothing on
+    screen but the exit code. The legacy store it falls back to is equivalent here: we
+    launch --num_processes=1, so the store is a single-rank formality either way.
+
+    This covers the code paths that honor the variable (init_process_group's rendezvous
+    and the elastic dynamic rendezvous). It does NOT cover torch's *static* TCP
+    rendezvous, which ignores USE_LIBUV entirely — see ACCELERATE_CONFIG_NAME below for
+    the setting that keeps runs off that path.
 
     An explicit USE_LIBUV in the user's own environment always wins, so anyone with a
     libuv-enabled build can opt back in — unless `force=True` (the Setup → Training
@@ -70,19 +74,67 @@ def libuv_status(existing=None, windows=None, force=False) -> str:
     return "USE_LIBUV=1 (torch default; not Windows)"
 
 
+ACCELERATE_CONFIG_NAME = "accelerate_single_gpu.yaml"
+
+# `accelerate launch` reads ~/.cache/huggingface/accelerate/default_config.yaml whenever
+# that file exists, and a `distributed_type: MULTI_GPU` in it sets multi_gpu=True even
+# though we pass --num_processes=1 (the "you need at least 2 processes" guard runs before
+# the file is loaded, so nothing catches the contradiction). That routes the launch through
+# multi_gpu_launcher -> torch elastic -> static_tcp_rendezvous, which constructs TCPStore()
+# with no use_libuv kwarg and therefore ignores USE_LIBUV completely — on a Windows wheel
+# built without libuv the run dies before step 1 no matter what we put in the environment.
+#
+# Anyone who has ever run `accelerate config` has that file, so we cannot leave the choice
+# of launcher to chance. Passing our own config pins simple_launcher, which builds no
+# TCPStore at all. AnimaForge is single-GPU by design (--num_processes=1), so this only
+# makes explicit what the run was always asking for.
+_ACCELERATE_SINGLE_GPU_CONFIG = """\
+compute_environment: LOCAL_MACHINE
+debug: false
+distributed_type: 'NO'
+machine_rank: 0
+num_machines: 1
+num_processes: 1
+rdzv_backend: static
+same_network: true
+tpu_use_cluster: false
+tpu_use_sudo: false
+use_cpu: false
+"""
+
+
+def write_accelerate_config(configs_dir) -> Path:
+    """Write the single-process accelerate config for a run and return its path.
+
+    Rewritten every launch rather than created once: it costs nothing, and it means a
+    stale or hand-edited copy in an old run folder can never quietly reintroduce the
+    multi-GPU launcher. Note `'NO'` must stay quoted — bare NO is YAML's boolean false.
+    """
+    configs_dir = Path(configs_dir)
+    configs_dir.mkdir(parents=True, exist_ok=True)
+    path = configs_dir / ACCELERATE_CONFIG_NAME
+    path.write_text(_ACCELERATE_SINGLE_GPU_CONFIG, encoding="utf-8")
+    return path
+
+
 def failure_hint(line: str):
     """Plain-English explanation for a known-cryptic launch failure, else None.
 
     torch's wording ("PyTorch was build without libuv support") is both misspelled and
     meaningless to a user whose only other evidence is exit code 1.
+
+    The hint must not blame the user's USE_LIBUV: the error reaches them through torch's
+    static TCP rendezvous, which never reads that variable. An earlier version of this
+    text sent a user hunting through System Properties for a variable that was not set
+    and would not have mattered.
     """
     low = (line or "").lower()
     if "libuv" in low and "without libuv" in low:
-        return ("[AnimaForge] That means this PyTorch build has no libuv support. "
-                "AnimaForge normally sets USE_LIBUV=0 to avoid it — seeing this anyway "
-                "means a USE_LIBUV variable in your own Windows environment is "
-                "overriding that. Delete it (System Properties → Environment "
-                "Variables) and relaunch. Rebuilding PyTorch is not necessary.")
+        return ("[AnimaForge] That means this PyTorch build has no libuv support, and "
+                "the run reached torch's multi-process launcher, which needs it. "
+                "AnimaForge pins accelerate to a single-process config to stay off that "
+                "path, so seeing this means the pin did not take — please report it "
+                "with this log. Rebuilding PyTorch is not necessary.")
     return None
 
 
@@ -194,9 +246,14 @@ class TrainingProcess(QObject):
         python = subprocess_python(sdscripts_path)
 
         train_script = str(Path(sdscripts_path) / "anima_train_network.py")
+        # Ours, not the user's ~/.cache one. Must come before train_script or accelerate
+        # would hand it to sd-scripts instead of reading it. Distinct from the
+        # --config_file after train_script, which is the training config.
+        accelerate_config = write_accelerate_config(Path(config_path).parent)
         args = [
             "-m",
             "accelerate.commands.launch",
+            f"--config_file={accelerate_config}",
             "--num_cpu_threads_per_process=2",
             "--num_processes=1",
             "--num_machines=1",
