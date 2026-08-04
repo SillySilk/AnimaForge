@@ -210,9 +210,9 @@ def test_force_libuv_checkbox_roundtrips():
 
 
 def test_libuv_status_label_reflects_the_registry_probe(monkeypatch):
-    s = SetupTab()
     monkeypatch.setattr("ui.setup_tab.windows_user_env_libuv", lambda: "1")
     monkeypatch.setattr("ui.setup_tab.windows_system_env_libuv", lambda: None)
+    s = SetupTab()
     s._refresh_libuv_status()
     assert s._clear_libuv_btn.isEnabled()
     monkeypatch.setattr("ui.setup_tab.windows_user_env_libuv", lambda: None)
@@ -221,39 +221,42 @@ def test_libuv_status_label_reflects_the_registry_probe(monkeypatch):
 
 
 def test_libuv_status_label_explains_a_system_scope_only_value(monkeypatch):
-    s = SetupTab()
     monkeypatch.setattr("ui.setup_tab.windows_user_env_libuv", lambda: None)
     monkeypatch.setattr("ui.setup_tab.windows_system_env_libuv", lambda: "1")
+    s = SetupTab()
     s._refresh_libuv_status()
     assert not s._clear_libuv_btn.isEnabled()
     assert "System scope" in s._libuv_status_label.text()
 
 
 def test_clear_libuv_confirms_then_clears(monkeypatch):
-    s = SetupTab()
     monkeypatch.setattr("ui.setup_tab.windows_user_env_libuv", lambda: "1")
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Yes))
     calls = []
     monkeypatch.setattr("ui.setup_tab.clear_windows_user_env_libuv", lambda: calls.append(True))
+    s = SetupTab()
     s._clear_libuv_from_windows()
     assert calls == [True]
 
 
 def test_clear_libuv_declines_without_confirmation(monkeypatch):
-    s = SetupTab()
     monkeypatch.setattr("ui.setup_tab.windows_user_env_libuv", lambda: "1")
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.No))
     calls = []
     monkeypatch.setattr("ui.setup_tab.clear_windows_user_env_libuv", lambda: calls.append(True))
+    s = SetupTab()
     s._clear_libuv_from_windows()
     assert calls == []
 
 
 def test_clear_libuv_is_a_no_op_when_nothing_is_set(monkeypatch):
-    s = SetupTab()
     monkeypatch.setattr("ui.setup_tab.windows_user_env_libuv", lambda: None)
     asked = []
     monkeypatch.setattr(QMessageBox, "question",
                          staticmethod(lambda *a, **k: asked.append(True) or QMessageBox.Yes))
+    calls = []
+    monkeypatch.setattr("ui.setup_tab.clear_windows_user_env_libuv", lambda: calls.append(True))
+    s = SetupTab()
     s._clear_libuv_from_windows()
     assert asked == []   # no dialog when there's nothing to clear
+    assert calls == []   # and the real clear function is never reached either
