@@ -8,7 +8,7 @@ from PySide6.QtCore import QObject, QProcess, Signal
 from utils.proc import apply_no_window
 
 
-def training_env_overrides(existing=None, windows=None) -> dict:
+def training_env_overrides(existing=None, windows=None, force=False) -> dict:
     """Environment the training subprocess needs on top of the inherited one.
 
     USE_LIBUV is the important one. `accelerate launch` always builds a c10d TCPStore,
@@ -21,7 +21,10 @@ def training_env_overrides(existing=None, windows=None) -> dict:
     so the store is a single-rank formality either way.
 
     An explicit USE_LIBUV in the user's own environment always wins, so anyone with a
-    libuv-enabled build can opt back in.
+    libuv-enabled build can opt back in — unless `force=True` (the Setup → Training
+    Environment "ignore my environment" toggle), which makes AnimaForge set USE_LIBUV=0
+    unconditionally. That's the self-service alternative to deleting the variable from
+    Windows by hand.
     """
     if windows is None:
         windows = sys.platform.startswith("win")
@@ -34,30 +37,33 @@ def training_env_overrides(existing=None, windows=None) -> dict:
         "PYTHONWARNINGS": "ignore::UserWarning",
         "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
     }
-    if windows and not existing.get("USE_LIBUV"):
+    if windows and (force or not existing.get("USE_LIBUV")):
         env["USE_LIBUV"] = "0"
     return env
 
 
-def libuv_status(existing=None, windows=None) -> str:
+def libuv_status(existing=None, windows=None, force=False) -> str:
     """One line for the training log: the USE_LIBUV the subprocess really gets, and why.
 
     Worth logging because the two failure modes are indistinguishable from outside.
-    We deliberately never clobber a USE_LIBUV already in the user's environment, so a
-    stray `USE_LIBUV=1` there silently defeats the fix and the run still dies at exit
-    code 1 — looking exactly like the fix never shipped.
+    We deliberately never clobber a USE_LIBUV already in the user's environment unless
+    `force=True`, so a stray `USE_LIBUV=1` there silently defeats the fix and the run
+    still dies at exit code 1 — looking exactly like the fix never shipped.
     """
     if windows is None:
         windows = sys.platform.startswith("win")
     if existing is None:
         existing = os.environ
+    if not windows:
+        return "USE_LIBUV=1 (torch default; not Windows)"
     inherited = existing.get("USE_LIBUV")
+    if inherited and force:
+        return (f"USE_LIBUV=0 (forced — your Setup override replaces your "
+                 f"environment's USE_LIBUV={inherited})")
     if inherited:
         return (f"USE_LIBUV={inherited} (from your environment — AnimaForge left it "
                 f"alone; unset it to let AnimaForge choose)")
-    if windows:
-        return "USE_LIBUV=0 (set by AnimaForge for this run)"
-    return "USE_LIBUV=1 (torch default; not Windows)"
+    return "USE_LIBUV=0 (set by AnimaForge for this run)"
 
 
 def failure_hint(line: str):

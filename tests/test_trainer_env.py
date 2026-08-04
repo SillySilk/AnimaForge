@@ -81,3 +81,32 @@ def test_the_libuv_error_gets_a_plain_english_hint():
 def test_ordinary_lines_get_no_hint():
     assert failure_hint("steps:  33%|###  | 100/3000 [01:32<24:17]") is None
     assert failure_hint("") is None
+
+
+# --- Setup "force" override --------------------------------------------
+# The Setup tab's "Ignore my environment" checkbox (force_use_libuv_off setting)
+# lets a user override an inherited USE_LIBUV without editing Windows by hand.
+
+def test_force_overrides_an_inherited_value():
+    env = training_env_overrides(existing={"USE_LIBUV": "1"}, windows=True, force=True)
+    assert env["USE_LIBUV"] == "0"
+
+
+def test_force_is_a_no_op_off_windows():
+    env = training_env_overrides(existing={"USE_LIBUV": "1"}, windows=False, force=True)
+    assert "USE_LIBUV" not in env
+
+
+def test_force_defaults_to_off_and_changes_nothing():
+    env = training_env_overrides(existing={"USE_LIBUV": "1"}, windows=True)
+    assert "USE_LIBUV" not in env  # same as before this change
+
+
+def test_status_reports_a_forced_override():
+    s = libuv_status(existing={"USE_LIBUV": "1"}, windows=True, force=True)
+    assert "USE_LIBUV=0" in s and "forced" in s
+
+
+def test_status_with_force_but_nothing_to_override_reads_normally():
+    s = libuv_status(existing={}, windows=True, force=True)
+    assert "USE_LIBUV=0" in s and "AnimaForge" in s
