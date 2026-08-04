@@ -302,11 +302,12 @@ class SetupTab(QWidget):
         libuv_layout = QVBoxLayout(libuv_group)
         libuv_layout.setSpacing(8)
         libuv_hint = QLabel(
-            "Windows PyTorch builds without libuv make training die at exit code 1 "
-            "before the first step unless USE_LIBUV=0. AnimaForge sets that "
-            "automatically — unless your own Windows environment already has a "
-            "USE_LIBUV, which AnimaForge leaves alone by default. Use these if that's "
-            "still causing crashes."
+            "Windows PyTorch builds without libuv can make training die at exit code 1 "
+            "before the first step. AnimaForge sets USE_LIBUV=0 automatically — unless "
+            "your own Windows environment already has a USE_LIBUV, which AnimaForge "
+            "leaves alone by default. Use these if that's still causing crashes. "
+            "(Runs are also pinned to a single-process launcher, which avoids the most "
+            "common form of this crash on its own.)"
         )
         libuv_hint.setObjectName("label_field")
         libuv_hint.setWordWrap(True)
