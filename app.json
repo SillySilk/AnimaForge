@@ -1,0 +1,5 @@
+{
+  "name": "Anima Forge",
+  "launch": "launch.bat",
+  "image": "tile.png"
+}
