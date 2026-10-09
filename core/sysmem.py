@@ -330,6 +330,23 @@ def close_tree(pid: int) -> bool:
     return not alive
 
 
+def plan_room(target_free_gb: float, *, free=available_commit_gb,
+              candidates=closable_committers) -> tuple:
+    """(free_gb | None, [(pid, label, gb)]): the biggest-first programs that would
+    have to close for `target_free_gb` to be committable. Closes nothing -- the
+    caller shows this list and asks before anything is ended."""
+    have = free()
+    if have is None or have >= target_free_gb:
+        return have, []
+    plan, expect = [], have
+    for row in candidates():
+        plan.append(row)
+        expect += row[2]
+        if expect >= target_free_gb:
+            break
+    return have, plan
+
+
 def make_room(target_free_gb: float, *, close=close_tree, free=available_commit_gb,
               candidates=closable_committers, sleep=time.sleep,
               clock=time.monotonic) -> list:

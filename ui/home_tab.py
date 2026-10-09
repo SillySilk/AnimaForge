@@ -61,6 +61,7 @@ class HomeTab(QWidget):
     preset_pick_requested = Signal()  # PRESET button — MainWindow opens the picker (owns the data)
     model_changed = Signal(str)          # model preset id (Anima / Krea 2)
     caption_style_changed = Signal(str)  # prose / tags / prose+tags
+    free_memory_requested = Signal()  # "Free memory…" — MainWindow names what it would close, asks
     advanced_settings_requested = Signal()  # "Advanced…" — MainWindow opens the settings editor
     preview_config_requested = Signal()  # 📜 beside Start — inspect the exact TOMLs pre-launch
 
@@ -503,6 +504,15 @@ class HomeTab(QWidget):
         self._stop_train_btn.setToolTip("Stop the current training run (asks to confirm)")
         self._stop_train_btn.clicked.connect(self.stop_train_requested.emit)
         start_stop.addWidget(self._stop_train_btn)
+        self._free_memory_btn = QPushButton("Free memory…")
+        self._free_memory_btn.setObjectName("af_btn_ghost")
+        self._free_memory_btn.setMinimumHeight(48)
+        self._free_memory_btn.setCursor(Qt.PointingHandCursor)
+        self._free_memory_btn.setToolTip(
+            "Close the biggest other programs so the run has system memory. "
+            "Lists them and asks first.")
+        self._free_memory_btn.clicked.connect(self.free_memory_requested.emit)
+        start_stop.addWidget(self._free_memory_btn)
         # Config check right where the launch happens (user feedback: it was only
         # discoverable inside Options). Inspection aid, not a run control.
         config_btn = QPushButton("📜")
@@ -1006,6 +1016,7 @@ class HomeTab(QWidget):
         self._model_combo.setEnabled(not active)
         self._style_combo.setEnabled(not active)
         self._advanced_btn.setEnabled(not active)
+        self._free_memory_btn.setEnabled(not active)
 
     def set_advanced_count(self, n: int):
         """Show how many advanced settings this run changes (hidden when none)."""

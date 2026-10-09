@@ -470,6 +470,7 @@ class MainWindow(QMainWindow):
         self._home_tab.preset_pick_requested.connect(self._open_preset_picker)
         self._advanced_panel = None
         self._home_tab.advanced_settings_requested.connect(self._open_advanced_settings)
+        self._home_tab.free_memory_requested.connect(self._free_memory)
         self._train_tab.config_overrides_changed.connect(self._home_tab.set_advanced_count)
         # 📜 beside Start → the same config preview the Options modal offers
         self._home_tab.preview_config_requested.connect(self._train_tab._preview_config)
@@ -646,6 +647,40 @@ class MainWindow(QMainWindow):
         select_btn.clicked.connect(_select)
         lst.itemDoubleClicked.connect(lambda _i: _select())
         modal.open()
+
+    def _free_memory(self):
+        """Close the biggest other programs so the run has system memory -- after
+        naming every one and asking, because anything unsaved in them is lost."""
+        from core import models, run_prep, sysmem
+        model = models.get(self._train_tab.model())
+        target = run_prep.room_target_gb(model.engine)
+        have, plan = sysmem.plan_room(target)
+        if have is None:
+            QMessageBox.information(self, "Free memory",
+                                    "Windows would not report free memory, so nothing was closed.")
+            return
+        if not plan:
+            QMessageBox.information(
+                self, "Free memory",
+                f"There is already enough free memory for a {model.name} run "
+                f"({have:.0f} GB free).")
+            return
+        lines = "\n".join(f"  • {label} — {gb:.0f} GB" for _pid, label, gb in plan)
+        answer = QMessageBox.warning(
+            self, "Free memory",
+            f"A {model.name} run wants about {target:.0f} GB of system memory; "
+            f"{have:.0f} GB is free.\n\nThese programs will be closed to free memory "
+            f"for the run. Anything unsaved in them will be lost:\n\n{lines}\n\n"
+            "Close them now?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if answer != QMessageBox.Yes:
+            return
+        closed = [label.split(" (PID")[0] for pid, label, _gb in plan if sysmem.close_tree(pid)]
+        now = sysmem.available_commit_gb()
+        free_text = f" — {now:.0f} GB free now" if now is not None else ""
+        self._status_bar.showMessage(
+            ("Closed " + ", ".join(closed) if closed else "Nothing could be closed")
+            + free_text + ".", 10000)
 
     def _open_advanced_settings(self):
         """Every setting the chosen model's engine will receive, editable (full control)."""
