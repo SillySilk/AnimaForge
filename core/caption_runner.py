@@ -36,6 +36,23 @@ _STYLE_CHAINS = {
 _STYLE_SOURCES = {"prose": ("nl",), "tags": ("tags",), "prose+tags": ("nl", "tags")}
 
 
+def vram_warning():
+    """The pre-describe memory warning line, or None. Never raises: an unreadable
+    probe is no reason to block or crash a caption run. Uses the describe threshold,
+    not training's: a 4-bit describe model needs about 6 GB."""
+    threshold = AppSettings().get("min_free_vram_describe_mb")
+    if not threshold:
+        return None
+    try:
+        free = free_vram_mb()
+    except Exception:
+        return None
+    if free is None or free >= threshold:
+        return None
+    return (f"[Caption] only {free} MB VRAM free — the describe model may run out of "
+            f"memory. Close other GPU apps if it fails.")
+
+
 def chain_for_style(style: str) -> list:
     """The caption stages a caption style runs (core.models.CAPTION_STYLES)."""
     if style not in _STYLE_CHAINS:
@@ -140,17 +157,10 @@ class CaptionRunner(QObject):
         return True
 
     def _warn_if_vram_low(self):
-        """Best-effort pre-describe VRAM probe; describe is the only GPU stage that
-        loads a large model here. Warn-only: 0 disables it, an unreadable reading is
-        skipped, and a low reading never blocks the run."""
-        threshold = AppSettings().get("min_free_vram_mb")
-        if not threshold:
-            return
-        free = free_vram_mb()
-        if free is not None and free < threshold:
-            self.log_line.emit(
-                f"[Caption] only {free} MB VRAM free — the describe model may fail or "
-                f"fall back to CPU. Close other GPU apps if it does.")
+        """Best-effort pre-describe VRAM probe (see vram_warning). Never blocks."""
+        line = vram_warning()
+        if line:
+            self.log_line.emit(line)
 
     def stop(self):
         """Abort the chain. Emits finished(False) exactly once, whether or not a

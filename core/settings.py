@@ -104,6 +104,9 @@ DEFAULTS = {
     "save_every_n_steps": 250,
     # Pre-launch guard: warn if free VRAM is below this many MB before training (0 disables).
     "min_free_vram_mb": 12000,
+    # Describe (JoyCaption etc.) runs 4-bit and needs ~6 GB, far less than training;
+    # warn below this before a describe pass. 0 disables.
+    "min_free_vram_describe_mb": 7000,
     # Windows only: force USE_LIBUV=0 for training even when the user's own
     # environment already sets one (Setup → Training Environment). Off by default —
     # training_env_overrides() normally leaves an explicit USE_LIBUV alone so a

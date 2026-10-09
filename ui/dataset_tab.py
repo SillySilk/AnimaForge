@@ -1417,6 +1417,10 @@ class DatasetTab(QWidget):
         self._tagger_log.setVisible(True)
         self._tagger_log.clear()
         self._tagger_log.append("⚠ Do not close the app while captioning/downloading is in progress.\n")
+        from core.caption_runner import vram_warning
+        line = vram_warning()
+        if line:
+            self._tagger_log.append(line)
         self._describe_btn.setEnabled(False)
         self._describe_btn.setText("📝 Captioning…")
         self._joycaption.start(

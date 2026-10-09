@@ -239,7 +239,7 @@ def _start_with(monkeypatch, tmp_path, free, threshold, chain):
     import core.caption_runner as m
     monkeypatch.setattr(m, "free_vram_mb", lambda: free)
     monkeypatch.setattr(m.AppSettings, "get",
-                        lambda self, k: threshold if k == "min_free_vram_mb" else None)
+                        lambda self, k: threshold if k == "min_free_vram_describe_mb" else None)
     (tmp_path / "a.png").write_bytes(b"x")
     runner = CaptionRunner()
     monkeypatch.setattr(runner._joy, "start", lambda **kw: None)
@@ -263,7 +263,7 @@ def test_no_describe_stage_never_probes(monkeypatch, tmp_path):
     probed = []
     monkeypatch.setattr(m, "free_vram_mb", lambda: probed.append(1) or 0)
     monkeypatch.setattr(m.AppSettings, "get",
-                        lambda self, k: 12000 if k == "min_free_vram_mb" else None)
+                        lambda self, k: 12000 if k == "min_free_vram_describe_mb" else None)
     (tmp_path / "a.png").write_bytes(b"x")
     runner = CaptionRunner()
     monkeypatch.setattr(runner._tagger, "start", lambda **kw: None)
@@ -273,3 +273,41 @@ def test_no_describe_stage_never_probes(monkeypatch, tmp_path):
 
 def test_zero_threshold_disables_the_probe(monkeypatch, tmp_path):
     assert not _start_with(monkeypatch, tmp_path, 10, 0, ["describe", "combine"])
+
+
+def _settings(monkeypatch, values):
+    import core.caption_runner as m
+    monkeypatch.setattr(m.AppSettings, "get", lambda self, k: values.get(k))
+
+
+def test_describe_warning_uses_its_own_threshold(monkeypatch):
+    import core.caption_runner as m
+    _settings(monkeypatch, {"min_free_vram_describe_mb": 7000, "min_free_vram_mb": 12000})
+    monkeypatch.setattr(m, "free_vram_mb", lambda: 9000)
+    assert m.vram_warning() is None             # enough for describe, under the training bar
+    monkeypatch.setattr(m, "free_vram_mb", lambda: 5000)
+    line = m.vram_warning()
+    assert "5000 MB" in line and "run out of memory" in line and "CPU" not in line
+
+
+def test_describe_warning_survives_a_failing_probe(monkeypatch):
+    import core.caption_runner as m
+    _settings(monkeypatch, {"min_free_vram_describe_mb": 7000})
+
+    def boom():
+        raise OSError("nvidia-smi hung")
+    monkeypatch.setattr(m, "free_vram_mb", boom)
+    assert m.vram_warning() is None
+
+
+def test_manual_describe_warns_too(tmp_path, monkeypatch):
+    import core.caption_runner as m
+    from ui.dataset_tab import DatasetTab
+    _settings(monkeypatch, {"min_free_vram_describe_mb": 7000})
+    monkeypatch.setattr(m, "free_vram_mb", lambda: 2000)
+    t = DatasetTab()
+    t._folder_path = str(tmp_path)
+    monkeypatch.setattr(t._joycaption, "start", lambda **kw: None)
+    monkeypatch.setattr(t, "_begin_caption", lambda proc: None)
+    t._start_describe()
+    assert "2000 MB" in t._tagger_log.toPlainText()
