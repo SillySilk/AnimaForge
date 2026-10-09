@@ -468,6 +468,9 @@ class MainWindow(QMainWindow):
 
         # PRESET button on the Set card → the picker (MainWindow owns preset data)
         self._home_tab.preset_pick_requested.connect(self._open_preset_picker)
+        self._advanced_panel = None
+        self._home_tab.advanced_settings_requested.connect(self._open_advanced_settings)
+        self._train_tab.config_overrides_changed.connect(self._home_tab.set_advanced_count)
         # 📜 beside Start → the same config preview the Options modal offers
         self._home_tab.preview_config_requested.connect(self._train_tab._preview_config)
 
@@ -643,6 +646,52 @@ class MainWindow(QMainWindow):
         select_btn.clicked.connect(_select)
         lst.itemDoubleClicked.connect(lambda _i: _select())
         modal.open()
+
+    def _open_advanced_settings(self):
+        """Every setting the chosen model's engine will receive, editable (full control)."""
+        from core import models
+        from ui.advanced_settings import AdvancedSettingsPanel
+        from ui.forge_modal import ForgeModal
+        self._advanced_panel = None
+        flat, msg = self._train_tab.base_config()
+        if flat is None:
+            QMessageBox.warning(self, "Advanced settings", msg)
+            return
+        name = models.get(self._train_tab.model()).name
+        modal = ForgeModal(
+            self, title=f"Advanced settings — {name}", eyebrow="The Set · Advanced",
+            subtitle="Everything the trainer will receive for this run. Changed settings "
+                     "are highlighted; they apply to this run until you change model.",
+            max_width=880)
+        panel = AdvancedSettingsPanel(flat, self._train_tab.config_overrides())
+        modal.body.addWidget(panel)
+        self._advanced_panel = panel
+        self._advanced_modal = modal
+        self._add_advanced_footer(modal)
+        modal.closed.connect(lambda: setattr(self, "_advanced_panel", None))
+        modal.open()
+
+    def _add_advanced_footer(self, modal):
+        modal.add_footer_button("Close").clicked.connect(modal.close_modal)
+        apply_btn = modal.add_footer_button("Apply", primary=True)
+        apply_btn.clicked.connect(lambda: self._apply_advanced() and modal.close_modal())
+
+    def _apply_advanced(self) -> bool:
+        """Hand the editor's changes to the run. A value that does not fit its setting
+        is refused (naming it) and the editor stays open."""
+        panel = self._advanced_panel
+        if panel is None:
+            return False
+        try:
+            overrides = panel.overrides()
+        except ValueError as e:
+            QMessageBox.warning(self, "Advanced settings",
+                                f"These values don't fit their settings:\n\n{e}")
+            return False
+        self._train_tab.set_config_overrides(overrides)
+        self._status_bar.showMessage(
+            f"Advanced settings: {len(overrides)} changed for this run.", 6000)
+        return True
 
     def _apply_preset_by_name(self, name: str):
         from core import train_presets as tp

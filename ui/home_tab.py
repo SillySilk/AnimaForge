@@ -61,6 +61,7 @@ class HomeTab(QWidget):
     preset_pick_requested = Signal()  # PRESET button — MainWindow opens the picker (owns the data)
     model_changed = Signal(str)          # model preset id (Anima / Krea 2)
     caption_style_changed = Signal(str)  # prose / tags / prose+tags
+    advanced_settings_requested = Signal()  # "Advanced…" — MainWindow opens the settings editor
     preview_config_requested = Signal()  # 📜 beside Start — inspect the exact TOMLs pre-launch
 
     _GLYPH = {"ok": "✓", "idle": "–", "err": "✗"}
@@ -361,6 +362,18 @@ class HomeTab(QWidget):
             "Add your own in Setup → Training Presets.")
         self._preset_btn.clicked.connect(self.preset_pick_requested.emit)
         sub_row.addWidget(self._preset_btn)
+        self._advanced_btn = QPushButton("Advanced…")
+        self._advanced_btn.setObjectName("af_btn_ghost")
+        self._advanced_btn.setMinimumHeight(36)
+        self._advanced_btn.setCursor(Qt.PointingHandCursor)
+        self._advanced_btn.setToolTip(
+            "Every setting the trainer will receive for this run — change any of them.")
+        self._advanced_btn.clicked.connect(self.advanced_settings_requested.emit)
+        sub_row.addWidget(self._advanced_btn)
+        self._advanced_label = QLabel("")
+        self._advanced_label.setObjectName("af_eyebrow_mute")
+        self._advanced_label.setVisible(False)
+        sub_row.addWidget(self._advanced_label)
         sub_row.addStretch()
         gear = QPushButton("⚙")
         gear.setObjectName("af_icon_btn")
@@ -992,6 +1005,12 @@ class HomeTab(QWidget):
         # A run's model and caption style are fixed once it has started.
         self._model_combo.setEnabled(not active)
         self._style_combo.setEnabled(not active)
+        self._advanced_btn.setEnabled(not active)
+
+    def set_advanced_count(self, n: int):
+        """Show how many advanced settings this run changes (hidden when none)."""
+        self._advanced_label.setText(f"Advanced: {n} changed")
+        self._advanced_label.setVisible(n > 0)
 
     # ---- refresh + nav ----
     def _go(self, index):
