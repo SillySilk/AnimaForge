@@ -57,6 +57,27 @@ def _free_vram_mb():
     return None
 
 
+def load_cast(folder):
+    """The folder's character cast, read before the heavy model loads so a damaged
+    cast file fails in seconds with its name, not after a ~17 GB load.
+
+    Returns (cast, "") or (None, problem). The app root is appended to sys.path, not
+    prepended, so its packages never shadow a library imported later.
+    """
+    root = str(Path(__file__).resolve().parents[1])
+    if root not in sys.path:
+        sys.path.append(root)
+    from core import characters
+    name = Path(characters.path_for(str(folder))).name
+    try:
+        cast = characters.load(str(folder))
+        for image_name in list(cast.assignments):
+            characters.explicit_tokens_for_image(cast, image_name)
+    except Exception as e:
+        return None, f"cannot read the cast file {name}: {e}"
+    return cast, ""
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("image_folder")
@@ -99,6 +120,13 @@ def main():
     if not todo:
         log("[JoyCaption] All images already have captions (use overwrite to redo).")
         return 0
+
+    # Named people go into the prompt so the prose uses their names (core/characters.py).
+    cast, problem = load_cast(folder)
+    if problem:
+        log(f"[JoyCaption] ERROR: {problem}")
+        return 1
+    from core import characters
 
     model_id = args.model_id
     log(f"[JoyCaption] Loading model {model_id}…")
@@ -178,12 +206,6 @@ def main():
 
     log(f"[JoyCaption] Model ready on {device} ({'4-bit' if loaded_4bit else 'bf16'}). "
         f"Captioning {len(todo)} image(s)…")
-
-    # Named people go into the prompt so the prose uses their names (core/characters.py).
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from core import characters
-
-    cast = characters.load(str(folder))
 
     def convo_for(img):
         convo = [
