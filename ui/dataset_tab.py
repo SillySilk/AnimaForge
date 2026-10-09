@@ -430,8 +430,18 @@ class DatasetTab(QWidget):
     # ------------------------------------------------------------------
 
     def _build_process_chain(self) -> list:
-        """Steps the ▶ Process / Home auto-pipeline runs, in order."""
-        return ["tag", "describe", "combine"]
+        """Steps the ▶ Process / Home auto-pipeline runs, in order: the caption style's."""
+        from core.caption_runner import chain_for_style
+        return chain_for_style(self._caption_style_now())
+
+    def set_caption_style(self, style: str):
+        """Prose / Tags / Prose + tags, mirrored from Home (core.models.CAPTION_STYLES)."""
+        from core.caption_runner import chain_for_style
+        chain_for_style(style)                 # ValueError names an unknown style
+        self._caption_style = style
+
+    def _caption_style_now(self) -> str:
+        return getattr(self, "_caption_style", "prose+tags")
 
     def _chain_arrow_text(self, chain=None) -> str:
         chain = chain if chain else self._build_process_chain()
@@ -1238,6 +1248,7 @@ class DatasetTab(QWidget):
             describe_cache_dir=describe_cache or "",
             caption_rules=parse_rules(AppSettings().get("caption_rules_json")),
             name_subject=self._names_subject(),
+            caption_style=self._caption_style_now(),
         )
 
     def _begin_runner_ui(self):

@@ -717,3 +717,21 @@ def test_caption_job_follows_the_subject_type(tmp_path):
     assert t._build_caption_job("keep").name_subject is False
     t.set_subject_type("character")
     assert t._build_caption_job("keep").name_subject is True
+
+
+def test_dataset_tab_chain_follows_the_caption_style(tmp_path):
+    from ui.dataset_tab import DatasetTab
+    t = DatasetTab()
+    t._folder_path = str(tmp_path)
+    assert t._build_process_chain() == ["tag", "describe", "combine"]
+    t.set_caption_style("prose")
+    assert t._build_process_chain() == ["describe", "combine"]
+    job = t._build_caption_job("keep")
+    assert job.chain == ["describe", "combine"] and job.caption_style == "prose"
+
+
+def test_dataset_tab_refuses_an_unknown_style():
+    import pytest
+    from ui.dataset_tab import DatasetTab
+    with pytest.raises(ValueError, match="haiku"):
+        DatasetTab().set_caption_style("haiku")
