@@ -186,7 +186,7 @@ def test_generated_config_carries_resolution_and_cadence(tmp_path: Path):
     cfg = toml.load(t._config_path)
     assert cfg["training_arguments"]["resolution"] == "512,512"
     assert cfg["saving_arguments"]["save_every_n_epochs"] == 2
-    assert cfg["saving_arguments"]["save_last_n_epochs"] == 5
+    assert "save_last_n_epochs" not in cfg["saving_arguments"]   # applied after the run
     ds_cfg = toml.load(t._dataset_config_path)
     assert ds_cfg["datasets"][0]["resolution"] == 512
 

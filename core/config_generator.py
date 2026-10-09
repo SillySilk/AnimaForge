@@ -74,17 +74,15 @@ PRODIGY_OPTIMIZER_ARGS = [
 
 
 def _saving_block(epochs: int, save_every_n_epochs, save_last_n_epochs) -> dict:
-    """Epoch-save cadence. every: None/0 → auto (a fifth of the run); keep-last:
-    None → 3 (legacy default), 0 → keep all (key omitted so sd-scripts never prunes)."""
-    block = {
+    """Epoch-save cadence. every: None/0 -> auto, a tenth of the run (so run safety
+    has a snapshot from near any point to ship). Keep-last is never handed to
+    sd-scripts: it keeps every epoch save until the run ends, and run safety
+    (core/engines/kohya/safety.prune) applies the user's keep-last afterwards, so
+    the best epoch is still on disk when an overshoot is found."""
+    return {
         "save_every_n_epochs": int(save_every_n_epochs) if save_every_n_epochs
-        else max(1, epochs // 5),
+        else max(1, round(epochs / 10)),
     }
-    if save_last_n_epochs is None:
-        block["save_last_n_epochs"] = 3
-    elif int(save_last_n_epochs) > 0:
-        block["save_last_n_epochs"] = int(save_last_n_epochs)
-    return block
 
 
 def generate_configs(

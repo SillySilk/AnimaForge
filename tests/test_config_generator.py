@@ -1,3 +1,4 @@
+import pytest
 import sys
 from pathlib import Path
 
@@ -226,23 +227,24 @@ def test_resolution_leaves_bucket_range_alone(tmp_path):
 
 
 def test_epoch_save_cadence_defaults_to_auto_formula(tmp_path):
-    main, _ = _gen(tmp_path)  # epochs=10 -> every 2, keep last 3
+    main, _ = _gen(tmp_path)  # epochs=10 -> every tenth of the run = every epoch
     s = main["saving_arguments"]
-    assert s["save_every_n_epochs"] == 2
-    assert s["save_last_n_epochs"] == 3
+    assert s["save_every_n_epochs"] == 1
+    # keep-last is applied by run safety after the run, never handed to sd-scripts
+    assert "save_last_n_epochs" not in s
 
 
 def test_epoch_save_cadence_override(tmp_path):
     main, _ = _gen(tmp_path, save_every_n_epochs=1, save_last_n_epochs=8)
     s = main["saving_arguments"]
     assert s["save_every_n_epochs"] == 1
-    assert s["save_last_n_epochs"] == 8
+    assert "save_last_n_epochs" not in s
 
 
 def test_epoch_save_zero_means_auto(tmp_path):
     # 0 is the UI spinner's "auto" sentinel — same as not passing it.
     main, _ = _gen(tmp_path, save_every_n_epochs=0)
-    assert main["saving_arguments"]["save_every_n_epochs"] == 2
+    assert main["saving_arguments"]["save_every_n_epochs"] == 1
 
 
 def test_keep_all_epoch_saves_when_last_n_zero(tmp_path):
@@ -261,3 +263,14 @@ def test_training_comment(tmp_path):
     assert main["training_arguments"]["training_comment"] == "mychar"
     main2, _ = _gen(tmp_path)
     assert "training_comment" not in main2["training_arguments"]
+
+
+@pytest.mark.parametrize("epochs,every", [(10, 1), (14, 1), (20, 2), (25, 2), (30, 3)])
+def test_auto_epoch_saves_land_every_tenth(tmp_path, epochs, every):
+    main, _ = _gen(tmp_path, epochs=epochs)
+    assert main["saving_arguments"]["save_every_n_epochs"] == every
+
+
+def test_keep_last_is_not_handed_to_sd_scripts(tmp_path):
+    main, _ = _gen(tmp_path, save_last_n_epochs=3)
+    assert "save_last_n_epochs" not in main["saving_arguments"]
