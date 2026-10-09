@@ -282,7 +282,8 @@ def closable(rows, protected) -> list:
         # end -- not one this app started (protected above) and not one started
         # by hand from OneTrainer either. This rule wrote itself the day the test
         # suite closed a live run.
-        if "train.py" in text.lower():
+        # (sd-scripts' anima_train_network.py too: a hand-started Anima run.)
+        if "train.py" in text.lower() or "train_network.py" in text.lower():
             continue
         if len(text) > _LABEL_CHARS:
             text = text[:_LABEL_CHARS - 1] + "…"

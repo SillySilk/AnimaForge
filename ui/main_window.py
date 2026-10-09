@@ -659,11 +659,19 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Free memory",
                                     "Windows would not report free memory, so nothing was closed.")
             return
-        if not plan:
+        if have >= target:
             QMessageBox.information(
                 self, "Free memory",
                 f"There is already enough free memory for a {model.name} run "
                 f"({have:.0f} GB free).")
+            return
+        if not plan:
+            QMessageBox.information(
+                self, "Free memory",
+                f"A {model.name} run wants about {target:.0f} GB of system memory and "
+                f"{have:.0f} GB is free (short by {target - have:.0f} GB), but no other "
+                "program is holding enough to be worth closing. Raising the Windows "
+                "pagefile size would give the run more room.")
             return
         lines = "\n".join(f"  • {label} — {gb:.0f} GB" for _pid, label, gb in plan)
         answer = QMessageBox.warning(
@@ -671,7 +679,9 @@ class MainWindow(QMainWindow):
             f"A {model.name} run wants about {target:.0f} GB of system memory; "
             f"{have:.0f} GB is free.\n\nThese programs will be closed to free memory "
             f"for the run. Anything unsaved in them will be lost:\n\n{lines}\n\n"
-            "Close them now?",
+            + (f"Even then it would be about {target - have - sum(g for *_x, g in plan):.0f} GB "
+               "short.\n\n" if have + sum(g for *_x, g in plan) < target else "")
+            + "Close them now?",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if answer != QMessageBox.Yes:
             return
