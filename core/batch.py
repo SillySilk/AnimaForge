@@ -531,6 +531,9 @@ class BatchRunner(QObject):
         run = self._runs[self._idx]
         run.status = DONE if success else FAILED
         if success:
+            note = getattr(self._trainer, "last_safety_note", "") if not shipped else ""
+            if note:
+                self.log_line.emit(f"[Batch] '{run.lora_name}': {note}")
             self._maybe_deliver(run, shipped)
         self.run_finished.emit(self._idx, success)
         if not success:

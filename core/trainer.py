@@ -7,7 +7,7 @@ except ImportError:  # pragma: no cover - winreg only exists on Windows
     winreg = None
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QProcess, Signal
+from PySide6.QtCore import QTimer, QObject, QProcess, Signal
 
 from utils.proc import apply_no_window
 
@@ -44,6 +44,10 @@ def training_env_overrides(existing=None, windows=None, force=False) -> dict:
         "PYTHONUTF8": "1",
         "PYTHONWARNINGS": "ignore::UserWarning",
         "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
+        # sd-scripts prints "epoch N/M" to stdout, which Python block-buffers into a
+        # pipe: without this every epoch line arrives in one burst at exit and run
+        # safety (core/engines/kohya/safety.py) never sees an epoch close.
+        "PYTHONUNBUFFERED": "1",
     }
     if windows and (force or not existing.get("USE_LIBUV")):
         env["USE_LIBUV"] = "0"
@@ -232,23 +236,36 @@ class TrainingProcess(QObject):
         self._watch = None
         self._safety_found = None
         self._user_stopped = False
+        self._since = None
+        self._partial = ""
+        # What run safety did to the last run ("" when nothing): read by the Train
+        # tab and the batch when training_finished(True) arrives.
+        self.last_safety_note = ""
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
-    def set_safety(self, run_dir: str, output_name: str, keep_last: int):
+    def set_safety(self, run_dir: str, output_name: str, keep_last: int,
+                   resume: bool = False):
         """Watch the next run: stop a blow-up and ship its last good epoch save,
         ship the best one after an overshoot, refuse a final file that never
         learned, then apply keep-last. Cleared when that run ends."""
         self._safety = {"run_dir": run_dir, "output_name": output_name,
-                        "keep_last": int(keep_last or 0)}
+                        "keep_last": int(keep_last or 0), "resume": bool(resume)}
 
     def _arm_safety(self):
         from core.engines.kohya.safety import LossWatch
         self._user_stopped = False
         self._safety_found = None
         self._watch = LossWatch() if self._safety else None
+        self.last_safety_note = ""
+        self._partial = ""
+        # Epoch saves older than this launch belong to an earlier run in the same
+        # folder. A resumed run continues its own, so it keeps them all.
+        import time
+        resume = bool(self._safety and self._safety.get("resume"))
+        self._since = None if resume else time.time() - 2
 
     def set_total_steps(self, total_steps: int):
         self._total_steps = max(1, total_steps)
@@ -324,12 +341,28 @@ class TrainingProcess(QObject):
         self._stop_process()
 
     def _stop_process(self):
-        if self._process is not None:
-            if self._process.state() != QProcess.NotRunning:
-                self._process.terminate()
-                if not self._process.waitForFinished(5000):
-                    self._process.kill()
-            self._process = None
+        proc = self._process
+        if proc is not None:
+            if proc.state() != QProcess.NotRunning:
+                # accelerate launches the trainer as a child: end the whole tree, or
+                # the child keeps writing while run safety moves its files.
+                pid = int(proc.processId() or 0) if hasattr(proc, "processId") else 0
+                if pid and sys.platform.startswith("win"):
+                    import subprocess
+                    subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                                   capture_output=True)
+                else:
+                    proc.terminate()
+                if not proc.waitForFinished(5000):
+                    proc.kill()
+            # finished() may already have started the next queued run.
+            if self._process is proc:
+                self._process = None
+
+    def _safety_stop(self):
+        if self._safety is not None and self.is_running():
+            self._stop_process()
 
     def is_running(self) -> bool:
         if self._process is None:
@@ -344,10 +377,22 @@ class TrainingProcess(QObject):
         if self._process is None:
             return
         data = self._process.readAllStandardOutput()
-        text = bytes(data).decode("utf-8", errors="replace")
-        for line in text.splitlines():
+        self._feed_text(bytes(data).decode("utf-8", errors="replace"))
+
+    def _feed_text(self, text: str):
+        """Lines out of a chunk of output; an unfinished last line waits for the
+        next chunk so "epoch 5/" + "10" is read as one line."""
+        text = self._partial + text
+        parts = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+        self._partial = parts.pop()
+        for line in parts:
             if line:
                 self._handle_line(line)
+
+    def _flush_partial(self):
+        line, self._partial = self._partial, ""
+        if line:
+            self._handle_line(line)
 
     def _handle_line(self, line: str):
         if "impl_abstract" in line:
@@ -366,9 +411,12 @@ class TrainingProcess(QObject):
                 from core.engines.onetrainer import verify
                 self._safety_found = found
                 self.log_line.emit(f"[AnimaForge] {verify.describe_divergence(found)}")
-                self._stop_process()
+                # Out of this handler: stopping waits for the process, and its
+                # finished() can start the next queued run.
+                QTimer.singleShot(0, self._safety_stop)
 
     def _on_finished(self, exit_code: int, exit_status):
+        self._flush_partial()
         safety, self._safety = self._safety, None
         if safety is not None and not self._user_stopped:
             self._finish_with_safety(safety, exit_code)
@@ -440,18 +488,22 @@ class TrainingProcess(QObject):
             return
         note = ""
         if found is not None:
-            _epoch, note = ks.ship(run_dir, name, found)
+            _epoch, note = ks.ship(run_dir, name, found, since=self._since)
         problem = ks.final_problem(run_dir, name)
         if problem:
             self.log_line.emit(f"[AnimaForge] {problem}")
             self.log_line.emit("[AnimaForge] Training process finished, but its LoRA is not usable.")
             self.training_finished.emit(False)
             return
-        ks.prune(run_dir, name, safety["keep_last"])
+        ks.prune(run_dir, name, safety["keep_last"], since=self._since)
         if note:
+            self.last_safety_note = note
             self.log_line.emit(f"[AnimaForge] {note}")
             self.safety_note.emit(note)
-            self.log_line.emit("[AnimaForge] Training process stopped early by run safety.")
+            self.log_line.emit(
+                "[AnimaForge] Training process stopped early by run safety."
+                if found.get("kind") == "diverged" else
+                "[AnimaForge] Training process finished; run safety shipped an earlier snapshot.")
         else:
             self.log_line.emit("[AnimaForge] Training process completed successfully.")
         self.training_finished.emit(True)

@@ -105,8 +105,10 @@ class LossWatch:
         return out
 
 
-def epoch_saves(run_dir: str, output_name: str) -> list:
-    """sd-scripts' epoch saves ({name}-{NNNNNN}.safetensors), oldest first."""
+def epoch_saves(run_dir: str, output_name: str, since=None) -> list:
+    """sd-scripts' epoch saves ({name}-{NNNNNN}.safetensors), oldest first. With
+    `since` (a timestamp), only files written at or after it: a re-used run folder
+    still holds the previous run's saves, which are not this run's to ship."""
     folder = Path(run_dir or "")
     if not folder.is_dir():
         return []
@@ -114,7 +116,7 @@ def epoch_saves(run_dir: str, output_name: str) -> list:
     found = []
     for path in folder.iterdir():
         m = pattern.match(path.name)
-        if m and path.is_file():
+        if m and path.is_file() and (since is None or path.stat().st_mtime >= since):
             found.append(snapshots.Snapshot(str(path), 0, int(m.group(1))))
     return sorted(found, key=lambda s: s.epoch)
 
@@ -128,11 +130,11 @@ def final_problem(run_dir: str, output_name: str):
     return verify.verify_output(final_path(run_dir, output_name), namespace=NAMESPACE)
 
 
-def ship(run_dir: str, output_name: str, found: dict) -> tuple:
+def ship(run_dir: str, output_name: str, found: dict, since=None) -> tuple:
     """Ship the newest healthy epoch save from at or before the last good epoch.
     Returns (shipped_epoch | None, sentence for the user)."""
     said = verify.describe(found)
-    for snap in snapshots.candidates(epoch_saves(run_dir, output_name),
+    for snap in snapshots.candidates(epoch_saves(run_dir, output_name, since),
                                      found["last_good_epoch"]):
         if verify.verify_output(snap.path, namespace=NAMESPACE) is not None:
             continue
@@ -143,13 +145,14 @@ def ship(run_dir: str, output_name: str, found: dict) -> tuple:
                   "so the final file was kept.")
 
 
-def prune(run_dir: str, output_name: str, keep_last: int, keep_epoch=None) -> int:
+def prune(run_dir: str, output_name: str, keep_last: int, keep_epoch=None,
+          since=None) -> int:
     """Apply the user's keep-last to the epoch saves (sd-scripts keeps them all
     during the run so safety can reach the best one). Never removes the epoch that
     shipped or the final file. Returns how many went."""
     if not keep_last or keep_last <= 0:
         return 0
-    saves = epoch_saves(run_dir, output_name)
+    saves = epoch_saves(run_dir, output_name, since)
     doomed = [s for s in saves[:-keep_last] if s.epoch != keep_epoch]
     removed = 0
     for snap in doomed:

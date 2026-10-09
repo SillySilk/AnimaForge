@@ -63,6 +63,7 @@ def test_a_blowup_stops_the_run_and_ships_the_last_good_epoch(tmp_path):
     fake = t._process
     for line in _epoch_lines([0.11, 0.10, 0.10, 0.10, 0.25, 0.10]):
         t._handle_line(line)
+    QCoreApplication.processEvents()           # the stop runs outside the output handler
     assert fake.terminated == 1
     assert seen["finished"] == [True]
     assert (tmp_path / "X.overshot.safetensors").is_file()

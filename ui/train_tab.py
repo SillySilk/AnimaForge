@@ -1883,7 +1883,9 @@ class TrainTab(QWidget):
             run_manifest.write_start(self._run_dir(), rd)
 
         self._trainer.set_safety(self._run_dir(), self._lora_name_edit.text().strip(),
-                                 self._keep_epochs_spin.value())
+                                 self._keep_epochs_spin.value(),
+                                 resume=bool(self._resume_check.isChecked()
+                                             and self._resume_state_path))
         self._trainer.start(self._config_path, self._setup_path)
 
     def _check_empty_captions(self, interactive: bool = True) -> bool:
@@ -2404,8 +2406,14 @@ class TrainTab(QWidget):
             from core import sets
             if kohya:
                 sets.clear_active_run()
-            self._rp(kind="done", label="Complete!")
-            self.status_message.emit("Training finished successfully.")
+            note = getattr(self._trainer, "last_safety_note", "") if kohya else ""
+            if note:
+                # Run safety shipped an earlier snapshot: say so, not "success".
+                self._rp(kind="done", label="Done — earlier snapshot shipped")
+                self.status_message.emit(note)
+            else:
+                self._rp(kind="done", label="Complete!")
+                self.status_message.emit("Training finished successfully.")
             if not kohya and self._app_settings and (
                     self._app_settings.get("forge_auto_deliver")
                     or self._app_settings.get("forge_auto_test")):
