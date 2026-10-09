@@ -209,6 +209,7 @@ class TrainTab(QWidget):
     training_active = Signal(bool)           # run started/ended -> Home Start/Stop state
     model_changed = Signal(str)              # model preset id (Home mirrors it)
     caption_style_changed = Signal(str)      # caption style (Home + Dataset mirror it)
+    config_overrides_changed = Signal(int)   # number of advanced-setting changes
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -249,6 +250,9 @@ class TrainTab(QWidget):
         self._model = models.DEFAULT_MODEL
         self._caption_style = models.get(self._model).caption_style
         self._onetrainer_root = ""
+        # Advanced settings: {dotted.path: value} over the engine's generated config.
+        # Per model — a Kohya path means nothing to OneTrainer — so a model change clears it.
+        self._config_overrides = {}
         self._session = None            # live OneTrainer session for a Krea 2 run
         self._ot_output = ""            # the file that session reported finishing
         self._onetrainer_factory = None  # tests inject a fake session here
@@ -339,6 +343,8 @@ class TrainTab(QWidget):
         if model_id == self._model:
             return                             # re-selecting keeps the user's step target
         self._model = model_id
+        if self._config_overrides:
+            self.set_config_overrides({})
         spin = self._target_steps_spin
         spin.blockSignals(True)
         if preset.engine == models.ONETRAINER:
@@ -355,6 +361,62 @@ class TrainTab(QWidget):
         self._caption_style = preset.caption_style
         self._recalculate()
         self.model_changed.emit(model_id)
+
+    def config_overrides(self) -> dict:
+        return dict(self._config_overrides)
+
+    def set_config_overrides(self, overrides: dict):
+        self._config_overrides = dict(overrides or {})
+        self.config_overrides_changed.emit(len(self._config_overrides))
+
+    def base_config(self) -> tuple:
+        """Every setting the current model's engine would receive for this run, before
+        advanced overrides, as a flat {dotted.path: value}. Returns (flat|None, message)."""
+        from core import config_overrides
+        if self.engine() == models.ONETRAINER:
+            valid, msg = self._validate_common()
+            if not valid:
+                return None, msg
+            from core import paths
+            from core.engines.onetrainer import preset, steps
+            name = self._lora_name_edit.text().strip()
+            plan = steps.plan(self._image_count, self._lora_type_for_subject() or "character",
+                              self.get_target_steps())
+            run_dir = paths.run_output_dir(paths.from_portable(self._output_dir), name)
+            try:
+                cfg = preset.build_run_config(preset.load_template(), run_dir,
+                                              paths.sanitize_name(name), plan["epochs"],
+                                              plan["warmup_steps"], plan["prodigy_steps"])
+            except preset.TemplateError as e:
+                return None, str(e)
+            return config_overrides.flatten(cfg), ""
+        valid, msg = self._validate_for_config()
+        if not valid:
+            return None, msg
+        import shutil
+        import tempfile
+        import toml
+        from core.config_generator import DATASET_PREFIX
+        self._ensure_sample_prompts()
+        scratch = tempfile.mkdtemp(prefix="animaforge-config-")
+        try:
+            main_cfg, dataset_cfg = generate_configs(**self._kohya_config_kwargs(scratch))
+            flat = config_overrides.flatten(toml.load(main_cfg))
+            flat.update({DATASET_PREFIX + k: v for k, v in
+                         config_overrides.flatten(toml.load(dataset_cfg)).items()})
+        except Exception as e:
+            return None, f"Could not build the settings: {e}"
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
+        # Built in a scratch folder so nothing lands in the real one; show the real paths.
+        real = self._run_dir()
+        swaps = [(Path(scratch).as_posix(), Path(real).as_posix()), (scratch, real)]
+        for path, value in flat.items():
+            if isinstance(value, str):
+                for old, new in swaps:
+                    value = value.replace(old, new)
+                flat[path] = value
+        return flat, ""
 
     def caption_style(self) -> str:
         return self._caption_style
@@ -1270,12 +1332,14 @@ class TrainTab(QWidget):
             model=self._model,
             onetrainer_root=self._onetrainer_root,
             caption_style=self._caption_style,
+            config_overrides=dict(self._config_overrides),
         )
         return rd, ""
 
     def apply_run_definition(self, rd):
         """Inverse of build_run_definition: push a saved set back into the widgets."""
         self.set_model(getattr(rd, "model", "") or models.DEFAULT_MODEL)
+        self.set_config_overrides(getattr(rd, "config_overrides", None) or {})
         if getattr(rd, "caption_style", ""):
             self.set_caption_style(rd.caption_style)
         self._lora_name_edit.setText(rd.lora_name or "")
@@ -1622,16 +1686,10 @@ class TrainTab(QWidget):
             f"border: 1px solid {border}; border-radius: 5px;"
         )
 
-    def _generate_config(self):
-        valid, msg = self._validate_for_config()
-        if not valid:
-            QMessageBox.warning(self, "Cannot Generate Config", msg)
-            return
-
-        self._ensure_sample_prompts()
+    def _kohya_config_kwargs(self, run_dir: str) -> dict:
+        """generate_configs arguments for the current UI, writing under run_dir."""
         params = self._training_params
         lora_name = self._lora_name_edit.text().strip()
-        run_dir = self._run_dir()  # per-run folder: {output_dir}/{lora_name}
         extra = {}
         if self._app_settings:
             extra.update(self._app_settings.build_extra_training_args())
@@ -1640,36 +1698,47 @@ class TrainTab(QWidget):
         # Low-VRAM overrides (only present when the user enabled+acknowledged it this session).
         from core import lowvram
         lv = lowvram.get_current() or {}
+        return dict(
+            output_dir=run_dir,
+            micro_batch=lv.get("micro_batch"),
+            grad_accum=lv.get("grad_accum"),
+            blocks_to_swap=lv.get("blocks_to_swap"),
+            fp8_base=bool(lv.get("fp8_base")),
+            lora_name=lora_name,
+            dit_path=self._dit_path,
+            qwen3_path=self._qwen3_path,
+            vae_path=self._vae_path,
+            dataset_folder=self._dataset_path,
+            epochs=params["epochs"],
+            repeats=params["repeats"],
+            optimizer=self._current_optimizer(),
+            learning_rate=self._lr_spin.value(),
+            network_dim=self._dim_spin.value(),
+            network_alpha=self._alpha_spin.value(),
+            train_text_encoder=self._train_text_encoder,
+            resolution=self._resolution_combo.currentData(),
+            enable_bucket=self._bucket_check.isChecked(),
+            save_state=self._save_state_check.isChecked(),
+            save_every_n_steps=self._ckpt_steps_spin.value(),
+            save_every_n_epochs=self._save_epochs_spin.value(),
+            save_last_n_epochs=self._keep_epochs_spin.value(),
+            resume_state_path=self._resume_state_path if self._resume_check.isChecked() else None,
+            network_weights=(self._network_weights_edit.text().strip() or None),
+            training_comment=(self._trigger_word if self._metadata_check.isChecked() and self._trigger_word else None),
+            extra_args=extra,
+        )
+
+    def _generate_config(self):
+        valid, msg = self._validate_for_config()
+        if not valid:
+            QMessageBox.warning(self, "Cannot Generate Config", msg)
+            return
+
+        self._ensure_sample_prompts()
+        run_dir = self._run_dir()  # per-run folder: {output_dir}/{lora_name}
         try:
             main_cfg, dataset_cfg = generate_configs(
-                output_dir=run_dir,
-                micro_batch=lv.get("micro_batch"),
-                grad_accum=lv.get("grad_accum"),
-                blocks_to_swap=lv.get("blocks_to_swap"),
-                fp8_base=bool(lv.get("fp8_base")),
-                lora_name=lora_name,
-                dit_path=self._dit_path,
-                qwen3_path=self._qwen3_path,
-                vae_path=self._vae_path,
-                dataset_folder=self._dataset_path,
-                epochs=params["epochs"],
-                repeats=params["repeats"],
-                optimizer=self._current_optimizer(),
-                learning_rate=self._lr_spin.value(),
-                network_dim=self._dim_spin.value(),
-                network_alpha=self._alpha_spin.value(),
-                train_text_encoder=self._train_text_encoder,
-                resolution=self._resolution_combo.currentData(),
-                enable_bucket=self._bucket_check.isChecked(),
-                save_state=self._save_state_check.isChecked(),
-                save_every_n_steps=self._ckpt_steps_spin.value(),
-                save_every_n_epochs=self._save_epochs_spin.value(),
-                save_last_n_epochs=self._keep_epochs_spin.value(),
-                resume_state_path=self._resume_state_path if self._resume_check.isChecked() else None,
-                network_weights=(self._network_weights_edit.text().strip() or None),
-                training_comment=(self._trigger_word if self._metadata_check.isChecked() and self._trigger_word else None),
-                extra_args=extra,
-            )
+                **self._kohya_config_kwargs(run_dir), overrides=self._config_overrides)
             self._config_path = main_cfg
             self._dataset_config_path = dataset_cfg
             self._config_path_label.setText(
