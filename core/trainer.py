@@ -241,6 +241,7 @@ class TrainingProcess(QObject):
         # What run safety did to the last run ("" when nothing): read by the Train
         # tab and the batch when training_finished(True) arrives.
         self.last_safety_note = ""
+        self.last_shipped_epoch = 0
 
     # ------------------------------------------------------------------
     # Public API
@@ -260,6 +261,7 @@ class TrainingProcess(QObject):
         self._safety_found = None
         self._watch = LossWatch() if self._safety else None
         self.last_safety_note = ""
+        self.last_shipped_epoch = 0
         self._partial = ""
         # Epoch saves older than this launch belong to an earlier run in the same
         # folder. A resumed run continues its own, so it keeps them all.
@@ -489,6 +491,7 @@ class TrainingProcess(QObject):
         note = ""
         if found is not None:
             _epoch, note = ks.ship(run_dir, name, found, since=self._since)
+            self.last_shipped_epoch = int(_epoch or 0)
         problem = ks.final_problem(run_dir, name)
         if problem:
             self.log_line.emit(f"[AnimaForge] {problem}")

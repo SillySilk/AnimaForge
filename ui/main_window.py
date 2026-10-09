@@ -709,6 +709,16 @@ class MainWindow(QMainWindow):
                 "Write at least one sample prompt (Train options → Sample previews) or "
                 "caption the set first: both runs preview the same prompts.")
             return False
+        from core import caption_policy as cp
+        foreign = cp.scan(rd.dataset_folder).foreign
+        if foreign and QMessageBox.question(
+                self, "Compare caption styles",
+                f"{foreign} caption(s) in this folder were not written by Anima Forge "
+                "(hand-written or from another tool). Each comparison run rebuilds every "
+                "caption in its own style, so those will be replaced. Existing prose "
+                "descriptions and tags are kept. Continue?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+            return False
         try:
             run_a, run_b, entry = compare.plan(rd, other_style, prompts)
         except ValueError as e:
@@ -752,8 +762,11 @@ class MainWindow(QMainWindow):
         entry = compare.find(group_id, root=self._compare_root)
         if entry is None:
             return
+        names = {r["name"] for r in entry["runs"]}
+        shipped = {r.lora_name: r.shipped_epoch for r in self._batch_tab.runs()
+                   if r.lora_name in names and getattr(r, "shipped_epoch", 0)}
         rows = compare.final_previews(entry, self._train_tab._output_dir,
-                                      self._comparison_statuses(entry))
+                                      self._comparison_statuses(entry), shipped)
         modal = ForgeModal(self, title="Caption style comparison",
                            eyebrow="The Set · Compare",
                            subtitle="Same prompts, same seeds — only the caption style differs.",

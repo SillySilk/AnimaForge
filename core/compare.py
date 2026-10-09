@@ -11,28 +11,11 @@ import time
 from pathlib import Path
 
 from core import models, sets
-from core.caption_policy import KEEP, OVERWRITE
-from core.dataset_manager import NL_EXT, SUPPORTED_EXTENSIONS, TAGS_EXT
+from core.caption_policy import FILL
 
 STYLE_SLUG = {"prose": "prose", "tags": "tags", "prose+tags": "prose-tags"}
 STYLE_LABEL = {"prose": "Prose", "tags": "Tags", "prose+tags": "Prose + tags"}
 RECORDS = "_comparisons"
-
-
-def _sidecar(img: Path, ext: str) -> str:
-    try:
-        return img.with_suffix(ext).read_text(encoding="utf-8").strip()
-    except OSError:
-        return ""
-
-
-def sidecars_complete(folder: str) -> bool:
-    """Every image has a non-empty .nl and .tags sidecar."""
-    p = Path(folder or "")
-    if not p.is_dir():
-        return False
-    images = [f for f in p.iterdir() if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS]
-    return bool(images) and all(_sidecar(i, NL_EXT) and _sidecar(i, TAGS_EXT) for i in images)
 
 
 def plan(rd, other_style: str, prompts: list) -> tuple:
@@ -44,15 +27,16 @@ def plan(rd, other_style: str, prompts: list) -> tuple:
         raise ValueError("Pick a caption style different from the current one.")
     stamp = time.strftime("%Y%m%d-%H%M%S")
     group = f"{rd.lora_name}-{stamp}"
-    # The first run writes both sidecars; when the folder already has them all,
-    # keeping them means both runs share the prose that is already there.
-    first_policy = KEEP if sidecars_complete(rd.dataset_folder) else OVERWRITE
+    # Both runs fill only the sidecars an image lacks (existing prose is never
+    # re-described) and rebuild every .txt in their own style. Decided here, never
+    # by the batch's caption-conflict prompt (ui/batch_tab._resolve_conflicts).
     runs = []
-    for s, policy in ((style, first_policy), (other_style, KEEP)):
+    for s in (style, other_style):
         run = copy.deepcopy(rd)
-        run.lora_name = f"{rd.lora_name}-{STYLE_SLUG[s]}"
+        # The stamp keeps a later comparison of the same set out of these folders.
+        run.lora_name = f"{rd.lora_name}-{STYLE_SLUG[s]}-{stamp[4:13]}"
         run.caption_style = s
-        run.caption_policy = policy
+        run.caption_policy = FILL
         run.compare_group = group
         run.sample_prompts = list(prompts)
         run.sample_enabled = True
@@ -92,8 +76,9 @@ def find(group_id: str, root=None):
 _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
 
 
-def _kohya_finals(run_dir: Path, name: str) -> dict:
-    """{prompt index: image} from the highest epoch sd-scripts sampled."""
+def _kohya_finals(run_dir: Path, name: str, epoch=None) -> tuple:
+    """(epoch, {prompt index: image}): the shipped epoch's samples when run safety
+    shipped an earlier snapshot and they exist, else the highest epoch sampled."""
     import re
     pattern = re.compile(rf"^{re.escape(name)}_e(\d+)_(\d+)_.*\.png$")
     by_epoch = {}
@@ -103,35 +88,50 @@ def _kohya_finals(run_dir: Path, name: str) -> dict:
             m = pattern.match(f.name)
             if m:
                 by_epoch.setdefault(int(m.group(1)), {})[int(m.group(2))] = str(f)
-    return by_epoch[max(by_epoch)] if by_epoch else {}
+    if not by_epoch:
+        return None, {}
+    chosen = epoch if epoch in by_epoch else max(by_epoch)
+    return chosen, by_epoch[chosen]
 
 
 def _onetrainer_finals(run_dir: Path) -> dict:
-    """{prompt index: image} from the shipped file's final render (samples.json order)."""
+    """{prompt index: image} from the shipped file's final render. The render writes
+    prompt i into "<i> - final/"; a prompt whose render failed simply has no folder."""
+    import re
     from core.engines.onetrainer import render
     dest = Path(render.destination(str(run_dir)))
+    out = {}
     if not dest.is_dir():
-        return {}
-    images = sorted((f for f in dest.rglob("*") if f.suffix.lower() in _IMAGE_SUFFIXES),
-                    key=lambda f: str(f))
-    return {i: str(f) for i, f in enumerate(images)}
+        return out
+    for folder in dest.iterdir():
+        m = re.match(r"^(\d+) - final$", folder.name)
+        if not (m and folder.is_dir()):
+            continue
+        images = sorted(f for f in folder.iterdir() if f.suffix.lower() in _IMAGE_SUFFIXES)
+        if images:
+            out[int(m.group(1))] = str(images[0])
+    return out
 
 
-def final_previews(entry: dict, output_base: str, statuses: dict) -> list:
-    """One row per prompt: {"prompt", "a", "b", "status": {"a", "b"}}. A side with no
-    images is None; its status comes from the batch (done / failed), else pending."""
+def final_previews(entry: dict, output_base: str, statuses: dict, shipped=None) -> list:
+    """One row per prompt: {"prompt", "a", "b", "status": {"a", "b"}, "epoch": {"a", "b"}}.
+    A side with no images is None; its status comes from the batch (done / failed),
+    else pending. `shipped` maps a run name to the epoch run safety shipped."""
     from core import paths
     engine = models.get(entry.get("model") or models.DEFAULT_MODEL).engine
     sides = []
     for run in entry["runs"][:2]:
         base = paths.from_portable(run.get("output_dir") or output_base)
         run_dir = Path(paths.run_output_dir(base, run["name"]))
-        finals = (_onetrainer_finals(run_dir) if engine == models.ONETRAINER
-                  else _kohya_finals(run_dir, run["name"]))
-        sides.append((finals, statuses.get(run["name"], "pending")))
+        if engine == models.ONETRAINER:
+            epoch, finals = None, _onetrainer_finals(run_dir)
+        else:
+            epoch, finals = _kohya_finals(run_dir, run["name"], (shipped or {}).get(run["name"]))
+        sides.append((finals, statuses.get(run["name"], "pending"), epoch))
     rows = []
     for i, prompt in enumerate(entry.get("prompts") or []):
         rows.append({"prompt": prompt,
                      "a": sides[0][0].get(i), "b": sides[1][0].get(i),
-                     "status": {"a": sides[0][1], "b": sides[1][1]}})
+                     "status": {"a": sides[0][1], "b": sides[1][1]},
+                     "epoch": {"a": sides[0][2], "b": sides[1][2]}})
     return rows

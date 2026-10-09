@@ -345,7 +345,9 @@ class BatchTab(QWidget):
         from core import caption_policy as cp
         from core.settings import AppSettings
 
-        pending = list(candidates)
+        # A comparison run's caption policy was decided when it was queued
+        # (core/compare.py); the conflict prompt never overrides it.
+        pending = [r for r in candidates if not getattr(r, "compare_group", "")]
         default = AppSettings().get("caption_existing_policy")
         conflicted = []
         plan = []   # [(run, policy), ...] — not applied until an accepted path

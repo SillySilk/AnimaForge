@@ -214,7 +214,7 @@ class AppSettings:
         return e
 
     def prepare_sample_args(self, output_dir: str, lora_name: str, trigger_word: str = "",
-                            style_anchor: str = "", prompts=None) -> dict:
+                            style_anchor: str = "", prompts=None, force: bool = False) -> dict:
         """If sample images are enabled, write the prompts file and return sample-* training args.
 
         Activation words (the trigger and the style anchor, if any) are prepended to every prompt
@@ -222,7 +222,7 @@ class AppSettings:
         present as a comma-separated token. `prompts` (a list) overrides the settings box —
         batch runs pass their own snapshot so the queue never depends on live UI state.
         """
-        if not self.get("sample_enable"):
+        if not self.get("sample_enable") and not force:
             return {}
         activations = [a.strip() for a in (trigger_word, style_anchor) if a and a.strip()]
         quality = [q.strip() for q in self.get("sample_quality_prefix").split(",") if q.strip()]
@@ -248,7 +248,7 @@ class AppSettings:
                 p = ", ".join(prefix + [p])
             # A fixed seed per prompt: previews from one epoch to the next, and from
             # two runs being compared, differ only by what the LoRA learned.
-            if " --d " not in f" {p} ":
+            if " --d " not in f" {p.lower()} ":
                 p = f"{p} --d {SAMPLE_SEED_BASE + len(lines)}"
             lines.append(p)
         cfg_dir = Path(output_dir) / "configs"

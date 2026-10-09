@@ -112,7 +112,25 @@ def plan_stages(job: CaptionJob, state) -> list:
     images = cp.images_for(state, job.policy)
     if not images:
         return []
+    if job.policy == cp.FILL:
+        # Only the sidecars each image lacks; Combine rebuilds every .txt.
+        from core.dataset_manager import NL_EXT, TAGS_EXT
+        need = {"tag": TAGS_EXT, "describe": NL_EXT}
+        out = []
+        for stage in job.chain:
+            todo = list(images) if stage not in need else [
+                i for i in images if not _has_sidecar(i, need[stage])]
+            if todo:
+                out.append((stage, todo))
+        return out
     return [(stage, list(images)) for stage in job.chain]
+
+
+def _has_sidecar(image: str, ext: str) -> bool:
+    try:
+        return bool(Path(image).with_suffix(ext).read_text(encoding="utf-8").strip())
+    except OSError:
+        return False
 
 
 class CaptionRunner(QObject):

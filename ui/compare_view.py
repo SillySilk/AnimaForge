@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 from core.compare import STYLE_LABEL
 
 IMAGE_SIZE = 384
+_STATUS = {"done": "finished", "failed": "failed", "pending": "not finished yet"}
 _MISSING = {"failed": "failed — no previews", "pending": "not finished yet",
             "done": "no preview for this prompt"}
 
@@ -31,8 +32,14 @@ class CompareView(QWidget):
         grid = QGridLayout(body)
         grid.setHorizontalSpacing(12)
         grid.setVerticalSpacing(6)
-        for col, style in enumerate(styles):
-            lbl = QLabel(style)
+        first = rows[0] if rows else {"status": {}, "epoch": {}}
+        for col, (style, side) in enumerate(zip(styles, ("a", "b"))):
+            status = first.get("status", {}).get(side, "pending")
+            epoch = (first.get("epoch") or {}).get(side)
+            text = f"{style} — {_STATUS.get(status, status)}"
+            if epoch:
+                text += f", previews from epoch {epoch}"
+            lbl = QLabel(text)
             lbl.setObjectName("af_eyebrow_mute")
             lbl.setAlignment(Qt.AlignCenter)
             grid.addWidget(lbl, 0, col)

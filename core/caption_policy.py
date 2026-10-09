@@ -15,6 +15,12 @@ from core.dataset_manager import NL_EXT, SUPPORTED_EXTENSIONS, TAGS_EXT
 ASK = "ask"
 OVERWRITE = "overwrite"
 KEEP = "keep"
+# Caption-style comparison runs: write only the sidecars an image is missing (never
+# re-describe existing prose), then rebuild every .txt in the run's own style.
+FILL = "fill"
+# Caption-style comparison runs: write only the sidecars an image is missing (never
+# re-describe existing prose), then rebuild every .txt in the run's own style.
+FILL = "fill"
 
 _UNSET = object()
 
@@ -80,5 +86,9 @@ def images_for(state: FolderCaptionState, policy: str) -> list:
         return list(state.captioned) + list(state.partial) + list(state.untouched)
     if policy == KEEP:
         return list(state.partial) + list(state.untouched)
+    if policy == FILL:
+        return list(state.captioned) + list(state.partial) + list(state.untouched)
+    if policy == FILL:
+        return list(state.captioned) + list(state.partial) + list(state.untouched)
     raise ValueError(f"policy must be {OVERWRITE!r} or {KEEP!r}, not {policy!r} "
                      "— resolve ASK in the UI before calling")

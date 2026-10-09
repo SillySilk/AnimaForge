@@ -2,7 +2,6 @@ import pytest
 
 from core import compare, sets
 from core.batch import RunDefinition
-from core.caption_policy import KEEP, OVERWRITE
 
 
 def _folder(tmp_path, tags=True, nl=True):
@@ -40,17 +39,15 @@ def test_the_two_runs_differ_only_in_caption_style(tmp_path):
 def test_comparison_runs_get_their_own_folders(tmp_path):
     a, b, _ = compare.plan(_rd(_folder(tmp_path)), "prose", ["p"])
     assert len({a.lora_name, b.lora_name, "Mr X"}) == 3
-    assert a.lora_name == "Mr X-prose-tags" and b.lora_name == "Mr X-prose"
+    assert a.lora_name.startswith("Mr X-prose-tags-") and b.lora_name.startswith("Mr X-prose-")
 
 
-def test_missing_sidecars_make_the_first_run_recaption(tmp_path):
-    a, b, _ = compare.plan(_rd(_folder(tmp_path, tags=False)), "tags", ["p"])
-    assert a.caption_policy == OVERWRITE and b.caption_policy == KEEP
-    (tmp_path / "ds" / "a0.tags").write_text("1boy", encoding="utf-8")
-    for i in (1, 2):
-        (tmp_path / "ds" / f"a{i}.tags").write_text("1boy", encoding="utf-8")
-    a, b, _ = compare.plan(_rd(tmp_path / "ds"), "tags", ["p"])
-    assert a.caption_policy == KEEP
+def test_both_runs_fill_sidecars_whatever_the_folder_holds(tmp_path):
+    # Replaced KEEP/OVERWRITE planning (review C1/C2): both runs use FILL.
+    from core.caption_policy import FILL
+    for tags in (True, False):
+        a, b, _ = compare.plan(_rd(_folder(tmp_path, tags=tags)), "tags", ["p"])
+        assert a.caption_policy == b.caption_policy == FILL
 
 
 def test_same_style_is_refused(tmp_path):
@@ -104,9 +101,9 @@ def test_krea_previews_pair_by_prompt(tmp_path):
     entry = _entry(tmp_path, model="krea2")
     for run in entry["runs"]:
         dest = Path(render.destination(paths.run_output_dir(str(tmp_path), run["name"])))
-        dest.mkdir(parents=True)
         for i in range(2):
-            (dest / f"final-{i}.jpg").write_bytes(b"x")
+            (dest / f"{i} - final").mkdir(parents=True)
+            (dest / f"{i} - final" / f"final-{i}.jpg").write_bytes(b"x")
     rows = compare.final_previews(entry, str(tmp_path), {})
     assert rows[1]["a"].endswith("final-1.jpg") and rows[1]["b"].endswith("final-1.jpg")
 

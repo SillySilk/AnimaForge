@@ -101,6 +101,8 @@ class RunDefinition:
     debug_profiles: bool = False
     # Caption-style comparison this run belongs to (core/compare.py); "" = none.
     compare_group: str = ""
+    # Set when run safety shipped an earlier epoch of this (Anima) run; 0 = the end.
+    shipped_epoch: int = 0
     # Runtime
     status: str = QUEUED
 
@@ -406,7 +408,8 @@ class BatchRunner(QObject):
             extra = app.build_extra_training_args()
             extra.update(app.prepare_sample_args(
                 run_dir, run.lora_name, run.trigger_word,
-                prompts=resolve_sample_prompts(run)))
+                prompts=resolve_sample_prompts(run),
+                force=bool(run.compare_group)))   # a comparison is its previews
             from core import lowvram
             lv = lowvram.get_current() or {}  # active only if acknowledged this session
             # Aspect-ratio bucketing divides by zero on images with a side under 64 px
@@ -538,6 +541,7 @@ class BatchRunner(QObject):
             note = getattr(self._trainer, "last_safety_note", "") if not shipped else ""
             if note:
                 self.log_line.emit(f"[Batch] '{run.lora_name}': {note}")
+                run.shipped_epoch = int(getattr(self._trainer, "last_shipped_epoch", 0) or 0)
             self._maybe_deliver(run, shipped)
         self.run_finished.emit(self._idx, success)
         if not success:

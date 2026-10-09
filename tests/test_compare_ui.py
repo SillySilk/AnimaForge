@@ -57,7 +57,7 @@ def test_queueing_adds_two_runs_and_a_record(win, tmp_path):
     from core import compare
     w, queued, warns, _rd = win
     assert w._queue_comparison("tags") is True
-    assert [r.lora_name for r in queued] == ["Mr X-prose-tags", "Mr X-tags"]
+    assert [r.lora_name.rsplit("-", 2)[0] for r in queued] == ["Mr X-prose-tags", "Mr X-tags"]
     assert len(compare.load_all(root=tmp_path)) == 1
     assert "start the batch" in w._status_bar.currentMessage()
 
