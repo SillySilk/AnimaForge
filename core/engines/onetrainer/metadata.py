@@ -189,7 +189,7 @@ def build_metadata(lora_name: str, dataset_dir: str, trigger_word: str = "",
         "ss_tag_frequency": json.dumps(tag_frequency(dataset_dir),
                                        ensure_ascii=False),
         "ss_num_train_images": str(int(image_count or 0)),
-        "krea_forge_version": APP_VERSION,
+        "animaforge_version": APP_VERSION,
     }
     if words:
         # Both spellings are in the wild: Forge/A1111 read the first as activation
@@ -198,7 +198,7 @@ def build_metadata(lora_name: str, dataset_dir: str, trigger_word: str = "",
         meta["ss_trained_words"] = joined
         meta["modelspec.trigger_phrase"] = joined
     if trigger_word:
-        meta["krea_forge_trigger"] = trigger_word
+        meta["animaforge_trigger"] = trigger_word
     for key, field in (("ss_num_epochs", "epochs"),
                        ("ss_max_train_steps", "total_steps"),
                        ("ss_steps_per_epoch", "steps_per_epoch")):

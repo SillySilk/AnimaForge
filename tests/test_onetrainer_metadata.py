@@ -212,3 +212,10 @@ def test_stamp_writes_both_copies(tmp_path):
     assert back["ss_max_train_steps"] == "400"
     assert "aria" in back["ss_trained_words"]
     assert json.loads(back["ss_tag_frequency"])[tmp_path.name]["aria"] == 2
+
+
+def test_the_app_labels_its_own_keys_as_animaforge(tmp_path):
+    (tmp_path / "a.txt").write_text("toshi, a man")
+    meta = metadata.build_metadata("Toshi", str(tmp_path), trigger_word="toshi")
+    assert "animaforge_version" in meta and meta["animaforge_trigger"] == "toshi"
+    assert not any(k.startswith("krea_forge_") for k in meta)
