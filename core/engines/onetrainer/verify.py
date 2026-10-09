@@ -221,7 +221,8 @@ def loss_by_epoch(log_text: str) -> dict:
     return out
 
 
-def overshoot(losses: dict, total_epochs: int) -> dict | None:
+def overshoot(losses: dict, total_epochs: int, rise: float = OVERSHOOT_RISE,
+              settle: float = SETTLING_FRACTION) -> dict | None:
     """The overshoot in this loss curve, or None when the run ended near its best.
 
     The best epoch is the lowest end-of-epoch loss after SETTLING_FRACTION of the
@@ -231,35 +232,36 @@ def overshoot(losses: dict, total_epochs: int) -> dict | None:
         return None
     epochs = sorted(losses)
     final_epoch = epochs[-1]
-    first_counted = max(1, round(int(total_epochs or final_epoch) * SETTLING_FRACTION))
+    first_counted = max(1, round(int(total_epochs or final_epoch) * settle))
     candidates = [e for e in epochs if e >= first_counted] or epochs
     best_epoch = min(candidates, key=lambda e: losses[e])
     best, final = losses[best_epoch], losses[final_epoch]
     if best <= 0:
         return None
-    rise = final / best - 1.0
-    if rise < OVERSHOOT_RISE:
+    grew = final / best - 1.0
+    if grew < rise:
         return None
     return {"kind": "overshoot", "last_good_epoch": best_epoch, "best_epoch": best_epoch, "best": best, "final_epoch": final_epoch,
-            "final": final, "rise": rise, "total_epochs": int(total_epochs or final_epoch)}
+            "final": final, "rise": grew, "total_epochs": int(total_epochs or final_epoch)}
 
 
-def divergence(losses: dict, total_epochs: int) -> dict | None:
+def divergence(losses: dict, total_epochs: int, rise: float = DIVERGENCE_RISE,
+               settle: float = SETTLING_FRACTION) -> dict | None:
     """The first epoch whose loss jumped DIVERGENCE_RISE or more above the best
     before it, or None. Epochs in the first SETTLING_FRACTION of the run are
     neither a best nor a jump."""
     total = int(total_epochs or (max(losses) if losses else 0))
-    first_counted = max(1, round(total * SETTLING_FRACTION))
+    first_counted = max(1, round(total * settle))
     best_epoch = None
     for e in sorted(losses):
         if e < first_counted:
             continue
         if best_epoch is not None and losses[best_epoch] > 0:
-            rise = losses[e] / losses[best_epoch] - 1.0
-            if rise >= DIVERGENCE_RISE:
+            jump = losses[e] / losses[best_epoch] - 1.0
+            if jump >= rise:
                 return {"kind": "diverged", "last_good_epoch": e - 1,
                         "best_epoch": best_epoch, "best": losses[best_epoch],
-                        "spike_epoch": e, "spike": losses[e], "rise": rise,
+                        "spike_epoch": e, "spike": losses[e], "rise": jump,
                         "total_epochs": total}
         if best_epoch is None or losses[e] < losses[best_epoch]:
             best_epoch = e
