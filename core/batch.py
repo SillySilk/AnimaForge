@@ -99,6 +99,8 @@ class RunDefinition:
     config_overrides: dict = field(default_factory=dict)
     # Krea 2: write OneTrainer profiler traces (Setup switch, snapshotted per run).
     debug_profiles: bool = False
+    # Caption-style comparison this run belongs to (core/compare.py); "" = none.
+    compare_group: str = ""
     # Runtime
     status: str = QUEUED
 

@@ -1,0 +1,75 @@
+import pytest
+
+from core import compare, sets
+from core.batch import RunDefinition
+from core.caption_policy import KEEP, OVERWRITE
+
+
+def _folder(tmp_path, tags=True, nl=True):
+    ds = tmp_path / "ds"
+    ds.mkdir(exist_ok=True)
+    for i in range(3):
+        (ds / f"a{i}.png").write_bytes(b"x")
+        if nl:
+            (ds / f"a{i}.nl").write_text("A man stands.", encoding="utf-8")
+        if tags:
+            (ds / f"a{i}.tags").write_text("1boy, solo", encoding="utf-8")
+    return ds
+
+
+def _rd(ds, **kw):
+    base = dict(lora_name="Mr X", dataset_folder=str(ds), image_count=3, model="krea2",
+                caption_style="prose+tags", trigger_word="mrx",
+                config_overrides={"learning_rate": 1})
+    base.update(kw)
+    return RunDefinition(**base)
+
+
+def test_the_two_runs_differ_only_in_caption_style(tmp_path):
+    a, b, entry = compare.plan(_rd(_folder(tmp_path)), "tags", ["p1", "p2"])
+    da, db = a.to_dict(), b.to_dict()
+    differ = {k for k in da if da[k] != db[k]}
+    assert differ <= {"lora_name", "caption_style", "caption_policy"}
+    assert a.caption_style == "prose+tags" and b.caption_style == "tags"
+    assert a.sample_prompts == b.sample_prompts == ["p1", "p2"]
+    assert a.compare_group == b.compare_group == entry["id"]
+    assert a.sample_enabled and b.sample_enabled
+    assert [r["name"] for r in entry["runs"]] == [a.lora_name, b.lora_name]
+
+
+def test_comparison_runs_get_their_own_folders(tmp_path):
+    a, b, _ = compare.plan(_rd(_folder(tmp_path)), "prose", ["p"])
+    assert len({a.lora_name, b.lora_name, "Mr X"}) == 3
+    assert a.lora_name == "Mr X-prose-tags" and b.lora_name == "Mr X-prose"
+
+
+def test_missing_sidecars_make_the_first_run_recaption(tmp_path):
+    a, b, _ = compare.plan(_rd(_folder(tmp_path, tags=False)), "tags", ["p"])
+    assert a.caption_policy == OVERWRITE and b.caption_policy == KEEP
+    (tmp_path / "ds" / "a0.tags").write_text("1boy", encoding="utf-8")
+    for i in (1, 2):
+        (tmp_path / "ds" / f"a{i}.tags").write_text("1boy", encoding="utf-8")
+    a, b, _ = compare.plan(_rd(tmp_path / "ds"), "tags", ["p"])
+    assert a.caption_policy == KEEP
+
+
+def test_same_style_is_refused(tmp_path):
+    with pytest.raises(ValueError):
+        compare.plan(_rd(_folder(tmp_path)), "prose+tags", ["p"])
+    with pytest.raises(ValueError):
+        compare.plan(_rd(_folder(tmp_path)), "haiku", ["p"])
+
+
+def test_records_round_trip_and_hide_from_sets(tmp_path):
+    _a, _b, e1 = compare.plan(_rd(_folder(tmp_path)), "tags", ["p"])
+    e1["id"] = "one"
+    compare.record(e1, root=tmp_path)
+    e2 = dict(e1, id="two")
+    compare.record(e2, root=tmp_path)
+    assert [e["id"] for e in compare.load_all(root=tmp_path)] == ["two", "one"]
+    assert sets.list_sets(root=tmp_path) == []
+
+
+def test_compare_group_round_trips():
+    rd = RunDefinition(lora_name="a", dataset_folder="d", image_count=1, compare_group="g")
+    assert RunDefinition.from_dict(rd.to_dict()).compare_group == "g"

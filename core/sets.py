@@ -70,7 +70,7 @@ def set_save_decision(name: str, existing) -> str:
 def list_sets(root=None):
     names = []
     for p in sets_dir(root).glob("*.json"):
-        if p.stem == _MARKER:
+        if p.stem in (_MARKER, "_comparisons"):   # bookkeeping, not sets
             continue
         names.append(p.stem)
     return sorted(names)
