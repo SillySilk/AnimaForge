@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from core import models
 from core.batch import BatchRunner, save_queue, load_queue, RUNNING, DONE, FAILED
 from core.batch_status import StatusWriter, default_status_path
 
@@ -182,7 +183,10 @@ class BatchTab(QWidget):
         name = QLabel(r.lora_name)
         name.setObjectName("af_display_gold")
         row.addWidget(name)
-        chips = QLabel(f"{Path(r.dataset_folder).name} · {r.target_steps} steps")
+        preset = models.MODELS.get(r.model)
+        steps = "Auto steps" if r.target_steps == 0 else f"{r.target_steps} steps"
+        chips = QLabel(f"{preset.name if preset else r.model} · "
+                       f"{Path(r.dataset_folder).name} · {steps}")
         chips.setObjectName("af_eyebrow_mute")
         row.addWidget(chips)
         row.addStretch()

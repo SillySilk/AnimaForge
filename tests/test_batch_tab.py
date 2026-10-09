@@ -430,3 +430,14 @@ def test_restart_refused_when_gpu_busy_elsewhere_before_conflict_dialog(tmp_path
 
     t._restart()
     assert restarted == []
+
+
+def test_batch_row_names_the_model_and_auto_steps(tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QLabel
+    from core.batch import RunDefinition
+    t = _make_tab(tmp_path, monkeypatch)          # queue file in tmp, never the repo's
+    t.add_run(RunDefinition("K", str(tmp_path), 3, model="krea2"))
+    t.add_run(RunDefinition("A", str(tmp_path), 3))
+    labels = " ".join(lbl.text() for lbl in t.findChildren(QLabel))
+    assert "Krea 2" in labels and "Auto steps" in labels
+    assert "Anima" in labels and "500 steps" in labels
