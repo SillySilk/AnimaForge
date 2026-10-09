@@ -9,7 +9,7 @@ to the crash.
 When the system commit limit is reached, the allocation inside PyTorch returns
 null and c10.dll dereferences it: Windows kills python.exe with an access
 violation (0xC0000005). There is no traceback, no OOM marker, no last words --
-trainer.log simply stops mid-progress-bar. The AmberHeard run on 2026-08-17 died
+trainer.log simply stops mid-progress-bar. The run_A run on 2026-08-17 died
 that way at 36% of quantization, holding 51.6 GB, while an idle Forge Neo held
 52.2 GB and the commit limit was 103.8 GB. Windows diagnosed it correctly in the
 event log; the app had nothing to say.
@@ -57,9 +57,17 @@ class _MemoryStatusEx(ctypes.Structure):
 
 
 class _UnicodeString(ctypes.Structure):
+    # Buffer is a raw pointer: the text is exactly Length bytes and need not be
+    # NUL-terminated, so it must never be read as a C string.
     _fields_ = [("Length", ctypes.c_ushort),
                 ("MaximumLength", ctypes.c_ushort),
-                ("Buffer", ctypes.c_wchar_p)]
+                ("Buffer", ctypes.c_void_p)]
+
+
+def _unicode_string_text(us) -> str:
+    if not us.Buffer or not us.Length:
+        return ""
+    return ctypes.wstring_at(us.Buffer, us.Length // ctypes.sizeof(ctypes.c_wchar))
 
 
 class _ProcessMemoryCounters(ctypes.Structure):
@@ -128,7 +136,7 @@ def _command_line(handle) -> str:
                 handle, _PROCESS_COMMAND_LINE_INFORMATION, buf, needed.value,
                 ctypes.byref(needed)) != 0:
             return ""
-        return ctypes.cast(buf, ctypes.POINTER(_UnicodeString)).contents.Buffer or ""
+        return _unicode_string_text(ctypes.cast(buf, ctypes.POINTER(_UnicodeString)).contents)
     except (AttributeError, OSError, ValueError):
         return ""
 

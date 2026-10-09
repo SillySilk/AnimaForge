@@ -53,7 +53,7 @@ def test_closable_skips_this_app_its_launchers_and_the_desktop():
             (5, "llama-server.exe", "llama-server.exe -m big.gguf", 6.5),
             # A run started by hand from OneTrainer: not ours, not protected by
             # tree, and still the one thing making room for training must not end.
-            (6, "python.exe", r"C:\AI\One Trainer\venv\Scripts\python.exe scripts\train.py --config-path x.json", 49.0)]
+            (6, "python.exe", r"D:\Tools\OneTrainer\venv\Scripts\python.exe scripts\train.py --config-path x.json", 49.0)]
     got = sysmem.closable(rows, protected={1})
     assert [pid for pid, _, _ in got] == [3, 5]                         # biggest first
     assert "WebUI" in got[0][1] and "(PID 3)" in got[0][1]
@@ -128,3 +128,16 @@ def test_make_room_stops_waiting_when_the_share_never_shows_up():
     out, closed = _room([40.0, 40.0], cands)
     assert closed == [3]
     assert out == [("a (PID 3)", 10.0)]
+
+
+def test_command_line_reads_exactly_length_not_up_to_a_nul():
+    # NtQueryInformationProcess's UNICODE_STRING need not be NUL-terminated inside
+    # Length; reading it as a C string runs past the end of the buffer.
+    import ctypes
+    text = "python.exe train.py"
+    raw = ctypes.create_unicode_buffer(text + "GARBAGE-PAST-LENGTH")
+    us = sysmem._UnicodeString()
+    us.Length = len(text) * 2
+    us.MaximumLength = us.Length
+    us.Buffer = ctypes.cast(raw, ctypes.c_void_p).value
+    assert sysmem._unicode_string_text(us) == text
