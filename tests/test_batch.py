@@ -627,3 +627,39 @@ def test_batch_reports_a_safety_stop_as_done(tmp_path, monkeypatch):
     runner._trainer.training_finished.emit(True)
     assert run.status == DONE
     assert any("epoch 4" in line for line in log)
+
+
+def test_comparison_runs_caption_both_sidecars():
+    rd = RunDefinition(lora_name="a-prose", dataset_folder="d", image_count=1,
+                       caption_style="prose", compare_group="g")
+    job = rd.to_caption_job("C:/sd", "", "keep")
+    assert "tag" in job.chain and "describe" in job.chain
+    assert job.caption_style == "prose"
+    plain = RunDefinition(lora_name="a", dataset_folder="d", image_count=1, caption_style="prose")
+    assert "tag" not in plain.to_caption_job("C:/sd", "", "keep").chain
+
+
+def test_second_run_rebuilds_its_own_style_from_shared_sidecars(tmp_path, monkeypatch):
+    from core import caption_manifest as cm
+    from core.batch import BatchRunner
+    import core.batch as batch_mod
+    folder = tmp_path / "ds"
+    folder.mkdir()
+    _png(folder, "a.png")
+    (folder / "a.nl").write_text("A man stands in a field.", encoding="utf-8")
+    (folder / "a.tags").write_text("1boy, solo, field", encoding="utf-8")
+    (folder / "a.txt").write_text("mrx, A man stands in a field. 1boy, solo, field", encoding="utf-8")
+    cm.record_settings(str(folder), "mrx", "", "nl_first", ["tag", "describe", "combine"],
+                       caption_style="prose+tags")
+    cm.mark_stage(str(folder), "combine", [str(folder / "a.png")])
+    monkeypatch.setattr(batch_mod, "generate_configs", lambda **kw: ("cfg", None))
+    runner = BatchRunner()
+    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd: None)
+    run = RunDefinition(lora_name="mrx-tags", dataset_folder=str(folder), image_count=1,
+                        trigger_word="mrx", caption_style="tags", caption_policy="keep",
+                        compare_group="g", sdscripts_path="C:/sd", enable_bucket=False,
+                        output_dir=str(tmp_path / "out"), target_steps=100)
+    runner.start([run])
+    txt = (folder / "a.txt").read_text(encoding="utf-8")
+    assert "field" in txt and "stands" not in txt
+    assert cm.load(str(folder))["caption_style"] == "tags"

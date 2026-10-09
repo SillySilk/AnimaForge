@@ -126,7 +126,9 @@ class RunDefinition:
         from core.caption_runner import CaptionJob
         from core.caption_runner import chain_for_style
         style = self.caption_style or "prose+tags"
-        chain = chain_for_style(style)
+        # A caption-style comparison writes both sidecars whatever its own style, so
+        # the other run of the pair can build its .txt from the same prose and tags.
+        chain = chain_for_style("prose+tags" if self.compare_group else style)
         return CaptionJob(
             dataset_folder=self.dataset_folder, sdscripts_path=sdscripts_path,
             trigger=self.trigger_word, prefix=self.quality_prefix,
