@@ -228,3 +228,52 @@ def test_auto_deliver_uses_the_file_the_session_reported(tmp_path, monkeypatch):
     r.start(make(tmp_path))
     s.done.emit(str(shipped))
     assert delivered == [str(shipped)]
+
+
+def test_session_that_refuses_without_saying_why_still_names_the_run(tmp_path):
+    class Silent(FakeSession):
+        def start(self, params):
+            self.started_with = params
+            return False
+
+    s, b = Silent(), FakeSession()
+    r = runner_with([s, b])
+    logs = []
+    r.log_line.connect(logs.append)
+    runs = make(tmp_path, n=2)
+    r.start(runs)
+    assert runs[0].status == FAILED
+    assert any("'K0' did not start: OneTrainer refused the run" in line for line in logs)
+    assert b.started_with.lora_name == "K1"
+
+
+def test_krea2_run_without_target_steps_gets_auto_not_animas_500():
+    r = RunDefinition.from_dict({"lora_name": "K", "dataset_folder": "C:/ds", "image_count": 9,
+                                 "model": "krea2"})
+    assert r.target_steps == 0
+    assert RunDefinition("K", "C:/ds", 9, model="krea2").target_steps == 0
+    assert RunDefinition("A", "C:/ds", 9).target_steps == 500
+    assert RunDefinition("K", "C:/ds", 9, model="krea2", target_steps=750).target_steps == 750
+
+
+def test_a_v2_saved_queue_trains_through_kohya_exactly_as_before(tmp_path, monkeypatch):
+    import json
+    ds = tmp_path / "ds"
+    ds.mkdir()
+    (ds / "a.png").write_bytes(b"x")
+    (ds / "a.txt").write_text("anima, a girl")
+    qfile = tmp_path / "batch_queue.json"
+    qfile.write_text(json.dumps([{  # the shape v2 wrote: no model, no onetrainer_root
+        "lora_name": "Old", "dataset_folder": str(ds), "image_count": 1, "target_steps": 500,
+        "sdscripts_path": "C:/sd", "caption_policy": cp.KEEP, "status": "queued"}]))
+    runs = batch_mod.load_queue(str(qfile))
+    seen = {}
+    monkeypatch.setattr(batch_mod, "generate_configs",
+                        lambda **kw: seen.update(kw) or ("cfg.toml", None))
+    r = BatchRunner(onetrainer_factory=lambda p: (_ for _ in ()).throw(AssertionError("OT")))
+    kohya = []
+    monkeypatch.setattr(r._trainer, "start", lambda cfg, sd: kohya.append((cfg, sd)))
+    r.start(runs)
+    assert runs[0].model == "anima"
+    assert kohya == [("cfg.toml", "C:/sd")]
+    assert seen["lora_name"] == "Old" and seen["dataset_folder"] == str(ds)

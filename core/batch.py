@@ -53,7 +53,10 @@ class RunDefinition:
     network_dim: int = 16
     network_alpha: int = 8
     train_text_encoder: bool = False
-    target_steps: int = 500
+    # Unset (-1) resolves to the model's own default in __post_init__: Anima 500,
+    # Krea 2 0 (= Auto). A queue entry lacking the key must not inherit Anima's
+    # number on a Krea run. An unknown model keeps -1; that run fails at start.
+    target_steps: int = -1
     resolution: int = 1024            # base training resolution (square)
     enable_bucket: bool = True
     save_state: bool = True
@@ -90,6 +93,12 @@ class RunDefinition:
     model: str = "anima"
     # Runtime
     status: str = QUEUED
+
+    def __post_init__(self):
+        if self.target_steps == -1:
+            preset = models.MODELS.get(self.model)
+            if preset is not None:
+                self.target_steps = preset.default_target_steps
 
     def to_dict(self) -> dict:
         return asdict(self)
