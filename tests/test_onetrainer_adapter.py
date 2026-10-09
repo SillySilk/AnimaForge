@@ -35,3 +35,8 @@ def test_krea2_run_uses_auto_steps_unless_set():
 def test_non_onetrainer_model_is_refused():
     with pytest.raises(ValueError, match="anima"):
         to_onetrainer_params(run(model="anima"))
+
+
+def test_advanced_overrides_travel_to_the_session():
+    p = to_onetrainer_params(run(config_overrides={"learning_rate": 1}))
+    assert p.config_overrides == {"learning_rate": 1}

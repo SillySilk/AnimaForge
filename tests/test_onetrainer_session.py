@@ -772,3 +772,46 @@ def test_a_stopped_blowup_with_no_snapshot_fails_and_says_why(tmp_path, monkeypa
     FakeProc.last.finished.emit(1, False)
     assert done == []
     assert failed and "blew up" in failed[0] and "snapshot" in failed[0]
+
+
+def test_session_without_overrides_writes_the_plain_config(tmp_path, monkeypatch):
+    from core.engines.onetrainer import preset, steps
+    _quiet_preflight(monkeypatch, tmp_path)
+    s = TrainingSession(process_factory=FakeProc)
+    assert s.start(_params(tmp_path)) is True
+    run = Path(s.run_dir())
+    plan = steps.plan(20, "character", 0)
+    want = preset.build_run_config(preset.load_template(), str(run), "Aria", plan["epochs"],
+                                   plan["warmup_steps"], plan["prodigy_steps"])
+    assert json.loads((run / "config.json").read_text(encoding="utf-8")) == want
+
+
+def test_session_applies_overrides_to_config_json(tmp_path, monkeypatch):
+    _quiet_preflight(monkeypatch, tmp_path)
+    s = TrainingSession(process_factory=FakeProc)
+    assert s.start(_params(tmp_path, config_overrides={
+        "learning_rate": 0.0002, "optimizer.weight_decay": 0.01})) is True
+    cfg = json.loads((Path(s.run_dir()) / "config.json").read_text(encoding="utf-8"))
+    assert cfg["learning_rate"] == 0.0002
+    assert cfg["optimizer"]["weight_decay"] == 0.01
+
+
+def test_overriding_the_output_path_ships_from_it(tmp_path, monkeypatch):
+    _quiet_preflight(monkeypatch, tmp_path)
+    s = TrainingSession(process_factory=FakeProc)
+    finished = []; s.done.connect(finished.append)
+    elsewhere = str(tmp_path / "elsewhere.safetensors")
+    assert s.start(_params(tmp_path, config_overrides={"output_model_destination": elsewhere})) is True
+    assert _output_path(s) == elsewhere
+    write_lora(elsewhere)
+    FakeProc.last.finished.emit(0, False)
+    _render_ok(s)
+    assert finished == [elsewhere]
+
+
+def test_an_override_that_cannot_apply_fails_the_start(tmp_path, monkeypatch):
+    _quiet_preflight(monkeypatch, tmp_path)
+    s = TrainingSession(process_factory=FakeProc)
+    msgs = []; s.failed.connect(msgs.append)
+    assert s.start(_params(tmp_path, config_overrides={"model_type.x": 1})) is False
+    assert "model_type.x" in msgs[-1]

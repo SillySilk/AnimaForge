@@ -583,3 +583,27 @@ def test_caption_style_roundtrips():
 def test_only_character_runs_name_the_subject_by_trigger(subject, named):
     r = RunDefinition("S", "C:/ds", 3, trigger_word="inkwash", subject_type=subject)
     assert r.to_caption_job("C:/sd", "", "keep").name_subject is named
+
+
+def test_config_overrides_default_empty_and_roundtrip():
+    r = RunDefinition(lora_name="a", dataset_folder="d", image_count=1,
+                      config_overrides={"training_arguments.noise_offset": 0.05})
+    assert RunDefinition.from_dict(r.to_dict()).config_overrides == {"training_arguments.noise_offset": 0.05}
+    assert RunDefinition(lora_name="a", dataset_folder="d", image_count=1).config_overrides == {}
+
+
+def test_start_training_passes_the_runs_overrides(tmp_path, monkeypatch):
+    from core.batch import BatchRunner
+    import core.batch as batch_mod
+
+    seen = {}
+    def _capture(**kw):
+        seen.update(kw)
+        return ("cfg", None)
+    monkeypatch.setattr(batch_mod, "generate_configs", _capture)
+    runner = BatchRunner()
+    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd: None)
+    run = _caption_run(tmp_path, "ds0", captioned=True,
+                       config_overrides={"training_arguments.noise_offset": 0.05})
+    runner.start([run])
+    assert seen["overrides"] == {"training_arguments.noise_offset": 0.05}

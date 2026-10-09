@@ -95,6 +95,8 @@ class RunDefinition:
     # Model preset id (core/models.py). Queue JSON written before v3 has no key and
     # is Anima, which is what this default restores.
     model: str = "anima"
+    # Advanced settings: {dotted.path: value} over the engine's generated config.
+    config_overrides: dict = field(default_factory=dict)
     # Runtime
     status: str = QUEUED
 
@@ -441,6 +443,7 @@ class BatchRunner(QObject):
                 network_weights=(run.network_weights or None),
                 training_comment=(run.trigger_word if run.embed_metadata and run.trigger_word else None),
                 extra_args=extra,
+                overrides=run.config_overrides,
             )
         except Exception as e:
             self._mark_failed(f"config generation failed for '{run.lora_name}': {e}")

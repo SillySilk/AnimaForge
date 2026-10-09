@@ -1,11 +1,16 @@
 import os
 import toml
+
+from core import config_overrides
 from pathlib import Path
 
 # Default training settings for the Anima architecture.
 # Anima is a ~2B DiT model (NVIDIA Cosmos base) using a Qwen3-0.6B text encoder
 # and the Qwen-Image VAE. It is NOT SDXL — none of the SDXL flags apply
 # (v2, sdxl, clip_skip, xformers, no_half_vae, min_snr_gamma are all omitted).
+# Override paths under this prefix address the dataset TOML instead of the main config.
+DATASET_PREFIX = "dataset_toml."
+
 HARDCODED_CONFIG = {
     # Output
     "save_model_as": "safetensors",
@@ -94,6 +99,7 @@ def generate_configs(
     grad_accum: int = None,
     blocks_to_swap: int = None,
     fp8_base: bool = False,
+    overrides: dict = None,
 ) -> tuple:
     """
     Generate the main Anima training TOML config and the dataset TOML config.
@@ -114,6 +120,14 @@ def generate_configs(
 
     Returns (main_config_path, dataset_config_path). Raises on error.
     """
+    # Advanced-settings overrides: "dataset_toml.*" paths address the dataset TOML,
+    # every other path the main config.
+    main_overrides, dataset_overrides = {}, {}
+    for path, value in (overrides or {}).items():
+        if path.startswith(DATASET_PREFIX):
+            dataset_overrides[path[len(DATASET_PREFIX):]] = value
+        else:
+            main_overrides[path] = value
     configs_dir = Path(output_dir) / "configs"
     configs_dir.mkdir(parents=True, exist_ok=True)
 
@@ -156,6 +170,8 @@ def generate_configs(
             "bucket_reso_steps": 64,
             "bucket_no_upscale": True,
         })
+    if dataset_overrides:
+        dataset_config = config_overrides.apply(dataset_config, dataset_overrides)
     with open(dataset_toml_path, "w", encoding="utf-8") as f:
         toml.dump(dataset_config, f)
 
@@ -258,6 +274,8 @@ def generate_configs(
         "saving_arguments": _saving_block(epochs, save_every_n_epochs, save_last_n_epochs),
     }
 
+    if main_overrides:
+        config = config_overrides.apply(config, main_overrides)
     with open(main_config_path, "w", encoding="utf-8") as f:
         toml.dump(config, f)
 

@@ -7,12 +7,12 @@ and translates TrainerProcess events into UI-facing signals. One run at a time.
 import json
 import shutil
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal
 
-from core import paths, sysmem
+from core import config_overrides, paths, sysmem
 from core.engines.onetrainer import concepts, engine, metadata, preset, render, snapshots, steps, verify
 from core.engines.onetrainer.process import TrainerProcess
 
@@ -52,6 +52,8 @@ class RunParams:
     # Setup's "Write profiler traces": OneTrainer's OT_DEBUG_PROFILES switch. The
     # traces land in the trainer's own folder and are moved into the run folder.
     debug_profiles: bool = False
+    # Advanced settings: {dotted.path: value} applied over the built config.json.
+    config_overrides: dict = field(default_factory=dict)
 
 
 def _write_json(path: Path, payload) -> None:
@@ -155,6 +157,11 @@ class TrainingSession(QObject):
         cfg = preset.build_run_config(template, str(run_dir), safe_name,
                                       self._plan["epochs"], self._plan["warmup_steps"],
                                       self._plan["prodigy_steps"])
+        try:
+            cfg = config_overrides.apply(cfg, p.config_overrides)
+        except ValueError as e:
+            self._fail(f"An advanced setting could not be applied: {e}")
+            return False
         self._output_path = cfg["output_model_destination"]
         try:
             _write_json(run_dir / "concepts.json", concepts.build_concepts(p.dataset_dir))
