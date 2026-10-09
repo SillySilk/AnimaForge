@@ -35,3 +35,24 @@ def test_dataset_toml_settings_are_overridable_too(tmp_path):
     main, ds = _gen(tmp_path, "d", overrides={"dataset_toml.general.keep_tokens": 2})
     assert toml.load(ds)["general"]["keep_tokens"] == 2
     assert "dataset_toml" not in toml.load(main)
+
+
+def test_one_dataset_setting_never_freezes_the_image_folder(tmp_path):
+    _, ds = _gen(tmp_path, "e", overrides={"dataset_toml.datasets.0.subsets.0.caption_dropout_rate": 0.1})
+    sub = toml.load(ds)["datasets"][0]["subsets"][0]
+    assert sub["caption_dropout_rate"] == 0.1
+    assert sub["image_dir"].endswith("/ds") and sub["num_repeats"] == 1
+
+
+def test_run_managed_settings_are_locked():
+    from core import config_overrides as co
+    from core.config_generator import LOCKED_PATHS
+    from core.engines.onetrainer.preset import LOCKED_PATHS as OT_LOCKED
+    for p in ("training_arguments.output_dir", "training_arguments.output_name",
+              "training_arguments.max_train_epochs", "dataset_arguments.dataset_config",
+              "dataset_toml.datasets.0.subsets.0.image_dir",
+              "dataset_toml.datasets.0.subsets.0.num_repeats", "model_arguments.vae"):
+        assert co.is_locked(p, LOCKED_PATHS), p
+    for p in ("workspace_dir", "output_model_destination", "epochs", "optimizer.prodigy_steps"):
+        assert co.is_locked(p, OT_LOCKED), p
+    assert not co.is_locked("learning_rate", OT_LOCKED)

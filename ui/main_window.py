@@ -663,7 +663,8 @@ class MainWindow(QMainWindow):
             subtitle="Everything the trainer will receive for this run. Changed settings "
                      "are highlighted; they apply to this run until you change model.",
             max_width=880)
-        panel = AdvancedSettingsPanel(flat, self._train_tab.config_overrides())
+        panel = AdvancedSettingsPanel(flat, self._train_tab.config_overrides(),
+                                      locked=self._train_tab.locked_paths())
         modal.body.addWidget(panel)
         self._advanced_panel = panel
         self._advanced_modal = modal

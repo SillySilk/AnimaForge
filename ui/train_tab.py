@@ -365,8 +365,20 @@ class TrainTab(QWidget):
     def config_overrides(self) -> dict:
         return dict(self._config_overrides)
 
+    def locked_paths(self) -> tuple:
+        """Settings the run itself sets for the current model's engine."""
+        if self.engine() == models.ONETRAINER:
+            from core.engines.onetrainer.preset import LOCKED_PATHS
+            return LOCKED_PATHS
+        from core.config_generator import LOCKED_PATHS
+        return LOCKED_PATHS
+
     def set_config_overrides(self, overrides: dict):
-        self._config_overrides = dict(overrides or {})
+        from core.config_overrides import is_locked
+        locked = self.locked_paths()
+        # Run-set paths never become overrides, whatever a preset or old set carries.
+        self._config_overrides = {k: v for k, v in (overrides or {}).items()
+                                  if not is_locked(k, locked)}
         self.config_overrides_changed.emit(len(self._config_overrides))
 
     def base_config(self) -> tuple:

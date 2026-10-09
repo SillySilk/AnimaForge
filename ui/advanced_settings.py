@@ -7,7 +7,7 @@ differences from the base as the run's overrides (core/config_overrides.py).
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
-    QAbstractItemView, QHBoxLayout, QHeaderView, QLineEdit, QPushButton, QTableWidget,
+    QAbstractItemView, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPushButton, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
@@ -19,9 +19,10 @@ _SETTING, _VALUE, _PRESET = range(3)
 
 
 class AdvancedSettingsPanel(QWidget):
-    def __init__(self, base: dict, overrides: dict, parent=None):
+    def __init__(self, base: dict, overrides: dict, locked=(), parent=None):
         super().__init__(parent)
         self._base = dict(base)
+        self._locked = tuple(locked or ())
         self._filling = False
 
         self.search = QLineEdit()
@@ -60,6 +61,10 @@ class AdvancedSettingsPanel(QWidget):
         add_row.addWidget(self.add_path, 3)
         add_row.addWidget(self.add_value, 2)
         add_row.addWidget(self.add_button)
+        self.add_error = QLabel("")
+        self.add_error.setObjectName("af_eyebrow_mute")
+        self.add_error.setWordWrap(True)
+        self.add_error.setVisible(False)
         reset_row = QHBoxLayout()
         reset_row.addStretch(1)
         reset_row.addWidget(self.reset_selected_button)
@@ -70,6 +75,7 @@ class AdvancedSettingsPanel(QWidget):
         lay.addWidget(self.search)
         lay.addWidget(self.table, 1)
         lay.addLayout(add_row)
+        lay.addWidget(self.add_error)
         lay.addLayout(reset_row)
 
         self._fill(overrides or {})
@@ -121,7 +127,12 @@ class AdvancedSettingsPanel(QWidget):
         preset = QTableWidgetItem(preset_text)
         preset.setFlags(fixed)
         value = QTableWidgetItem(value_text)
-        value.setFlags(fixed | Qt.ItemIsEditable)
+        if config_overrides.is_locked(path, self._locked):
+            value.setFlags(fixed)
+            value.setToolTip("Set by the run itself (name, folders or step count) — "
+                             "change those on Home.")
+        else:
+            value.setFlags(fixed | Qt.ItemIsEditable)
         self.table.setItem(r, _SETTING, setting)
         self.table.setItem(r, _VALUE, value)
         self.table.setItem(r, _PRESET, preset)
@@ -154,7 +165,10 @@ class AdvancedSettingsPanel(QWidget):
             font.setBold(changed)
             item.setFont(font)
             item.setForeground(QBrush(_GOLD) if changed else QBrush())
-            item.setToolTip("Changed from the preset" if changed else "")
+            if changed:
+                item.setToolTip("Changed from the preset")
+            elif not config_overrides.is_locked(self._path(r), self._locked):
+                item.setToolTip("")
         self._filling = False
 
     def _on_item_changed(self, item: QTableWidgetItem):
@@ -177,7 +191,12 @@ class AdvancedSettingsPanel(QWidget):
 
     def _add(self):
         path = self.add_path.text().strip()
-        if not path:
+        problem = config_overrides.check_new_path(path, self._base)
+        if not problem and config_overrides.is_locked(path, self._locked):
+            problem = f"{path} is set by the run itself; change it on Home."
+        self.add_error.setText(problem)
+        self.add_error.setVisible(bool(problem))
+        if problem:
             self.add_path.setFocus()
             return
         existing = self._find(path)

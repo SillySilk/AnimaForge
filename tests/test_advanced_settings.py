@@ -109,3 +109,34 @@ def test_reset_all_restores_the_preset():
     p = _panel({"epochs": 3, "extra": 1})
     p.reset_all_button.click()
     assert p.overrides() == {} and p.table.rowCount() == len(BASE)
+
+
+def _locked_panel(overrides=None):
+    from ui.advanced_settings import AdvancedSettingsPanel
+    return AdvancedSettingsPanel(BASE, overrides or {}, locked=("name", "opt*"))
+
+
+def test_locked_settings_are_shown_but_not_editable():
+    from PySide6.QtCore import Qt
+    p = _locked_panel()
+    r = _row(p, "name")
+    assert not p.table.item(r, 1).flags() & Qt.ItemIsEditable
+    assert "run" in p.table.item(r, 1).toolTip().lower()
+
+
+def test_adding_a_locked_or_broken_path_is_refused_with_a_reason():
+    p = _locked_panel()
+    for path in ("optimizer.extra", "epochs.x", "a..b"):
+        p.add_path.setText(path)
+        p.add_value.setText("1")
+        p.add_button.click()
+        assert p.table.rowCount() == len(BASE), path
+        assert p.add_error.text()
+
+
+def test_an_added_group_name_cannot_replace_a_group():
+    p = _panel()
+    p.add_path.setText("optimizer")
+    p.add_value.setText("5")
+    p.add_button.click()
+    assert p.table.rowCount() == len(BASE)

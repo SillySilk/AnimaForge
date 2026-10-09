@@ -104,6 +104,9 @@ PATCHED_FIELDS = (
     "sample_after",
     "save_every",
 )
+# The run sets these (folders, output file, step-derived schedule), so the advanced
+# settings editor shows them but never overrides them.
+LOCKED_PATHS = PATCHED_FIELDS
 
 # Previews every tenth of the run, rounded up to the next whole epoch.
 SAMPLE_FRACTION = 0.1

@@ -10,6 +10,22 @@ from pathlib import Path
 # (v2, sdxl, clip_skip, xformers, no_half_vae, min_snr_gamma are all omitted).
 # Override paths under this prefix address the dataset TOML instead of the main config.
 DATASET_PREFIX = "dataset_toml."
+# Settings the run itself sets — model files from Setup, the run folder and name,
+# the dataset folder, and the step math (epochs, repeats). An override of one would
+# freeze it across runs and desync the app's own bookkeeping, so they stay locked.
+LOCKED_PATHS = (
+    "model_arguments.*",
+    "training_arguments.output_dir",
+    "training_arguments.output_name",
+    "training_arguments.logging_dir",
+    "training_arguments.max_train_epochs",
+    "training_arguments.sample_prompts",
+    "training_arguments.resume",
+    "network_arguments.network_weights",
+    "dataset_arguments.dataset_config",
+    DATASET_PREFIX + "datasets.*.subsets.*.image_dir",
+    DATASET_PREFIX + "datasets.*.subsets.*.num_repeats",
+)
 
 HARDCODED_CONFIG = {
     # Output

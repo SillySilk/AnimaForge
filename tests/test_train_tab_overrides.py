@@ -104,3 +104,17 @@ def test_applying_a_preset_sets_its_overrides(tmp_path):
     assert t.config_overrides() == {"learning_rate": 1}
     t.apply_preset(tp.TrainPreset("A", model="anima", overrides={"x": 1}))
     assert t.config_overrides() == {"learning_rate": 1}   # another model's settings never land
+
+
+def test_run_managed_settings_never_become_overrides(tmp_path, monkeypatch):
+    from core.engines.onetrainer import engine
+    monkeypatch.setattr(engine, "validate", lambda root: (True, ""))
+    t = _tab(tmp_path, "krea2")
+    t.set_config_overrides({"workspace_dir": "X", "learning_rate": 1})
+    assert t.config_overrides() == {"learning_rate": 1}
+    t.set_model("anima")
+    t.set_config_overrides({"training_arguments.output_dir": "X",
+                            "dataset_toml.datasets.0.subsets.0.image_dir": "Y",
+                            "training_arguments.noise_offset": 0.05})
+    assert t.config_overrides() == {"training_arguments.noise_offset": 0.05}
+    assert "training_arguments.output_dir" in t.locked_paths()
