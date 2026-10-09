@@ -7,6 +7,12 @@ from PySide6.QtCore import QSettings
 from core.settings import AppSettings
 
 
+
+def _unseeded(text: str) -> str:
+    """The prompt lines without the fixed preview seed (asserted in test_preview_prompts)."""
+    import re
+    return re.sub(r" --d \d+$", "", text, flags=re.M)
+
 def _appsettings(tmp_path):
     s = QSettings(str(tmp_path / "t.ini"), QSettings.IniFormat)
     return AppSettings(s)
@@ -127,7 +133,7 @@ def test_sample_args_enabled_no_prompts_falls_back_to_trigger(tmp_path):
     args = a.prepare_sample_args(str(tmp_path), "lr", trigger_word="mychar")
     f = tmp_path / "configs" / "lr_sample.txt"
     assert f.is_file()
-    assert f.read_text(encoding="utf-8").strip() == "mychar"
+    assert _unseeded(f.read_text(encoding="utf-8")).strip() == "mychar"
     assert args["sample_prompts"].endswith("lr_sample.txt")
 
 
@@ -139,7 +145,7 @@ def test_sample_args_writes_file_with_trigger(tmp_path):
     args = a.prepare_sample_args(str(tmp_path), "lr", trigger_word="mychar")
     f = tmp_path / "configs" / "lr_sample.txt"
     assert f.is_file()
-    lines = f.read_text(encoding="utf-8").strip().splitlines()
+    lines = _unseeded(f.read_text(encoding="utf-8")).strip().splitlines()
     assert lines[0] == "mychar, a girl on a bench"   # trigger prepended
     assert lines[1] == "mychar, a closeup"            # already had trigger, not doubled
     assert args["sample_prompts"].endswith("lr_sample.txt")
@@ -152,7 +158,7 @@ def test_prepare_sample_args_prepends_trigger_and_style_anchor(tmp_path):
     a.set("sample_quality_prefix", "")  # isolate trigger/anchor behavior from the quality prefix
     a.set("sample_prompts", "standing in a field\nmychar, sitting on a bench")
     out = a.prepare_sample_args(str(tmp_path), "demo", trigger_word="mychar", style_anchor="@mystyle")
-    written = (tmp_path / "configs" / "demo_sample.txt").read_text(encoding="utf-8").splitlines()
+    written = _unseeded((tmp_path / "configs" / "demo_sample.txt").read_text(encoding="utf-8")).splitlines()
     # both activation words prepended to the first prompt
     assert written[0] == "mychar, @mystyle, standing in a field"
     # trigger already present -> not duplicated; anchor still added
@@ -188,7 +194,7 @@ def test_quality_prefix_leads_then_trigger(tmp_path):
     a.set("sample_enable", True)
     a.set("sample_prompts", "sitting on a bench")
     a.prepare_sample_args(str(tmp_path), "demo", trigger_word="mychar")
-    line = (tmp_path / "configs" / "demo_sample.txt").read_text(encoding="utf-8").splitlines()[0]
+    line = _unseeded((tmp_path / "configs" / "demo_sample.txt").read_text(encoding="utf-8")).splitlines()[0]
     assert line == "masterpiece, best quality, score_7, safe, mychar, sitting on a bench"
 
 
@@ -198,7 +204,7 @@ def test_quality_prefix_not_duplicated(tmp_path):
     a.set("sample_enable", True)
     a.set("sample_prompts", "best quality, a closeup")
     a.prepare_sample_args(str(tmp_path), "demo", trigger_word="mychar")
-    line = (tmp_path / "configs" / "demo_sample.txt").read_text(encoding="utf-8").splitlines()[0]
+    line = _unseeded((tmp_path / "configs" / "demo_sample.txt").read_text(encoding="utf-8")).splitlines()[0]
     assert line.count("best quality") == 1
     assert line == "masterpiece, score_7, safe, mychar, best quality, a closeup"
 
@@ -209,7 +215,7 @@ def test_quality_prefix_cleared_gives_raw(tmp_path):
     a.set("sample_quality_prefix", "")
     a.set("sample_prompts", "a closeup")
     a.prepare_sample_args(str(tmp_path), "demo", trigger_word="mychar")
-    line = (tmp_path / "configs" / "demo_sample.txt").read_text(encoding="utf-8").splitlines()[0]
+    line = _unseeded((tmp_path / "configs" / "demo_sample.txt").read_text(encoding="utf-8")).splitlines()[0]
     assert line == "mychar, a closeup"
 
 
@@ -221,7 +227,7 @@ def test_prepare_sample_args_explicit_prompts_override_settings(tmp_path):
     a.set("sample_prompts", "stale box text")
     a.prepare_sample_args(str(tmp_path), "demo", trigger_word="mychar",
                           prompts=["a walk in the park", "mychar, at night"])
-    lines = (tmp_path / "configs" / "demo_sample.txt").read_text(encoding="utf-8").strip().splitlines()
+    lines = _unseeded((tmp_path / "configs" / "demo_sample.txt").read_text(encoding="utf-8")).strip().splitlines()
     assert lines == ["mychar, a walk in the park", "mychar, at night"]
 
 
@@ -232,7 +238,7 @@ def test_prepare_sample_args_explicit_empty_falls_back_to_trigger(tmp_path):
     a.set("sample_quality_prefix", "")
     a.set("sample_prompts", "stale box text")
     a.prepare_sample_args(str(tmp_path), "demo", trigger_word="mychar", prompts=[])
-    lines = (tmp_path / "configs" / "demo_sample.txt").read_text(encoding="utf-8").strip().splitlines()
+    lines = _unseeded((tmp_path / "configs" / "demo_sample.txt").read_text(encoding="utf-8")).strip().splitlines()
     assert lines == ["mychar"]
 
 

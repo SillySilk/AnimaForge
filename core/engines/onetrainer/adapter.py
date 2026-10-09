@@ -18,4 +18,5 @@ def to_onetrainer_params(run) -> RunParams:
         target_steps=run.target_steps,
         config_overrides=dict(run.config_overrides),
         debug_profiles=bool(run.debug_profiles),
+        sample_prompts=list(run.sample_prompts or []),
     )

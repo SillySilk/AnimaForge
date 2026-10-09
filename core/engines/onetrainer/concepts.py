@@ -135,6 +135,29 @@ def _spread(items: list, count: int) -> list:
     return [items[i * len(items) // count] for i in range(count)]
 
 
+def samples_from_prompts(prompts: list, trigger_word: str) -> list:
+    """Samples for explicit prompts (a caption-style comparison previews both runs
+    with the same list). The trigger leads any prompt that lacks it, so every
+    preview exercises what the LoRA was trained to answer to."""
+    trigger = (trigger_word or "").strip().strip(",").strip()
+    pattern = re.compile(rf"\b{re.escape(trigger)}\b", re.IGNORECASE) if trigger else None
+    out = []
+    for i, prompt in enumerate(p.strip() for p in prompts if p and p.strip()):
+        if pattern is not None and not pattern.search(prompt):
+            prompt = f"{trigger}, {prompt}"
+        out.append({
+            "enabled": True,
+            "prompt": _trim(prompt),
+            "negative_prompt": "",
+            "height": 512,
+            "width": 512,
+            "frames": 1,
+            "seed": _FIRST_SEED + i,
+            "random_seed": False,
+        })
+    return out
+
+
 def build_samples(dataset_dir: str, trigger_word: str,
                   count: int = SAMPLE_COUNT) -> list:
     """512×512 samples drawn from the set's own captions, rendered every sampling

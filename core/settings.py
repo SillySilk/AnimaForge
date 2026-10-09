@@ -148,6 +148,10 @@ DEFAULTS = {
 EPHEMERAL_KEYS = {"sample_prompts"}
 
 
+# Anima preview seeds: prompt i renders with seed SAMPLE_SEED_BASE + i.
+SAMPLE_SEED_BASE = 1000
+
+
 class AppSettings:
     def __init__(self, settings: QSettings = None):
         self._s = settings or QSettings(SETTINGS_ORG, SETTINGS_APP)
@@ -242,6 +246,10 @@ class AppSettings:
                     existing.add(tok.lower())
             if prefix:
                 p = ", ".join(prefix + [p])
+            # A fixed seed per prompt: previews from one epoch to the next, and from
+            # two runs being compared, differ only by what the LoRA learned.
+            if " --d " not in f" {p} ":
+                p = f"{p} --d {SAMPLE_SEED_BASE + len(lines)}"
             lines.append(p)
         cfg_dir = Path(output_dir) / "configs"
         cfg_dir.mkdir(parents=True, exist_ok=True)

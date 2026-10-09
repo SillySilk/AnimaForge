@@ -54,6 +54,8 @@ class RunParams:
     debug_profiles: bool = False
     # Advanced settings: {dotted.path: value} applied over the built config.json.
     config_overrides: dict = field(default_factory=dict)
+    # Explicit preview prompts (a caption-style comparison); empty = drawn from captions.
+    sample_prompts: list = field(default_factory=list)
 
 
 def _write_json(path: Path, payload) -> None:
@@ -165,8 +167,10 @@ class TrainingSession(QObject):
         self._output_path = cfg["output_model_destination"]
         try:
             _write_json(run_dir / "concepts.json", concepts.build_concepts(p.dataset_dir))
-            _write_json(run_dir / "samples.json",
-                        concepts.build_samples(p.dataset_dir, p.trigger_word))
+            samples = (concepts.samples_from_prompts(p.sample_prompts, p.trigger_word)
+                       if p.sample_prompts else
+                       concepts.build_samples(p.dataset_dir, p.trigger_word))
+            _write_json(run_dir / "samples.json", samples)
             _write_json(run_dir / "config.json", cfg)
             self._log = open(run_dir / "trainer.log", "w", encoding="utf-8", errors="replace")
         except OSError as e:
