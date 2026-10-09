@@ -4,7 +4,7 @@ assets/krea2_preset.json began as a copy of the preset that proved Krea 2 LoRA
 training FITS on the 16 GB card (2026-08-07). "Viable" there meant the run
 completed without an OOM -- it was never evidence that the run learned anything,
 and the recipe guard in tests/test_trainer_preset.py locked in the memory knobs
-while three learning knobs stayed wrong. Bev_and_Billy (2026-08-17) ran the full
+while three learning knobs stayed wrong. run_B (2026-08-17) ran the full
 1254 steps, saved cleanly, and produced a LoRA whose lora_B sat at ~1.7e-08
 against a working LoRA's ~4.0e-02: a file that loads and changes nothing. Fixed
 in the same pass:
@@ -42,7 +42,7 @@ four orders of magnitude off zero and no further -- so a short run is not a
 verify pass and was wrongly called one in commit 8f24cdb. A full run through
 the app is still the only end-to-end proof of the recipe.
 
-Since 2026-09-05 two things guard the END of a run, after Hailey (2026-09-04)
+Since 2026-09-05 two things guard the END of a run, after run_H (2026-09-04)
 trained 67 clean-looking epochs and shipped a file that rendered a mosaic. Its
 end-of-epoch loss had bottomed at epoch 52 and finished 38% higher; Prodigy's
 step size had settled at 5.8e-04 against 2.9e-04..3.4e-04 on every healthy run.
@@ -56,7 +56,7 @@ step size had settled at 5.8e-04 against 2.9e-04..3.4e-04 on every healthy run.
                                  count (steps.plan): Prodigy stops re-estimating
                                  its step size for the closing stretch. UNPROVEN
                                  as a recipe until a full run has shipped with
-                                 it -- Hailey's step size had already peaked by
+                                 it -- run_H's step size had already peaked by
                                  step 989 of 1139, so this alone would not have
                                  saved that run; the snapshots are what would.
 
@@ -64,7 +64,7 @@ Since 2026-10-07 previews render every tenth of the run instead of every 30
 minutes: sample_after is patched per run to the epoch count / 10, rounded UP to
 a whole epoch (SAMPLE_FRACTION), unit EPOCH. Ten preview passes per run, the
 last one landing on or just before the final epoch rather than up to 30 minutes
-short of it -- the blind stretch that let Hailey's overshoot ship unseen.
+short of it -- the blind stretch that let run_H's overshoot ship unseen.
 
 Since 2026-10-08 snapshots are taken on the same tenth-of-the-run schedule as the
 previews (save_every patched to sample_every_epochs, unit EPOCH): every preview
@@ -76,8 +76,8 @@ uses OneTrainer's plain PRODIGY (prodigyopt), which has no ceiling option -- and
 which never receives optimizer.prodigy_steps either: OneTrainer passes that only
 to PRODIGY_PLUS_SCHEDULE_FREE, so the per-run patch above has been a no-op. The
 cap is applied by core/engines/onetrainer/onetrainer_train.py, which wraps the optimizer's
-step before handing over to train.py. I_spit_on_your_grave_t (2026-10-08, 147
-images) settled at 7.3e-04 and blew up to noise at epoch 11 of 33; Hailey's
+step before handing over to train.py. run_S (2026-10-08, 147
+images) settled at 7.3e-04 and blew up to noise at epoch 11 of 33; run_H's
 5.8e-04 overshot late; four healthy runs sat at 2.9e-04..3.4e-04. The cap sits
 just above the healthy band. UNPROVEN until a capped run ships a working file.
 

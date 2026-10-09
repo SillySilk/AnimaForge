@@ -7,8 +7,8 @@ place of train.py itself. It is never imported by the app, and it imports nothin
 from the app.
 
 Why: Prodigy picks its own step size (`d`) and never lowers it. On every healthy
-run it settled at 2.9e-04..3.4e-04. Hailey (2026-09-04) settled at 5.8e-04 and
-overshot in its last 15 epochs; I_spit_on_your_grave_t (2026-10-08) settled at
+run it settled at 2.9e-04..3.4e-04. run_H (2026-09-04) settled at 5.8e-04 and
+overshot in its last 15 epochs; run_S (2026-10-08) settled at
 7.3e-04 and blew up to noise at epoch 11 of 33. OneTrainer's plain PRODIGY has no
 ceiling option -- d_coef scales every run, healthy ones too, and growth_rate only
 limits how fast d climbs, not how far -- so the ceiling is applied here: after

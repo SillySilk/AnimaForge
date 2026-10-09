@@ -5,7 +5,7 @@ from each one every epoch (mgds AspectBatchSorting.__shuffle). The drop rotates,
 so an odd bucket is harmless — but a bucket holding fewer images than the batch
 size yields no batches at all, and every image in it sits out FOREVER.
 
-Bev and Billy (2026-08-17) lost 2 of 47 that way, silently, for a whole 57-epoch
+run B (2026-08-17) lost 2 of 47 that way, silently, for a whole 57-epoch
 run: A19 at aspect 1.600 and A35 at 0.687 were each alone in a bucket.
 """
 from PIL import Image

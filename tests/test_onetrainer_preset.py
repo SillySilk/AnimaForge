@@ -30,7 +30,7 @@ def test_prodigy_learning_rate_is_the_multiplier_not_an_adamw_rate():
     AdamW-shaped 3e-4 multiplies its estimate by 3e-4 instead of setting it --
     and because Prodigy derives its estimate from terms that are themselves
     proportional to `lr` (dlr = d*lr, d0 = 1e-6), the run cannot climb back out.
-    Bev_and_Billy (2026-08-17) trained 1254 steps that way and landed lora_B at
+    run_B (2026-08-17) trained 1254 steps that way and landed lora_B at
     ~1.7e-08 against a working LoRA's ~4.0e-02: a numerical no-op that loads
     fine and changes nothing in the image."""
     t = preset.load_template()
@@ -65,7 +65,7 @@ def test_lora_alpha_equals_rank_so_the_applied_scale_is_one():
     contributes at 1/16 strength, and whether that survives export depends on the
     loader honouring the alpha key -- a loader that assumes alpha==rank would apply
     it 16x too strong instead. alpha == rank is scale 1.0 under either behaviour,
-    and matches the reference LoRAs in G:\\LORAS."""
+    and matches the reference LoRAs."""
     t = preset.load_template()
     assert t["lora_alpha"] == float(t["lora_rank"])
 
@@ -129,7 +129,7 @@ def test_the_preset_does_not_launch_a_web_server_it_cannot_reap():
     stop call lives on the clean shutdown path, so a trainer killed by Windows --
     exactly what an access violation does -- leaves it running forever, and even
     the clean path only kills the launcher shim, orphaning the server it spawned.
-    The AmberHeard crash on 2026-08-17 left two of them behind, still holding
+    The run_A crash on 2026-08-17 left two of them behind, still holding
     port 6006 against the next run's.
 
     Krea Forge never opens it: the app has no reference to tensorboard anywhere,
@@ -181,7 +181,7 @@ def test_the_latent_cache_stays_inside_the_run_folder():
 
 
 def test_the_run_keeps_snapshots_in_the_shipped_format_every_five_epochs():
-    """Hailey (2026-09-04) overshot in its last 15 epochs and the only files left
+    """run_H (2026-09-04) overshot in its last 15 epochs and the only files left
     were the overshot end and two backups at arbitrary minutes. A snapshot every
     five epochs, written in the same format as the final file, is what the session
     falls back to when verify says the end of the run went bad (~114 MB, ~2 s each,
@@ -194,7 +194,7 @@ def test_the_run_keeps_snapshots_in_the_shipped_format_every_five_epochs():
 
 
 def test_prodigy_step_size_is_frozen_per_run_not_in_the_template():
-    """Hailey's Prodigy step size settled at 5.8e-04 against 2.9e-04..3.4e-04 on
+    """run_H's Prodigy step size settled at 5.8e-04 against 2.9e-04..3.4e-04 on
     every healthy run. `prodigy_steps` freezes the estimate after N steps; it is
     sized from the run (steps.plan) and patched in, so the template carries no
     fixed number. UNPROVEN as a recipe until a full run has shipped with it."""

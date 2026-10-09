@@ -9,7 +9,7 @@ makes an odd bucket harmless: a different image sits out each time.
 
 A bucket holding FEWER images than the batch size is a different matter. It yields
 `int(len(bucket) / batch_size)` = 0 batches, so every image in it is dropped every
-epoch, forever, with nothing in the log to say so. Bev and Billy (2026-08-17) lost
+epoch, forever, with nothing in the log to say so. run B (2026-08-17) lost
 2 of 47 that way across a full 57-epoch run: one shot at aspect 1.600 and one at
 0.687, each the only image of its shape in the set.
 

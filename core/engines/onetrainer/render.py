@@ -1,7 +1,7 @@
 """The final previews: render the shipped LoRA's preview prompts after the run.
 
 OneTrainer's own previews are taken on a timer and stop at the last interval;
-nothing renders the state the file is finally saved from. Hailey (2026-09-04)
+nothing renders the state the file is finally saved from. run_H (2026-09-04)
 sampled at step 989 of 1139 and looked perfect there, then shipped the state at
 1139, which rendered a mosaic. "The samples look fine" had meant "the LoRA was
 fine at the last sample".

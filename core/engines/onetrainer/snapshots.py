@@ -3,7 +3,7 @@
 The preset has OneTrainer write a snapshot of the LoRA every five epochs
 (`save_every`), in the same format as the final file, into workspace/save. They
 exist for one reason: a run can train cleanly for fifty epochs and then overshoot
-in its last fifteen, and the final file is the overshot state. Hailey
+in its last fifteen, and the final file is the overshot state. run_H
 (2026-09-04) did exactly that -- its loss bottomed at epoch 52 of 67, finished
 38% higher, and the shipped file rendered a mosaic; the epoch-50 snapshot was the
 LoRA that worked. When core.engines.onetrainer.verify says the curve turned, the session

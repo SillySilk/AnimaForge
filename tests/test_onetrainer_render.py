@@ -2,7 +2,7 @@
 check, the shipped LoRA is loaded back and its preview prompts rendered, so the
 previews always show the file that ships.
 
-The trainer's own previews stop at the last sampling interval. Hailey
+The trainer's own previews stop at the last sampling interval. run_H
 (2026-09-04) sampled at step 989 of 1139 and looked perfect there; the file it
 shipped was the state at 1139, which rendered a mosaic. Nothing had drawn it.
 """

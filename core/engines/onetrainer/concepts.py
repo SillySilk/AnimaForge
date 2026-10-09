@@ -70,7 +70,7 @@ def build_concepts(dataset_dir: str) -> list:
 
 
 # Sample prompts are the run's real captions, not a written-in scene. A preview is
-# only worth rendering if it previews what the run is being taught: Bev_and_Billy
+# only worth rendering if it previews what the run is being taught: run_B
 # (2026-08-17) trained on two-character comic panels and sampled "a portrait
 # photograph of a person standing indoors", which could not have shown the
 # characters even from a healthy LoRA. Krea 2's text encoder is Qwen3-VL, which

@@ -8,10 +8,10 @@ import json
 import struct
 
 # The lora_B peak a working Krea 2 LoRA carries. Measured across the 10 known-good
-# files in G:\LORAS\Characters (2026-08-17): 2.7e-02 to 3.0e-01.
+# known-good character LoRAs (2026-08-17): 2.7e-02 to 3.0e-01.
 HEALTHY_B = 4.0e-2
 
-# What Bev_and_Billy actually shipped: lora_B still at its zero init.
+# What run_B actually shipped: lora_B still at its zero init.
 DEAD_B = 1.7e-8
 
 

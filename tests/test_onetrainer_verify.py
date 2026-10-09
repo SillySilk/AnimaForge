@@ -1,7 +1,7 @@
 """The post-run artifact check: does the .safetensors we just spent an hour on
 actually contain a LoRA the image tool will apply?
 
-Both failure modes here are real ones, taken from Bev_and_Billy (2026-08-17):
+Both failure modes here are real ones, taken from run_B (2026-08-17):
 a run that completed, saved, and produced a file that changed nothing.
 """
 import struct
@@ -21,7 +21,7 @@ def test_a_trained_lora_in_the_readable_namespace_passes(tmp_path):
 
 def test_a_lora_whose_b_side_never_left_zero_is_rejected(tmp_path):
     """lora_B is zero-initialised, so its magnitude IS the training signal.
-    1.7e-08 is what Bev_and_Billy actually shipped, against ~4e-02 working."""
+    1.7e-08 is what run_B actually shipped, against ~4e-02 working."""
     out = _write_lora(tmp_path / "dead.safetensors", b_value=DEAD_B)
     reason = verify.verify_output(str(out))
     assert reason is not None
@@ -115,7 +115,7 @@ def test_negative_weights_count_as_magnitude(tmp_path):
 
 # ---- the run overshot: the file is the state AFTER the loss turned upward ----
 #
-# Hailey (2026-09-04): 67 epochs, every trainer-side check green, and a file that
+# run_H (2026-09-04): 67 epochs, every trainer-side check green, and a file that
 # rendered a mosaic of faces in the image tool. The end-of-epoch smooth loss had
 # bottomed at epoch 52 (0.0613) and climbed every epoch after, to 0.0844 (+38%).
 # The 13 healthy runs before it all finished within 0-8% of their best.
@@ -198,7 +198,7 @@ def test_the_overshoot_message_says_where_the_best_was_and_how_far_it_fell():
     assert "38%" in text
 
 
-# I_spit_on_your_grave_t (2026-10-08): end-of-epoch smooth loss, epochs 1..32 of 33.
+# run_S (2026-10-08): end-of-epoch smooth loss, epochs 1..32 of 33.
 _BLOWUP = [0.129, 0.136, 0.133, 0.134, 0.135, 0.145, 0.135, 0.137, 0.138, 0.129,
            0.215, 0.263, 0.238, 0.221, 0.207, 0.205, 0.206, 0.187, 0.171, 0.167,
            0.162, 0.156, 0.160, 0.162, 0.153, 0.150, 0.152, 0.155, 0.144, 0.148,

@@ -2,7 +2,7 @@
 tool will actually apply?
 
 Two things can go wrong in a way nothing else notices. Both happened on
-Bev_and_Billy (2026-08-17), which trained all 1254 steps, saved cleanly, reported
+run_B (2026-08-17), which trained all 1254 steps, saved cleanly, reported
 success, and produced a file that changed nothing in the image:
 
   1. It never learned. `lora_B` is zero-initialised, so its magnitude IS the
@@ -35,12 +35,12 @@ MIN_TRAINED_ABSMAX = 1e-3
 READABLE_PREFIX = "diffusion_model"
 
 # A run that overshot: its end-of-epoch smooth loss finished this far above the
-# best it reached. Hailey (2026-09-04) bottomed at epoch 52 of 67 and finished
+# best it reached. run_H (2026-09-04) bottomed at epoch 52 of 67 and finished
 # +38%; the 13 healthy runs before it all finished within +0..8% of their best.
 OVERSHOOT_RISE = 0.15
 
 # A run that blew up: an end-of-epoch smooth loss this far above the best before
-# it. Not a slow drift but a cliff -- I_spit_on_your_grave_t (2026-10-08) went
+# it. Not a slow drift but a cliff -- run_S (2026-10-08) went
 # from 0.129 to 0.215 (+67%) in one epoch and its samples turned to noise; the
 # biggest epoch-to-epoch wobble on a run that stayed healthy was +12%. Checked
 # live, at every epoch, so the run is stopped there instead of training another

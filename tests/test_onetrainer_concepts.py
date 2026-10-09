@@ -28,7 +28,7 @@ def _dataset(tmp_path, captions):
 def test_sample_prompts_are_drawn_from_the_captions(tmp_path):
     """A preview is only worth rendering if it previews what was taught. A generic
     scene ("a portrait photograph of a person") tells you nothing about a set of
-    two-character comic panels — which is exactly what Bev_and_Billy sampled."""
+    two-character comic panels — which is exactly what run_B sampled."""
     captions = [f"aria_x, Aria is standing in scene {i}, looking at the camera."
                 for i in range(6)]
     samples = build_samples(_dataset(tmp_path, captions), "aria_x")

@@ -1,7 +1,7 @@
 """The snapshots OneTrainer writes every few epochs (preset `save_every`), and
 how the session picks one to ship when the end of the run overshot.
 
-Hailey (2026-09-04): the loss bottomed at epoch 52 of 67 and the shipped file
+run_H (2026-09-04): the loss bottomed at epoch 52 of 67 and the shipped file
 was the overshot state. A snapshot from epoch 50 was the file that worked.
 """
 import sys
@@ -47,11 +47,11 @@ def test_the_pick_is_the_last_snapshot_at_or_before_the_best_epoch(tmp_path):
 def test_promote_ships_the_snapshot_and_keeps_the_overshot_file_beside_it(tmp_path):
     save = tmp_path / "save"
     snap = _save(save, 850, 50)
-    out = write_lora(tmp_path / "Hailey.safetensors", b_value=9.0e-2)   # the overshot end
+    out = write_lora(tmp_path / "run_H.safetensors", b_value=9.0e-2)   # the overshot end
     snap_bytes = snap.read_bytes()
     kept = snapshots.promote(str(snap), str(out))
     assert out.read_bytes() == snap_bytes                  # the snapshot is what ships
-    assert Path(kept).name == "Hailey.overshot.safetensors"
+    assert Path(kept).name == "run_H.overshot.safetensors"
     assert Path(kept).is_file()
     assert not snap.exists()
 

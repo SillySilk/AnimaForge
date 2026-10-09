@@ -72,7 +72,7 @@ class TrainingSession(QObject):
     # The third ending. It used to be state_changed alone, which nothing in the UI
     # listens to: a cancelled run left Home on "Starting trainer…" with Cancel lit
     # and Train grey until the app was restarted -- a dead run that looked alive
-    # (Connie_D'Amico, 2026-09-04).
+    # (run_C, 2026-09-04).
     canceled = Signal()
 
     def __init__(self, parent=None, process_factory=TrainerProcess):
@@ -425,11 +425,11 @@ class TrainingSession(QObject):
             if output_mtime >= self._spawn_stamp - 2:
                 # A clean exit and a fresh file are not proof the run learned
                 # anything, nor that the image tool can read what it wrote.
-                # Bev_and_Billy (2026-08-17) satisfied both and was reported DONE.
+                # run_B (2026-08-17) satisfied both and was reported DONE.
                 problem = verify.verify_output(self._output_path)
                 if problem is None:
                     # The file is a LoRA. Is it the LoRA from the right moment?
-                    # Hailey (2026-09-04) passed everything above and shipped the
+                    # run_H (2026-09-04) passed everything above and shipped the
                     # state from AFTER its loss had turned upward.
                     found = verify.trouble_from_log(str(self._run_dir / "trainer.log"))
                     if found is not None and not self._ship_snapshot(found):

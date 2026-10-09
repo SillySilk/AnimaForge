@@ -274,7 +274,7 @@ def test_a_label_that_cannot_be_written_never_fails_a_finished_run(tmp_path, mon
 
 def test_a_no_op_lora_fails_instead_of_reporting_success(tmp_path, monkeypatch):
     """A clean exit and a fresh file are not proof the run learned anything.
-    Bev_and_Billy (2026-08-17) satisfied both and produced a LoRA that changed
+    run_B (2026-08-17) satisfied both and produced a LoRA that changed
     nothing, and the session reported DONE."""
     _quiet_preflight(monkeypatch, tmp_path)
     s = TrainingSession(process_factory=FakeProc)
@@ -464,7 +464,7 @@ def test_an_ordinary_failure_still_reports_its_exit_code(tmp_path, monkeypatch):
 def test_cancel_tells_the_ui_the_run_was_canceled(tmp_path, monkeypatch):
     """A cancelled run used to end in silence: the state went CANCELED, no signal
     left the session, and Home kept "Starting trainer…" with Train greyed out
-    until the app was restarted (Connie_D'Amico, 2026-09-04)."""
+    until the app was restarted (run_C, 2026-09-04)."""
     _quiet_preflight(monkeypatch, tmp_path)
     s = TrainingSession(process_factory=FakeProc)
     told = []; s.canceled.connect(lambda: told.append(True))
@@ -477,7 +477,7 @@ def test_cancel_tells_the_ui_the_run_was_canceled(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# The end of the run went bad. Hailey (2026-09-04): every check green, and the
+# The end of the run went bad. run_H (2026-09-04): every check green, and the
 # file rendered a mosaic. Its loss had bottomed at epoch 52 of 67 and finished 38%
 # higher; the snapshot from epoch 50 was the LoRA that worked.
 
@@ -602,7 +602,7 @@ def test_a_healthy_run_discards_its_snapshots_and_ships_the_end(tmp_path, monkey
 
 
 # ---------------------------------------------------------------------------
-# The trainer's previews stop at the last sampling interval; Hailey's showed
+# The trainer's previews stop at the last sampling interval; run_H's showed
 # step 989 of 1139 and the file it shipped was the state at 1139. Once the file
 # has passed every check, it is loaded back and its preview prompts rendered,
 # so the previews always show the file that ships.
@@ -711,7 +711,7 @@ def test_a_rejected_lora_is_never_rendered(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# The loss blew up mid-run. I_spit_on_your_grave_t (2026-10-08) went from 0.129
+# The loss blew up mid-run. run_S (2026-10-08) went from 0.129
 # to 0.215 at epoch 11 of 33, trained two more hours of noise, drifted back to
 # +12% over its best -- under the overshoot line -- and shipped the noise.
 
