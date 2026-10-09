@@ -5,10 +5,11 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
-    QFileDialog, QFrame, QGridLayout, QHBoxLayout, QInputDialog,
+    QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QInputDialog,
     QLabel, QLineEdit, QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
+from core import models
 from ui.forge_modal import ForgeModal
 from ui.run_progress import RunProgress
 
@@ -58,6 +59,8 @@ class HomeTab(QWidget):
     stop_train_requested = Signal()   # pillar "Stop" button (enabled while a run is live)
     presets_closed = Signal()         # an Options/Step Calculator modal closed → re-pull summary
     preset_pick_requested = Signal()  # PRESET button — MainWindow opens the picker (owns the data)
+    model_changed = Signal(str)          # model preset id (Anima / Krea 2)
+    caption_style_changed = Signal(str)  # prose / tags / prose+tags
     preview_config_requested = Signal()  # 📜 beside Start — inspect the exact TOMLs pre-launch
 
     _GLYPH = {"ok": "✓", "idle": "–", "err": "✗"}
@@ -303,6 +306,29 @@ class HomeTab(QWidget):
         self._prefix_edit.setPlaceholderText("e.g. masterpiece, best quality")
         self._prefix_edit.textEdited.connect(self.prefix_changed.emit)
         grid.addWidget(self._prefix_edit, 1, 2)
+
+        # model + caption style: which base model the LoRA is for, and how it is captioned
+        grid.addWidget(self._field_label("MODEL"), 2, 0)
+        grid.addWidget(self._field_label("CAPTION STYLE"), 2, 1)
+        self._syncing = False
+        self._model_combo = QComboBox()
+        self._model_combo.setMinimumHeight(42)
+        for m in models.MODELS.values():
+            self._model_combo.addItem(m.name, m.id)
+        self._model_combo.setToolTip("The base model this LoRA is for. Each trains with its own engine.")
+        self._model_combo.currentIndexChanged.connect(
+            lambda _i: self._emit_unless_syncing(self.model_changed, self._model_combo))
+        grid.addWidget(self._model_combo, 3, 0)
+        self._style_combo = QComboBox()
+        self._style_combo.setMinimumHeight(42)
+        for label, style in (("Prose", "prose"), ("Tags", "tags"), ("Prose + tags", "prose+tags")):
+            self._style_combo.addItem(label, style)
+        self._style_combo.setCurrentIndex(self._style_combo.findData("prose+tags"))
+        self._style_combo.setToolTip("Prose: written descriptions. Tags: booru tags. "
+                                     "Prose + tags: both, combined into one caption.")
+        self._style_combo.currentIndexChanged.connect(
+            lambda _i: self._emit_unless_syncing(self.caption_style_changed, self._style_combo))
+        grid.addWidget(self._style_combo, 3, 1)
 
         grid.setColumnStretch(0, 135)
         grid.setColumnStretch(1, 100)
@@ -927,6 +953,24 @@ class HomeTab(QWidget):
         modal.open()
 
     _TYPE_ICON = {"character": "👤", "concept": "📦", "style": "🎨"}
+
+    def _emit_unless_syncing(self, signal, combo):
+        if not self._syncing:
+            signal.emit(combo.currentData())
+
+    def _select_quietly(self, combo, value):
+        self._syncing = True
+        try:
+            combo.setCurrentIndex(combo.findData(value))
+        finally:
+            self._syncing = False
+
+    def set_model(self, model_id: str):
+        """Reflect the model chosen elsewhere (a loaded set, startup) without re-emitting."""
+        self._select_quietly(self._model_combo, model_id)
+
+    def set_caption_style(self, style: str):
+        self._select_quietly(self._style_combo, style)
 
     def set_preset_label(self, name: str, subject_type: str = ""):
         """Reflect the active training preset on the PRESET button (display only)."""

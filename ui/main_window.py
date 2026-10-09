@@ -132,6 +132,7 @@ class MainWindow(QMainWindow):
         # Initialise train tab environment + defaults from saved settings
         self._sync_environment_to_train()
         self._train_tab.apply_defaults(self._setup_tab.get_app_settings())
+        self._restore_model()
 
         # Offer to recover a run that was interrupted (crash/kill) last session.
         # The per-run output/<lora>/run.json manifest is tried first (it survives a
@@ -488,6 +489,9 @@ class MainWindow(QMainWindow):
         self._home_tab.name_changed.connect(self._train_tab.set_lora_name)
         self._home_tab.trigger_changed.connect(self._on_home_trigger_changed)
         self._home_tab.prefix_changed.connect(self._dataset_tab.set_prefix)
+        self._home_tab.model_changed.connect(self._train_tab.set_model)
+        self._home_tab.caption_style_changed.connect(self._on_home_caption_style)
+        self._train_tab.model_changed.connect(self._on_model_changed)
         self._home_tab.prefix_changed.connect(self._train_tab.set_quality_prefix)
         self._home_tab.type_changed.connect(self._on_home_type_changed)
         self._home_tab.anchor_changed.connect(self._characters_tab.set_style_anchor)
@@ -703,7 +707,7 @@ class MainWindow(QMainWindow):
             "quality_prefix": self._dataset_tab.get_prefix(),
             "subject_type": self._train_tab.get_subject_type(),
             "preset_name": self._preset_name,
-            "target_steps": self._train_tab.get_target_steps(),
+            "target_steps": self._train_tab.summary_steps(),
             "style_anchor": self._train_tab._dataset_style_anchor(),
             # live pillar readouts (Home condenses these into the two step cards)
             "caption_stage_counts": self._dataset_tab.caption_stage_counts(),
@@ -718,6 +722,33 @@ class MainWindow(QMainWindow):
         is shown on Home and auto-recalculates the suggested steps)."""
         if folder:
             self._dataset_tab.load_folder_path(folder)
+
+    def _restore_model(self):
+        """Open on the model last chosen. Stored settings can name a model this
+        build no longer has; say so rather than switching silently."""
+        from core import models
+        from core.settings import AppSettings
+        stored = AppSettings().get("model")
+        if stored not in models.MODELS:
+            self._status_bar.showMessage(
+                f"Saved model {stored!r} is not available — using "
+                f"{models.get(models.DEFAULT_MODEL).name}.")
+            stored = models.DEFAULT_MODEL
+        self._train_tab.set_model(stored)
+        self._on_model_changed(stored)
+
+    def _on_model_changed(self, model_id: str):
+        self._home_tab.set_model(model_id)
+        style = self._train_tab.caption_style()
+        self._home_tab.set_caption_style(style)
+        self._dataset_tab.set_caption_style(style)
+        from core.settings import AppSettings
+        AppSettings().set("model", model_id)
+        self._refresh_rail()
+
+    def _on_home_caption_style(self, style: str):
+        self._train_tab.set_caption_style(style)
+        self._dataset_tab.set_caption_style(style)
 
     def _on_home_trigger_changed(self, trigger: str):
         """Front-page trigger edit → the Dataset tab (source of truth) + Train mirror."""

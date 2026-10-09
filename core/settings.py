@@ -54,6 +54,8 @@ DEFAULTS = {
     "vae_path": "",
     "output_dir": "",
     "onetrainer_root": "",
+    # Model preset id (core/models.py) the app opens on: the last one chosen.
+    "model": "anima",
     # Connections
     "forge_api_url": "http://127.0.0.1:7860",
     "forge_lora_dir": "",
