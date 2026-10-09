@@ -15,7 +15,9 @@ from PySide6.QtCore import QObject, Signal
 from core import af_log, caption_manifest, caption_policy as cp
 from core.caption_progress import parse_progress
 from core.dataset_manager import combine_all
+from core.gpu_check import free_vram_mb
 from core.joycaption import JoyCaptionProcess
+from core.settings import AppSettings
 from core.tagger import TaggerProcess
 
 
@@ -126,9 +128,24 @@ class CaptionRunner(QObject):
             return True
         caption_manifest.record_settings(
             job.dataset_folder, job.trigger, job.prefix, job.order, job.chain)
+        if any(stage == "describe" for stage, _ in self._stages):
+            self._warn_if_vram_low()
         self._running = True
         self._next()
         return True
+
+    def _warn_if_vram_low(self):
+        """Best-effort pre-describe VRAM probe; describe is the only GPU stage that
+        loads a large model here. Warn-only: 0 disables it, an unreadable reading is
+        skipped, and a low reading never blocks the run."""
+        threshold = AppSettings().get("min_free_vram_mb")
+        if not threshold:
+            return
+        free = free_vram_mb()
+        if free is not None and free < threshold:
+            self.log_line.emit(
+                f"[Caption] only {free} MB VRAM free — the describe model may fail or "
+                f"fall back to CPU. Close other GPU apps if it does.")
 
     def stop(self):
         """Abort the chain. Emits finished(False) exactly once, whether or not a

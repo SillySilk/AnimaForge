@@ -233,3 +233,43 @@ def test_describe_stage_names_the_subject_by_trigger(monkeypatch):
     runner._running = True
     runner._next()
     assert seen["name"] == "mrx"
+
+
+def _start_with(monkeypatch, tmp_path, free, threshold, chain):
+    import core.caption_runner as m
+    monkeypatch.setattr(m, "free_vram_mb", lambda: free)
+    monkeypatch.setattr(m.AppSettings, "get",
+                        lambda self, k: threshold if k == "min_free_vram_mb" else None)
+    (tmp_path / "a.png").write_bytes(b"x")
+    runner = CaptionRunner()
+    monkeypatch.setattr(runner._joy, "start", lambda **kw: None)
+    monkeypatch.setattr(runner._tagger, "start", lambda **kw: None)
+    logs = []
+    runner.log_line.connect(logs.append)
+    runner.start(_job(dataset_folder=str(tmp_path), chain=chain, policy=OVERWRITE))
+    return [line for line in logs if "VRAM free" in line]
+
+
+def test_low_vram_before_describe_warns(monkeypatch, tmp_path):
+    assert _start_with(monkeypatch, tmp_path, 3000, 12000, ["describe", "combine"])
+
+
+def test_enough_vram_says_nothing(monkeypatch, tmp_path):
+    assert not _start_with(monkeypatch, tmp_path, 15000, 12000, ["describe", "combine"])
+
+
+def test_no_describe_stage_never_probes(monkeypatch, tmp_path):
+    import core.caption_runner as m
+    probed = []
+    monkeypatch.setattr(m, "free_vram_mb", lambda: probed.append(1) or 0)
+    monkeypatch.setattr(m.AppSettings, "get",
+                        lambda self, k: 12000 if k == "min_free_vram_mb" else None)
+    (tmp_path / "a.png").write_bytes(b"x")
+    runner = CaptionRunner()
+    monkeypatch.setattr(runner._tagger, "start", lambda **kw: None)
+    runner.start(_job(dataset_folder=str(tmp_path), chain=["tag", "combine"], policy=OVERWRITE))
+    assert probed == []
+
+
+def test_zero_threshold_disables_the_probe(monkeypatch, tmp_path):
+    assert not _start_with(monkeypatch, tmp_path, 10, 0, ["describe", "combine"])
