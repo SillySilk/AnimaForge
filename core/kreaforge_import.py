@@ -68,16 +68,29 @@ def _trigger(run_dir: Path, name: str) -> str:
 
 def _image_count(folder: str) -> int:
     p = Path(folder or "")
-    if not p.is_dir():
+    try:
+        if not p.is_dir():
+            return 0
+        return sum(1 for f in p.iterdir() if f.is_file() and f.suffix.lower() in IMAGE_EXTS)
+    except OSError:
         return 0
-    return sum(1 for f in p.iterdir() if f.is_file() and f.suffix.lower() in IMAGE_EXTS)
 
 
-def _free_name(name: str, sets_root: Path):
-    """The set name to import under, or None when both candidates are taken."""
+def _already_imported(candidate: str, dataset: str, sets_root: Path) -> bool:
+    rd = sets.load_set(candidate, root=sets_root)
+    return rd is not None and rd.model == "krea2" and rd.dataset_folder == dataset
+
+
+def _free_name(name: str, dataset: str, sets_root: Path):
+    """The set name to import under, or None when this run is already a set (an
+    earlier, interrupted import) or both names are taken."""
     taken = set(sets.list_sets(root=sets_root))
-    for candidate in (name, f"{name} - Krea 2"):
-        if sets._safe(candidate) not in taken and candidate not in taken:
+    candidates = (name, f"{name} - Krea 2")
+    if any(sets._safe(c) in taken and _already_imported(c, dataset, sets_root)
+           for c in candidates):
+        return None
+    for candidate in candidates:
+        if sets._safe(candidate) not in taken:
             return candidate
     return None
 
@@ -96,20 +109,25 @@ def import_runs(krea_root: Path, sets_root: Path) -> list:
             dataset = str(entries[0]["path"])
         except (OSError, ValueError, LookupError, TypeError):
             continue
-        set_name = _free_name(run_dir.name, sets_root)
-        if set_name is None:
-            continue
-        rd = RunDefinition(model="krea2", lora_name=run_dir.name, dataset_folder=dataset,
-                           image_count=_image_count(dataset),
-                           trigger_word=_trigger(run_dir, run_dir.name),
-                           output_dir=str(out_dir), subject_type="character")
-        sets.save_set(set_name, rd, root=sets_root)
-        snap_src = Path(krea_root) / "sets" / run_dir.name
-        snap_dst = sets.sets_dir(sets_root) / sets._safe(set_name)
-        if snap_src.is_dir() and not snap_dst.exists():
-            for stage in snap_src.glob("captions-*"):
-                if stage.is_dir():
-                    shutil.copytree(stage, snap_dst / stage.name)
+        try:
+            set_name = _free_name(run_dir.name, dataset, sets_root)
+            if set_name is None:
+                continue
+            # output_dir stays empty: the run trains into Setup's output folder, and
+            # Krea Forge's own folder is read-only history that may be removed.
+            rd = RunDefinition(model="krea2", lora_name=run_dir.name, dataset_folder=dataset,
+                               image_count=_image_count(dataset),
+                               trigger_word=_trigger(run_dir, run_dir.name),
+                               output_dir="", subject_type="character")
+            sets.save_set(set_name, rd, root=sets_root)
+            snap_src = Path(krea_root) / "sets" / run_dir.name
+            snap_dst = sets.sets_dir(sets_root) / sets._safe(set_name)
+            if snap_src.is_dir() and not snap_dst.exists():
+                for stage in snap_src.glob("captions-*"):
+                    if stage.is_dir():
+                        shutil.copytree(stage, snap_dst / stage.name)
+        except OSError:
+            continue        # one unreadable run never stops the rest
         created.append(set_name)
     return created
 

@@ -42,9 +42,12 @@ def build_app(argv=None):
     from PySide6.QtCore import QSettings
     from core import kreaforge_import
     from core.settings import AppSettings
-    imported = kreaforge_import.run_once(
-        AppSettings(), kreaforge_import.default_root(),
-        os.path.dirname(os.path.abspath(__file__)), QSettings("KreaForge", "KreaForge"))
+    try:
+        imported = kreaforge_import.run_once(
+            AppSettings(), kreaforge_import.default_root(),
+            os.path.dirname(os.path.abspath(__file__)), QSettings("KreaForge", "KreaForge"))
+    except Exception as e:  # never keep the app from opening
+        imported = [f"Krea Forge import failed: {e}"]
 
     # App / taskbar icon (the forge emblem)
     _icon = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "icon.ico")

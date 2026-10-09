@@ -62,7 +62,7 @@ def test_runs_become_krea2_sets_with_their_dataset_and_trigger(tmp_path):
     rd = RunDefinition.from_dict(json.loads((sets_root / "sets" / "Barry.json").read_text(encoding="utf-8")))
     assert rd.model == "krea2" and rd.lora_name == "Barry"
     assert rd.trigger_word == "barryx" and rd.image_count == 3
-    assert rd.dataset_folder.endswith("Barry") and rd.output_dir == str(root / "output")
+    assert rd.dataset_folder.endswith("Barry") and rd.output_dir == ""
     assert (sets_root / "sets" / "Barry" / "captions-processed" / "Barry_0.txt").is_file()
 
 
