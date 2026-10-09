@@ -148,7 +148,7 @@ def peak_lora_b_abs(path: str) -> float:
     return peak
 
 
-def verify_output(path: str) -> str | None:
+def verify_output(path: str, namespace: str = READABLE_PREFIX + ".") -> str | None:
     """None when the file is a LoRA worth shipping, otherwise why it is not.
 
     The message is the whole point: it has to be enough to act on without
@@ -167,13 +167,14 @@ def verify_output(path: str) -> str | None:
     if not header:
         return f"{p.name} contains no tensors."
 
-    if not any(k.startswith(READABLE_PREFIX + ".") for k in header):
+    if not any(k.startswith(namespace) for k in header):
         found = sorted({k.split(".", 1)[0] for k in header})[:3]
         return (f"{p.name} is in the wrong key namespace: it has no "
-                f"'{READABLE_PREFIX}.' keys (found {', '.join(found)}). The image "
-                "tool matches on the 'diffusion_model.' names, so it would load "
-                "this file and apply nothing. Check output_model_format is "
-                "COMFY_LORA, not DIFFUSERS_LORA.")
+                f"'{namespace}' keys (found {', '.join(found)}). The image "
+                f"tool matches on the '{namespace}' names, so it would load "
+                "this file and apply nothing."
+                + (" Check output_model_format is COMFY_LORA, not DIFFUSERS_LORA."
+                   if namespace == READABLE_PREFIX + "." else ""))
 
     if not _b_side(header):
         return (f"{p.name} has no lora_B tensors, so there is no trained "
