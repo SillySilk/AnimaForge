@@ -343,3 +343,36 @@ def test_naming_an_unrecognized_image_clears_the_sentinel():
     assert data.assignments["person.png"]["present"] == ["amber"]
     assert data.assignments["person.png"]["unidentified"] is False
     assert C.unrecognized_images(data, ["person.png"]) == []
+
+
+def test_describe_prompt_without_names_is_unchanged():
+    assert C.describe_prompt("Write a caption.", []) == "Write a caption."
+
+
+def test_describe_prompt_names_one_character():
+    p = C.describe_prompt("Write a caption.", ["Mira"])
+    assert p.startswith("Write a caption. ") and "refer to them as Mira" in p
+
+
+def test_describe_prompt_names_several_characters_once_each():
+    p = C.describe_prompt("Write a caption.", ["asuka", "rei", "Asuka"])
+    assert "asuka and rei" in p and p.count("asuka") == 1
+
+
+def test_describe_prompt_for_image_uses_explicit_assignments(tmp_path):
+    data = C.DatasetCharacters(roster=[C.Character(token="Mira")],
+                               assignments={"Mira_01.png": {"present": ["Mira"]}})
+    assert "Mira" in C.describe_prompt_for_image("Base.", data, "Mira_01.png")
+    assert C.describe_prompt_for_image("Base.", data, "other.png") == "Base."
+
+
+def test_describe_prompt_for_image_uses_trigger_when_no_character_assigned():
+    data = C.DatasetCharacters()
+    assert "refer to them as mrx" in C.describe_prompt_for_image("Base.", data, "x.png", trigger="mrx")
+
+
+def test_describe_prompt_for_image_prefers_characters_over_trigger():
+    data = C.DatasetCharacters(roster=[C.Character(token="Mira")],
+                               assignments={"Mira_01.png": {"present": ["Mira"]}})
+    p = C.describe_prompt_for_image("Base.", data, "Mira_01.png", trigger="mrx")
+    assert "Mira" in p and "mrx" not in p

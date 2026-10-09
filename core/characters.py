@@ -109,6 +109,34 @@ def explicit_tokens_for_image(data: DatasetCharacters, image_name: str) -> list:
     return [t for t in toks if t.strip()]
 
 
+def describe_prompt(base_prompt: str, names) -> str:
+    """The describe-stage prompt with the image's people named in it, so the prose
+    calls them by name instead of "a woman". The phrasing follows JoyCaption Beta
+    One's trained name option; other describe models take it as plain instruction.
+    Combine still puts the token at the head of the caption as well."""
+    unique, seen = [], set()
+    for n in (x.strip() for x in names):
+        if n and n.lower() not in seen:
+            seen.add(n.lower())
+            unique.append(n)
+    if not unique:
+        return base_prompt
+    if len(unique) == 1:
+        extra = f"If there is a person/character in the image you must refer to them as {unique[0]}."
+    else:
+        joined = ", ".join(unique[:-1]) + " and " + unique[-1]
+        extra = (f"The people/characters in the image are {joined}; "
+                 f"you must refer to each of them by name.")
+    return f"{base_prompt.strip()} {extra}"
+
+
+def describe_prompt_for_image(base_prompt: str, data, image_name: str, trigger: str = "") -> str:
+    """Assigned characters name the image's people; with none assigned, the dataset
+    trigger word does. Never both, or one person would be described as two."""
+    names = explicit_tokens_for_image(data, image_name) or [trigger]
+    return describe_prompt(base_prompt, names)
+
+
 def enforce_anchors_in_tags(tags: str, tokens, style_anchor: str = "") -> str:
     """Guarantee each token and the style anchor appear in a comma-separated tag string.
 
