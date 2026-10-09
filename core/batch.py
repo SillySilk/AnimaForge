@@ -83,6 +83,10 @@ class RunDefinition:
     qwen3_path: str = ""
     vae_path: str = ""
     output_dir: str = ""
+    onetrainer_root: str = ""
+    # Model preset id (core/models.py). Queue JSON written before v3 has no key and
+    # is Anima, which is what this default restores.
+    model: str = "anima"
     # Runtime
     status: str = QUEUED
 

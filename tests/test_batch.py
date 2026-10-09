@@ -541,3 +541,15 @@ def test_on_caption_finished_guard_blocks_stray_true_after_stop(tmp_path, monkey
 
     assert trained == []
     assert runner.is_running() is False
+
+
+def test_v2_queue_json_loads_as_anima():
+    d = {"lora_name": "Old", "dataset_folder": "C:/ds", "image_count": 10}  # written by v2
+    r = RunDefinition.from_dict(d)
+    assert r.model == "anima" and r.onetrainer_root == ""
+
+
+def test_model_fields_roundtrip():
+    r = RunDefinition("K", "C:/ds", 12, model="krea2", onetrainer_root="D:/OT")
+    back = RunDefinition.from_dict(r.to_dict())
+    assert (back.model, back.onetrainer_root) == ("krea2", "D:/OT")

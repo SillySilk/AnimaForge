@@ -53,6 +53,7 @@ DEFAULTS = {
     "qwen3_path": "",
     "vae_path": "",
     "output_dir": "",
+    "onetrainer_root": "",
     # Connections
     "forge_api_url": "http://127.0.0.1:7860",
     "forge_lora_dir": "",
