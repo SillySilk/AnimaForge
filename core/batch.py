@@ -13,6 +13,7 @@ from core import models
 from core.caption_policy import ASK
 from core.caption_runner import CaptionRunner
 from core.config_generator import generate_configs
+from core.dataset_manager import combine_all
 from core.paths import run_output_dir
 from core.settings import AppSettings
 from core.step_calculator import calculate_training_params
@@ -130,7 +131,8 @@ class RunDefinition:
             describe_model_id=self.describe_model_id,
             describe_cache_dir=self.describe_cache_dir,
             caption_rules=self.caption_rules,
-            caption_style=style)
+            caption_style=style,
+            name_subject=(self.subject_type or "character") == "character")
 
 
 def resolve_sample_prompts(run: RunDefinition):
@@ -297,6 +299,7 @@ class BatchRunner(QObject):
         policy = run.caption_policy if run.caption_policy != cp.ASK else cp.KEEP
         try:
             state = cp.scan(run.dataset_folder)
+            self._rebuild_if_style_changed(run, state, policy)
             if not cp.images_for(state, policy):
                 return self._start_training(run)
             self.run_phase.emit(self._idx, CAPTIONING)
@@ -314,6 +317,33 @@ class BatchRunner(QObject):
             self._mark_failed(f"could not start captioning for '{run.lora_name}'")
             return False
         return True
+
+    def _rebuild_if_style_changed(self, run, state, policy):
+        """The folder was captioned under another caption style. KEEP leaves those
+        captions alone, so the run would train on the old style (tags leaking into a
+        prose run). Rebuild the .txt of every image this app captioned from its
+        sidecars under the run's style; hand-written captions are not ours and stay."""
+        from core import caption_manifest as cm, caption_policy as cp
+        from core.caption_runner import sources_for_style
+        if policy != cp.KEEP or not state.captioned:
+            return
+        style = run.caption_style or "prose+tags"
+        manifest = cm.load(run.dataset_folder)
+        recorded = manifest.get("caption_style")
+        if not recorded or recorded == style:
+            return
+        ours = set(manifest.get("images", {}))
+        only = [p for p in state.captioned if Path(p).name in ours]
+        job = run.to_caption_job(run.sdscripts_path, "", policy)
+        written, errors = combine_all(
+            run.dataset_folder, prefix=job.combine_prefix(), order=run.caption_order,
+            only=only, rules=run.caption_rules, sources=sources_for_style(style))
+        manifest = cm.load(run.dataset_folder)
+        manifest["caption_style"] = style
+        cm.save(run.dataset_folder, manifest)
+        self.log_line.emit(
+            f"[Batch] '{run.lora_name}': captions were built as {recorded}; rebuilt "
+            f"{written} as {style} ({len(only) - written} had nothing to rebuild from).")
 
     def _on_caption_finished(self, ok: bool):
         if not self._running:

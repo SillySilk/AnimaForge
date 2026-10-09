@@ -684,3 +684,36 @@ def test_tag_tick_does_not_touch_the_card(tmp_path):
     t._cards_by_name = {"a.png": card}
     t._runner.tick.emit("Tag", 1, 1, "a.png")
     assert card._caption_preview.text() == "orig"
+
+
+def _describe_kwargs(t, monkeypatch, tmp_path):
+    seen = {}
+    t._folder_path = str(tmp_path)
+    t._trigger_edit.setText("inkwash")
+    monkeypatch.setattr(t._joycaption, "start", lambda **kw: seen.update(kw))
+    monkeypatch.setattr(t, "_begin_caption", lambda proc: None)
+    t._start_describe()
+    return seen
+
+
+def test_manual_describe_names_the_subject_for_a_character_lora(tmp_path, monkeypatch):
+    from ui.dataset_tab import DatasetTab
+    t = DatasetTab()
+    assert _describe_kwargs(t, monkeypatch, tmp_path)["name"] == "inkwash"
+
+
+def test_manual_describe_leaves_the_trigger_out_for_a_style_lora(tmp_path, monkeypatch):
+    from ui.dataset_tab import DatasetTab
+    t = DatasetTab()
+    t.set_subject_type("style")
+    assert _describe_kwargs(t, monkeypatch, tmp_path)["name"] == ""
+
+
+def test_caption_job_follows_the_subject_type(tmp_path):
+    from ui.dataset_tab import DatasetTab
+    t = DatasetTab()
+    t._folder_path = str(tmp_path)
+    t.set_subject_type("concept")
+    assert t._build_caption_job("keep").name_subject is False
+    t.set_subject_type("character")
+    assert t._build_caption_job("keep").name_subject is True

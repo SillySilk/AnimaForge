@@ -72,12 +72,16 @@ def save(folder: str, data: dict) -> None:
     p.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
-def record_settings(folder: str, trigger: str, prefix: str, order: str, chain: list) -> None:
-    """No-op when `folder` is falsy."""
+def record_settings(folder: str, trigger: str, prefix: str, order: str, chain: list,
+                    caption_style: str = "") -> None:
+    """No-op when `folder` is falsy. `caption_style` is kept so a later run that asks for
+    a different style can tell the captions on disk were built another way."""
     if not folder:
         return
     d = load(folder)
     d.update({"trigger": trigger, "prefix": prefix, "order": order, "chain": list(chain)})
+    if caption_style:
+        d["caption_style"] = caption_style
     d.setdefault("images", {})
     save(folder, d)
 

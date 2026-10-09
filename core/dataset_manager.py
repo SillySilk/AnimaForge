@@ -262,7 +262,10 @@ def combine_all(folder_path: str, prefix: str = "", order: str = "nl_first",
     for img in images:
         nl = read_sidecar(str(img), NL_EXT) if "nl" in sources else ""
         tags = read_sidecar(str(img), TAGS_EXT) if "tags" in sources else ""
-        if not nl and not tags and _txt_has_text(img):
+        # Under a style that reads only one sidecar, an image without it (a describe
+        # that failed, say) has nothing to build from. A trigger-only .txt would mark it
+        # captioned and resume would never retry it, so leave the image untouched.
+        if not nl and not tags and (_txt_has_text(img) or set(sources) != {"nl", "tags"}):
             continue
         lead = ""
         if chars is not None:

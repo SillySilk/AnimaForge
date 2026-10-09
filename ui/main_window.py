@@ -423,6 +423,10 @@ class MainWindow(QMainWindow):
                 *self._dataset_tab.caption_stage_counts()))
         self._characters_tab.characters_changed.connect(self._refresh_rail)
         self._train_tab.subject_type_changed.connect(self._refresh_rail)
+        # Describe passes name the subject by trigger only for a character LoRA.
+        self._train_tab.subject_type_changed.connect(
+            lambda: self._dataset_tab.set_subject_type(self._train_tab.get_subject_type()))
+        self._dataset_tab.set_subject_type(self._train_tab.get_subject_type())
         # Live OPTIMIZER tile: the Train Presets modal floats over Home, so reflect
         # preset flips immediately rather than waiting for the next full refresh.
         self._train_tab.optimizer_changed.connect(

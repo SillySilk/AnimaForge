@@ -82,3 +82,41 @@ def test_combine_stage_reads_only_the_styles_sidecars(tmp_path, monkeypatch):
     runner._running = True
     runner._next()
     assert seen["sources"] == ("nl",)
+
+
+def test_restricted_style_skips_an_image_it_has_nothing_to_build_from(tmp_path):
+    # A describe that failed for this image left no .nl; under prose style the .tags is
+    # ignored. Writing "trig" alone would mark the image captioned and resume would
+    # never retry it, so nothing is written and the image stays untouched.
+    _img(tmp_path, "a", tags="1girl")
+    written, errors = combine_all(str(tmp_path), prefix="trig", apply_anchors=False,
+                                  sources=("nl",))
+    assert (written, errors) == (0, 0)
+    assert not (tmp_path / "a.txt").exists()
+
+
+def test_job_names_the_subject_by_default():
+    assert CaptionJob(dataset_folder="d", sdscripts_path="s").name_subject is True
+
+
+def test_describe_stage_leaves_the_trigger_out_when_not_naming_the_subject(monkeypatch):
+    seen = {}
+    runner = CaptionRunner()
+    monkeypatch.setattr(runner._joy, "start", lambda **kw: seen.update(kw))
+    runner._job = CaptionJob(dataset_folder="d", sdscripts_path="s", trigger="inkwash",
+                             name_subject=False)
+    runner._stages = [("describe", ["a.png"])]
+    runner._running = True
+    runner._next()
+    assert seen["name"] == ""
+
+
+def test_runner_records_the_caption_style(tmp_path, monkeypatch):
+    from core import caption_manifest as cm
+    _img(tmp_path, "a")
+    runner = CaptionRunner()
+    monkeypatch.setattr(runner._joy, "start", lambda **kw: None)
+    runner.start(CaptionJob(dataset_folder=str(tmp_path), sdscripts_path="s",
+                            chain=["describe", "combine"], caption_style="prose",
+                            policy="overwrite"))
+    assert cm.load(str(tmp_path))["caption_style"] == "prose"

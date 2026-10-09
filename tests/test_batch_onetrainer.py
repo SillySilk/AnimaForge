@@ -146,6 +146,7 @@ def test_anima_runs_still_use_kohya(tmp_path, monkeypatch):
     monkeypatch.setattr(r._trainer, "start", lambda cfg, sd: kohya.append(sd))
     run = make(tmp_path)[0]
     run.model, run.sdscripts_path = "anima", "C:/sd"
+    run.output_dir = str(tmp_path / "out")  # sample prompts are written under it
     r.start([run])
     assert kohya == ["C:/sd"]
 
@@ -265,7 +266,8 @@ def test_a_v2_saved_queue_trains_through_kohya_exactly_as_before(tmp_path, monke
     qfile = tmp_path / "batch_queue.json"
     qfile.write_text(json.dumps([{  # the shape v2 wrote: no model, no onetrainer_root
         "lora_name": "Old", "dataset_folder": str(ds), "image_count": 1, "target_steps": 500,
-        "sdscripts_path": "C:/sd", "caption_policy": cp.KEEP, "status": "queued"}]))
+        "sdscripts_path": "C:/sd", "caption_policy": cp.KEEP, "status": "queued",
+        "output_dir": str(tmp_path / "out")}]))
     runs = batch_mod.load_queue(str(qfile))
     seen = {}
     monkeypatch.setattr(batch_mod, "generate_configs",
@@ -277,3 +279,29 @@ def test_a_v2_saved_queue_trains_through_kohya_exactly_as_before(tmp_path, monke
     assert runs[0].model == "anima"
     assert kohya == [("cfg.toml", "C:/sd")]
     assert seen["lora_name"] == "Old" and seen["dataset_folder"] == str(ds)
+
+
+def test_a_new_caption_style_rebuilds_captions_the_app_wrote(tmp_path, monkeypatch):
+    # Captioned under prose+tags; the queued run now asks for prose. KEEP has nothing
+    # left to caption, so without a rebuild the run would train on the tagged .txt.
+    from core import caption_manifest as cm
+    ds = tmp_path / "ds"
+    ds.mkdir()
+    (ds / "a.png").write_bytes(b"x")
+    (ds / "a.nl").write_text("a woman reading", encoding="utf-8")
+    (ds / "a.tags").write_text("1girl, book", encoding="utf-8")
+    (ds / "a.txt").write_text("mrx, a woman reading, 1girl, book", encoding="utf-8")
+    cm.record_settings(str(ds), "mrx", "", "nl_first", ["tag", "describe", "combine"],
+                       caption_style="prose+tags")
+    cm.mark_stage(str(ds), "tag", [str(ds / "a.png")])
+    cm.mark_stage(str(ds), "describe", [str(ds / "a.png")])
+    cm.mark_stage(str(ds), "combine", [str(ds / "a.png")])
+    s = FakeSession()
+    r = runner_with([s])
+    run = RunDefinition("K0", str(ds), 1, model="krea2", onetrainer_root="C:/OT",
+                        trigger_word="mrx", caption_policy=cp.KEEP, caption_style="prose",
+                        output_dir=str(tmp_path / "out"))
+    r.start([run])
+    assert (ds / "a.txt").read_text(encoding="utf-8") == "mrx, a woman reading"
+    assert cm.load(str(ds))["caption_style"] == "prose"
+    assert s.started_with is not None

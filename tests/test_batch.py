@@ -1,3 +1,4 @@
+import pytest
 import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import sys
@@ -575,3 +576,10 @@ def test_prose_style_run_skips_tagging():
 def test_caption_style_roundtrips():
     r = RunDefinition("K", "C:/ds", 3, caption_style="tags")
     assert RunDefinition.from_dict(r.to_dict()).caption_style == "tags"
+
+
+@pytest.mark.parametrize("subject,named", [("", True), ("character", True),
+                                            ("concept", False), ("style", False)])
+def test_only_character_runs_name_the_subject_by_trigger(subject, named):
+    r = RunDefinition("S", "C:/ds", 3, trigger_word="inkwash", subject_type=subject)
+    assert r.to_caption_job("C:/sd", "", "keep").name_subject is named
