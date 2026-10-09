@@ -260,7 +260,8 @@ class TrainTab(QWidget):
         self._gpu_busy_check = fn
 
     def is_training(self) -> bool:
-        return self._trainer.is_running()
+        return self._trainer.is_running() or (
+            self._session is not None and self._session.is_running())
 
     # ------------------------------------------------------------------
     # Public API — called by main window to sync shared state
@@ -1711,6 +1712,11 @@ class TrainTab(QWidget):
                 f"Cannot start — {reason}. Wait for it to finish, or stop it first.")
             return
 
+        if self.engine() == models.ONETRAINER:
+            self._start_onetrainer(confirm)
+            return
+        self._ot_output = ""
+
         valid, msg = self._validate_for_training()
         if not valid:
             QMessageBox.warning(self, "Cannot Start Training", msg)
@@ -1951,6 +1957,11 @@ class TrainTab(QWidget):
             QMessageBox.No,
         )
         if reply == QMessageBox.Yes:
+            if self._session is not None:
+                # The session reports its own end (canceled) once the process tree
+                # is gone; finishing here as well would end the run twice.
+                self._session.cancel()
+                return
             self._trainer.stop()
             self._on_log_line("[AnimaForge] Training stopped by user.")
             self._on_training_finished(False)
@@ -1964,7 +1975,7 @@ class TrainTab(QWidget):
             return
         from pathlib import Path
         from core.dataset_manager import latest_files
-        files = latest_files(str(Path(self._run_dir()) / "sample"), None)
+        files = latest_files(self._samples_dir(), None)
         if files == self._last_preview:
             return
         self._last_preview = files
@@ -2105,6 +2116,8 @@ class TrainTab(QWidget):
 
     def _lora_output_path(self):
         from pathlib import Path
+        if self._ot_output:
+            return Path(self._ot_output)   # the file the OneTrainer session shipped
         name = self._lora_name_edit.text().strip()
         if not name or not self._output_dir:
             return None
@@ -2267,10 +2280,13 @@ class TrainTab(QWidget):
         self._preview_timer.stop()
         self._poll_sample_dir()  # catch the final sample set
         from core import run_manifest
+        kohya = self.engine() == models.KOHYA
         # A user Stop must read as "interrupted" (resumable), never "failed" --
-        # find_resumable() only ever looks for running/interrupted status.
-        run_manifest.mark(
-            self._run_dir(), run_manifest.DONE if success else run_manifest.INTERRUPTED)
+        # find_resumable() only ever looks for running/interrupted status. A OneTrainer
+        # run has no Kohya state to resume, so it never writes this manifest.
+        if kohya:
+            run_manifest.mark(
+                self._run_dir(), run_manifest.DONE if success else run_manifest.INTERRUPTED)
         if success:
             from core import sets
             sets.clear_active_run()
@@ -2297,8 +2313,9 @@ class TrainTab(QWidget):
             # A state was just written before the process exited. Surface it and
             # arm resume so the next Start continues from the last checkpoint
             # instead of restarting from zero (uncheck the box to start fresh).
-            self._refresh_resume_option()
-            if self._resume_state_path:
+            if kohya:
+                self._refresh_resume_option()
+            if kohya and self._resume_state_path:
                 self._resume_check.setChecked(True)
                 from pathlib import Path as _P
                 self.status_message.emit(
@@ -2423,6 +2440,95 @@ class TrainTab(QWidget):
         ):
             return False, "Resume is checked but no saved state was found."
         return True, ""
+
+    def _default_onetrainer_session(self, parent):
+        from core.engines.onetrainer.session import TrainingSession
+        return TrainingSession(parent)
+
+    def _start_onetrainer(self, confirm: bool):
+        valid, msg = self._validate_for_onetrainer()
+        if not valid:
+            QMessageBox.warning(self, "Cannot Start Training", msg)
+            return
+        from core.naming import trigger_from_lora_name
+        if not self._trigger_word:
+            # Unattended runs must not stop to ask; a LoRA with no trigger has no way
+            # to be called, so it is called by the name the user already typed.
+            self._trigger_word = trigger_from_lora_name(self._lora_name_edit.text())
+            self._on_log_line(f"[AnimaForge] No trigger word set — using {self._trigger_word!r}.")
+        if not self._check_empty_captions(interactive=confirm):
+            return
+        rd, msg = self.build_run_definition()
+        if rd is None:
+            QMessageBox.warning(self, "Cannot Start Training", msg)
+            return
+        from core.engines.onetrainer.adapter import to_onetrainer_params
+        factory = self._onetrainer_factory or self._default_onetrainer_session
+        session = factory(self)
+        session.state_changed.connect(self._on_ot_state)
+        session.progress.connect(self._on_ot_progress)
+        session.done.connect(self._on_ot_done)
+        session.failed.connect(self._on_ot_failed)
+        session.canceled.connect(self._on_ot_canceled)
+        self._session, self._ot_output = session, ""
+        self._log_edit.clear()
+        self._on_training_started()
+        session.start(to_onetrainer_params(rd))   # a refusal arrives via failed()
+
+    _OT_PHASES = {"preflight": "Checking…", "generating": "Preparing…",
+                  "training": "Loading model…", "rendering": "Rendering final previews…"}
+
+    def _on_ot_state(self, state: str):
+        label = self._OT_PHASES.get(state)
+        if label and not self._stepping:
+            self._rp(kind="phase", label=label)
+
+    def _on_ot_progress(self, d: dict):
+        step, total = int(d.get("global_step") or 0), int(d.get("global_total") or 0)
+        self._tickbar.set_total(total)
+        self._tickbar.set_progress(step)
+        if d.get("epoch_total"):
+            self._dials.set_epoch(int(d.get("epoch") or 0), int(d["epoch_total"]))
+        if d.get("loss") is not None:
+            self._dials.set_loss(d["loss"])
+        if step >= 1 and not self._stepping:
+            self._stepping = True
+            self._rp(kind="phase", label="Training")
+        self._rp(kind="progress", step=step, total=total)
+
+    def _end_ot(self, success: bool):
+        session, self._session = self._session, None
+        if session is None:
+            return                      # already ended (e.g. Stop then canceled)
+        self._on_training_finished(success)
+        if hasattr(session, "deleteLater"):
+            session.deleteLater()
+
+    def _on_ot_done(self, path: str):
+        if self._session is None:
+            return
+        self._ot_output = path
+        for note in self._session.notes():
+            self._on_log_line(f"[AnimaForge] {note}")
+        self._on_log_line(f"[AnimaForge] Finished: {path}")
+        self._end_ot(True)
+
+    def _on_ot_failed(self, message: str):
+        if self._session is None:
+            return
+        self._on_log_line(f"[AnimaForge] {message}")
+        self._end_ot(False)
+
+    def _on_ot_canceled(self):
+        if self._session is None:
+            return
+        self._on_log_line("[AnimaForge] Training stopped by user.")
+        self._end_ot(False)
+
+    def _samples_dir(self) -> str:
+        if self._session is not None:
+            return self._session.samples_dir()
+        return str(Path(self._run_dir()) / "sample")
 
     def _validate_common(self) -> tuple:
         if not self._output_dir:
