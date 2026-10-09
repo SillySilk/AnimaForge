@@ -57,6 +57,8 @@ DEFAULTS = {
     # Ask OneTrainer for profiler traces (OT_DEBUG_PROFILES) on Krea 2 runs; the
     # session moves them into the run folder afterwards.
     "debug_profiles": False,
+    # Set once Krea Forge's settings and past runs were imported (core/kreaforge_import.py).
+    "kreaforge_imported": False,
     # Model preset id (core/models.py) the app opens on: the last one chosen.
     "model": "anima",
     # Connections

@@ -37,6 +37,15 @@ def build_app(argv=None):
     from core.settings import migrate_legacy_settings
     migrate_legacy_settings()
 
+    # Once: Krea Forge (the retired Krea 2 trainer) beside this app hands over its
+    # settings and past runs as Krea 2 sets. Never overwrites; no-op without it.
+    from PySide6.QtCore import QSettings
+    from core import kreaforge_import
+    from core.settings import AppSettings
+    imported = kreaforge_import.run_once(
+        AppSettings(), kreaforge_import.default_root(),
+        os.path.dirname(os.path.abspath(__file__)), QSettings("KreaForge", "KreaForge"))
+
     # App / taskbar icon (the forge emblem)
     _icon = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "icon.ico")
     if os.path.exists(_icon):
@@ -49,6 +58,8 @@ def build_app(argv=None):
     apply_app_font(app)
 
     window = MainWindow()
+    if imported:
+        window._status_bar.showMessage(" ".join(imported), 20000)
     # Detect PyTorch in the background so Home's health row is accurate on arrival —
     # it used to need a manual Check PyTorch Version click on every launch.
     window.start_background_checks()
