@@ -208,6 +208,7 @@ class TrainTab(QWidget):
     optimizer_changed = Signal(str)          # preset label for the Home OPTIMIZER tile
     training_active = Signal(bool)           # run started/ended -> Home Start/Stop state
     model_changed = Signal(str)              # model preset id (Home mirrors it)
+    caption_style_changed = Signal(str)      # caption style (Home + Dataset mirror it)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -251,6 +252,10 @@ class TrainTab(QWidget):
         self._session = None            # live OneTrainer session for a Krea 2 run
         self._ot_output = ""            # the file that session reported finishing
         self._onetrainer_factory = None  # tests inject a fake session here
+        # The engine the current/last run started on; its end follows this, not
+        # whatever model is selected by then.
+        self._run_engine = None
+        self._ot_samples_dir = ""
         self._build_ui()
         self._connect_trainer()
 
@@ -327,6 +332,10 @@ class TrainTab(QWidget):
 
     def set_model(self, model_id: str):
         preset = models.get(model_id)          # KeyError names an unknown id
+        if model_id != self._model and self.is_training():
+            self.status_message.emit(
+                "Finish or stop the current run before changing the model.")
+            return
         if model_id == self._model:
             return                             # re-selecting keeps the user's step target
         self._model = model_id
@@ -353,7 +362,10 @@ class TrainTab(QWidget):
     def set_caption_style(self, style: str):
         if style not in models.CAPTION_STYLES:
             raise ValueError(f"unknown caption style {style!r}")
+        changed = style != self._caption_style
         self._caption_style = style
+        if changed:
+            self.caption_style_changed.emit(style)
 
     def set_onetrainer_root(self, path: str):
         self._onetrainer_root = (path or "").strip()
@@ -1716,6 +1728,7 @@ class TrainTab(QWidget):
             self._start_onetrainer(confirm)
             return
         self._ot_output = ""
+        self._run_engine = models.KOHYA
 
         valid, msg = self._validate_for_training()
         if not valid:
@@ -1975,7 +1988,18 @@ class TrainTab(QWidget):
             return
         from pathlib import Path
         from core.dataset_manager import latest_files
-        files = latest_files(self._samples_dir(), None)
+        folder = self._samples_dir()
+        if self._run_engine == models.ONETRAINER:
+            # OneTrainer writes each prompt's previews into its own subfolder.
+            from core.dataset_manager import SUPPORTED_EXTENSIONS
+            root = Path(folder) if folder else None
+            found = ([f for f in root.rglob("*") if f.is_file()
+                      and f.suffix.lower() in SUPPORTED_EXTENSIONS]
+                     if root is not None and root.is_dir() else [])
+            found.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+            files = [str(f) for f in found]
+        else:
+            files = latest_files(folder, None)
         if files == self._last_preview:
             return
         self._last_preview = files
@@ -2280,7 +2304,7 @@ class TrainTab(QWidget):
         self._preview_timer.stop()
         self._poll_sample_dir()  # catch the final sample set
         from core import run_manifest
-        kohya = self.engine() == models.KOHYA
+        kohya = (self._run_engine or self.engine()) == models.KOHYA
         # A user Stop must read as "interrupted" (resumable), never "failed" --
         # find_resumable() only ever looks for running/interrupted status. A OneTrainer
         # run has no Kohya state to resume, so it never writes this manifest.
@@ -2289,10 +2313,19 @@ class TrainTab(QWidget):
                 self._run_dir(), run_manifest.DONE if success else run_manifest.INTERRUPTED)
         if success:
             from core import sets
-            sets.clear_active_run()
+            if kohya:
+                sets.clear_active_run()
             self._rp(kind="done", label="Complete!")
             self.status_message.emit("Training finished successfully.")
-            if self._app_settings:
+            if not kohya and self._app_settings and (
+                    self._app_settings.get("forge_auto_deliver")
+                    or self._app_settings.get("forge_auto_test")):
+                # The Forge LoRA folder and test checkpoint are set up for Anima; a Krea 2
+                # LoRA dropped there, or rendered on an Anima checkpoint, is wrong.
+                self._on_log_line("[AnimaForge] Krea 2 LoRA not sent to Forge automatically "
+                                  "(auto-deliver and auto-test are set up for Anima). "
+                                  "Deliver it from Home when you want it in Forge.")
+            elif self._app_settings:
                 if self._app_settings.get("forge_auto_deliver"):
                     self._deliver_to_forge(silent=True)
                 if self._app_settings.get("forge_auto_test"):
@@ -2451,29 +2484,52 @@ class TrainTab(QWidget):
             QMessageBox.warning(self, "Cannot Start Training", msg)
             return
         from core.naming import trigger_from_lora_name
+        notes = []
         if not self._trigger_word:
             # Unattended runs must not stop to ask; a LoRA with no trigger has no way
             # to be called, so it is called by the name the user already typed.
+            # (Forge It names it before captioning, so the captions carry it too.)
             self._trigger_word = trigger_from_lora_name(self._lora_name_edit.text())
-            self._on_log_line(f"[AnimaForge] No trigger word set — using {self._trigger_word!r}.")
+            notes.append(f"[AnimaForge] No trigger word set — using {self._trigger_word!r}.")
         if not self._check_empty_captions(interactive=confirm):
             return
         rd, msg = self.build_run_definition()
         if rd is None:
             QMessageBox.warning(self, "Cannot Start Training", msg)
             return
+        from core.engines.onetrainer import engine
         from core.engines.onetrainer.adapter import to_onetrainer_params
-        factory = self._onetrainer_factory or self._default_onetrainer_session
-        session = factory(self)
+        self._run_engine, self._ot_output, self._ot_samples_dir = models.ONETRAINER, "", ""
+        self._log_edit.clear()
+        try:
+            factory = self._onetrainer_factory or self._default_onetrainer_session
+            session = factory(self)
+            params = to_onetrainer_params(rd)
+        except Exception as e:
+            QMessageBox.warning(self, "Cannot Start Training", str(e))
+            return
         session.state_changed.connect(self._on_ot_state)
         session.progress.connect(self._on_ot_progress)
         session.done.connect(self._on_ot_done)
         session.failed.connect(self._on_ot_failed)
         session.canceled.connect(self._on_ot_canceled)
-        self._session, self._ot_output = session, ""
-        self._log_edit.clear()
+        self._session = session
         self._on_training_started()
-        session.start(to_onetrainer_params(rd))   # a refusal arrives via failed()
+        for line in notes:
+            self._on_log_line(line)
+        try:
+            for advice in engine.advisories(rd.dataset_folder, rd.trigger_word):
+                self._on_log_line(f"[AnimaForge] {advice}")
+        except Exception as e:  # advice is optional; a failure here never blocks a run
+            self._on_log_line(f"[AnimaForge] Pre-run checks could not run: {e}")
+        try:
+            started = session.start(params)    # a refusal arrives via failed()
+        except Exception as e:
+            self._on_log_line(f"[AnimaForge] The run could not start: {e}")
+            self._end_ot(False)
+            return
+        if started and self._session is session:
+            self._ot_samples_dir = session.samples_dir()
 
     _OT_PHASES = {"preflight": "Checking…", "generating": "Preparing…",
                   "training": "Loading model…", "rendering": "Rendering final previews…"}
@@ -2497,9 +2553,14 @@ class TrainTab(QWidget):
         self._rp(kind="progress", step=step, total=total)
 
     def _end_ot(self, success: bool):
-        session, self._session = self._session, None
+        session = self._session
         if session is None:
             return                      # already ended (e.g. Stop then canceled)
+        try:
+            self._ot_samples_dir = session.samples_dir() or self._ot_samples_dir
+        except Exception:
+            pass
+        self._session = None
         self._on_training_finished(success)
         if hasattr(session, "deleteLater"):
             session.deleteLater()
@@ -2528,7 +2589,17 @@ class TrainTab(QWidget):
     def _samples_dir(self) -> str:
         if self._session is not None:
             return self._session.samples_dir()
+        if self._run_engine == models.ONETRAINER:
+            return self._ot_samples_dir
         return str(Path(self._run_dir()) / "sample")
+
+    def stop_for_exit(self):
+        """The app is closing mid-run: stop the whole trainer process tree so it does
+        not keep holding the GPU after the window is gone."""
+        if self._session is not None:
+            self._session.cancel()
+        elif self._trainer.is_running():
+            self._trainer.stop()
 
     def _validate_common(self) -> tuple:
         if not self._output_dir:

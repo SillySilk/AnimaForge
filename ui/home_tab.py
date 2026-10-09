@@ -989,6 +989,9 @@ class HomeTab(QWidget):
         """Mirror the run state onto the front-page Start/Stop pair."""
         self._start_train_btn.setEnabled(not active)
         self._stop_train_btn.setEnabled(bool(active))
+        # A run's model and caption style are fixed once it has started.
+        self._model_combo.setEnabled(not active)
+        self._style_combo.setEnabled(not active)
 
     # ---- refresh + nav ----
     def _go(self, index):

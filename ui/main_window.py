@@ -492,6 +492,7 @@ class MainWindow(QMainWindow):
         self._home_tab.model_changed.connect(self._train_tab.set_model)
         self._home_tab.caption_style_changed.connect(self._on_home_caption_style)
         self._train_tab.model_changed.connect(self._on_model_changed)
+        self._train_tab.caption_style_changed.connect(self._on_train_caption_style)
         self._home_tab.prefix_changed.connect(self._train_tab.set_quality_prefix)
         self._home_tab.type_changed.connect(self._on_home_type_changed)
         self._home_tab.anchor_changed.connect(self._characters_tab.set_style_anchor)
@@ -746,6 +747,37 @@ class MainWindow(QMainWindow):
         AppSettings().set("model", model_id)
         self._refresh_rail()
 
+    def _on_train_caption_style(self, style: str):
+        """A loaded set (or anything else) changed the Train tab's style."""
+        self._home_tab.set_caption_style(style)
+        self._dataset_tab.set_caption_style(style)
+
+    def _fill_krea_trigger(self):
+        """Krea 2 must train a word its captions contain. With no trigger set, name
+        it after the LoRA *before* captioning, so the captions carry it."""
+        from core import models
+        from core.naming import trigger_from_lora_name
+        if self._train_tab.engine() != models.ONETRAINER or self._dataset_tab.get_trigger_word():
+            return
+        trigger = trigger_from_lora_name(self._train_tab.get_lora_name())
+        if trigger:
+            self._on_home_trigger_changed(trigger)
+            self._status_bar.showMessage(
+                f"No trigger word set — Krea 2 needs one, so the LoRA is called {trigger!r}.")
+
+    def closeEvent(self, event):
+        """Closing mid-run would leave the trainer running and holding the GPU."""
+        if self._train_tab.is_training():
+            reply = QMessageBox.question(
+                self, "Training is running",
+                "A training run is still going. Quit and stop it?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply != QMessageBox.Yes:
+                event.ignore()
+                return
+            self._train_tab.stop_for_exit()
+        super().closeEvent(event)
+
     def _on_home_caption_style(self, style: str):
         self._train_tab.set_caption_style(style)
         self._dataset_tab.set_caption_style(style)
@@ -792,6 +824,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Name required",
                                 "Name the LoRA first (Home → LoRA name).")
             return
+        self._fill_krea_trigger()
         subject = self._train_tab.get_subject_type()
         has_roster = any(c.token.strip() for c in ch.load(folder).roster)
         captioned = bool(workflow.caption_state(folder).get("done"))
@@ -805,6 +838,7 @@ class MainWindow(QMainWindow):
         if not folder:
             QMessageBox.warning(self, "No dataset", "Choose a dataset folder on Home first.")
             return
+        self._fill_krea_trigger()
         self._home_tab.apply_run_progress({"kind": "reset"})
         self._switch_tab(2)  # Dataset tab — its caption log + progress
         self._dataset_tab.start_auto_caption()
