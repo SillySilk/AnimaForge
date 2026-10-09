@@ -93,3 +93,14 @@ def test_generate_config_writes_overrides(tmp_path):
     t.set_config_overrides({"training_arguments.noise_offset": 0.05})
     t._generate_config()
     assert toml.load(t._config_path)["training_arguments"]["noise_offset"] == 0.05
+
+
+def test_applying_a_preset_sets_its_overrides(tmp_path):
+    from core import train_presets as tp
+    t = _tab(tmp_path, "krea2")
+    t.apply_preset(tp.TrainPreset("K", model="krea2", overrides={"learning_rate": 1}))
+    assert t.config_overrides() == {"learning_rate": 1}
+    t.apply_preset(tp.BUILTINS[0])               # a model-less preset leaves them alone
+    assert t.config_overrides() == {"learning_rate": 1}
+    t.apply_preset(tp.TrainPreset("A", model="anima", overrides={"x": 1}))
+    assert t.config_overrides() == {"learning_rate": 1}   # another model's settings never land

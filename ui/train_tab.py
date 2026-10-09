@@ -477,6 +477,10 @@ class TrainTab(QWidget):
             self.set_target_steps(preset.target_steps)
         else:
             self._apply_suggestion()
+        # A preset saved for this model carries its advanced settings; one saved for
+        # another model never lands here, and a model-less preset leaves them alone.
+        if getattr(preset, "model", "") == self._model:
+            self.set_config_overrides(preset.overrides)
         self._recalculate()
 
     def apply_defaults(self, app_settings):

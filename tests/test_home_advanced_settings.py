@@ -71,3 +71,35 @@ def test_not_ready_shows_why_and_opens_nothing(monkeypatch, warnings):
     w._open_advanced_settings()
     assert warnings[-1] == "Set the Anima model files first."
     assert w._advanced_panel is None
+
+
+def test_save_as_preset_stores_the_model_and_changes(monkeypatch):
+    from PySide6.QtWidgets import QInputDialog
+    from core import train_presets as tp
+    w = _window(monkeypatch, ({"epochs": 1}, ""))
+    store = {"v": ""}
+    app = w._setup_tab.get_app_settings()
+    monkeypatch.setattr(app, "get", lambda k, *a: store["v"] if k == tp.SETTINGS_KEY else "")
+    monkeypatch.setattr(app, "set", lambda k, v: store.__setitem__("v", v))
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("My Anima", True))
+    w._open_advanced_settings()
+    w._advanced_panel.table.item(0, 1).setText("7")
+    assert w._save_advanced_as_preset() is True
+    p = tp.find(store["v"], "My Anima")
+    assert p.model == w._train_tab.model() and p.overrides == {"epochs": 7}
+    assert w._train_tab.config_overrides() == {"epochs": 7}
+
+
+def test_picker_lists_only_presets_for_the_current_model(monkeypatch):
+    from PySide6.QtWidgets import QListWidget
+    from core import train_presets as tp
+    w = _window(monkeypatch, ({"epochs": 1}, ""))
+    store = tp.add_custom("", tp.TrainPreset("Krea look", model="krea2"))
+    monkeypatch.setattr(w, "_presets_store", lambda: store)
+    opened = []
+    from ui.forge_modal import ForgeModal
+    monkeypatch.setattr(ForgeModal, "open", lambda self: opened.append(self))
+    w._open_preset_picker()
+    names = [opened[-1].findChild(QListWidget).item(i).data(256)
+             for i in range(opened[-1].findChild(QListWidget).count())]
+    assert "Krea look" not in names and "Person" in names

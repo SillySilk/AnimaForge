@@ -83,3 +83,31 @@ def test_formula_line_fixed_steps():
     assert tp.formula_line(p) == "steps fixed at 1,500"
     p2 = tp.TrainPreset("Y", target_steps=5000, uncap_steps=True)
     assert "uncapped" in tp.formula_line(p2)
+
+
+def test_presets_are_filtered_by_model():
+    store = tp.add_custom("", tp.TrainPreset("Krea look", model="krea2", overrides={"learning_rate": 1}))
+    store = tp.add_custom(store, tp.TrainPreset("Any model"))
+    krea = [p.name for p in tp.presets_for(store, "krea2")]
+    anima = [p.name for p in tp.presets_for(store, "anima")]
+    assert "Krea look" in krea and "Krea look" not in anima
+    assert "Any model" in krea and "Any model" in anima
+    for b in tp.BUILTINS:
+        assert b.name in krea and b.name in anima
+
+
+def test_old_presets_load_as_any_model():
+    [p] = tp.parse_customs('[{"name": "Old", "network_dim": 32}]')
+    assert p.model == "" and p.overrides == {}
+
+
+def test_preset_overrides_round_trip():
+    store = tp.add_custom("", tp.TrainPreset("K", model="krea2",
+                                             overrides={"optimizer.weight_decay": 0.01}))
+    p = tp.find(store, "K")
+    assert p.model == "krea2" and p.overrides == {"optimizer.weight_decay": 0.01}
+
+
+def test_bad_model_or_overrides_fall_back_to_defaults():
+    [p] = tp.parse_customs('[{"name": "X", "model": "sdxl", "overrides": [1, 2]}]')
+    assert p.model == "" and p.overrides == {}

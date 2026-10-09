@@ -590,7 +590,7 @@ class MainWindow(QMainWindow):
         from core import train_presets as tp
         from ui.forge_modal import ForgeModal
         from PySide6.QtWidgets import QListWidget, QListWidgetItem
-        presets = tp.all_presets(self._presets_store())
+        presets = tp.presets_for(self._presets_store(), self._train_tab.model())
         modal = ForgeModal(
             self, title="Training Presets", eyebrow="The Set · Preset",
             subtitle="Pick the training intent — nothing changes until you hit Select.",
@@ -673,6 +673,8 @@ class MainWindow(QMainWindow):
 
     def _add_advanced_footer(self, modal):
         modal.add_footer_button("Close").clicked.connect(modal.close_modal)
+        modal.add_footer_button("Save as preset…").clicked.connect(
+            lambda: self._save_advanced_as_preset() and modal.close_modal())
         apply_btn = modal.add_footer_button("Apply", primary=True)
         apply_btn.clicked.connect(lambda: self._apply_advanced() and modal.close_modal())
 
@@ -691,6 +693,34 @@ class MainWindow(QMainWindow):
         self._train_tab.set_config_overrides(overrides)
         self._status_bar.showMessage(
             f"Advanced settings: {len(overrides)} changed for this run.", 6000)
+        return True
+
+    def _save_advanced_as_preset(self) -> bool:
+        """Apply the editor's changes, then save them with the current knobs as a
+        custom preset for this model."""
+        from PySide6.QtWidgets import QInputDialog
+        from core import train_presets as tp
+        if not self._apply_advanced():
+            return False
+        name, ok = QInputDialog.getText(self, "Save as preset", "Preset name:")
+        if not ok or not name.strip():
+            return False
+        train = self._train_tab
+        preset = tp.TrainPreset(
+            name=name, subject_type=train._lora_type_for_subject() or "character",
+            optimizer=train._current_optimizer(), learning_rate=train._lr_spin.value(),
+            network_dim=train._dim_spin.value(), network_alpha=train._alpha_spin.value(),
+            target_steps=train.get_target_steps(), uncap_steps=train._uncap_check.isChecked(),
+            model=train.model(), overrides=train.config_overrides())
+        app = self._setup_tab.get_app_settings()
+        try:
+            app.set(tp.SETTINGS_KEY, tp.add_custom(app.get(tp.SETTINGS_KEY), preset))
+        except ValueError as e:
+            QMessageBox.warning(self, "Cannot save preset", str(e))
+            return False
+        self._preset_name = preset.name
+        self._home_tab.set_preset_label(preset.name, preset.subject_type)
+        self._status_bar.showMessage(f"Saved preset: {preset.name}", 6000)
         return True
 
     def _apply_preset_by_name(self, name: str):

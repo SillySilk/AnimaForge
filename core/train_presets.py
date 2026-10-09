@@ -16,7 +16,9 @@ QSettings round-trip.
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
+
+from core import models
 
 SETTINGS_KEY = "train_presets_json"
 
@@ -33,6 +35,11 @@ class TrainPreset:
     network_alpha: int = 8
     target_steps: int = 0             # 0 = auto-suggest from the dataset
     uncap_steps: bool = False
+    # The model this preset was saved for ("" = any model: the built-ins and presets
+    # saved before v3) and its advanced-setting overrides, which only mean something
+    # to that model's engine.
+    model: str = ""
+    overrides: dict = field(default_factory=dict)
     builtin: bool = False
 
 
@@ -80,6 +87,10 @@ def parse_customs(store_json: str) -> list[TrainPreset]:
         except (TypeError, ValueError):
             pass
         base.uncap_steps = bool(item.get("uncap_steps", False))
+        if item.get("model") in models.MODELS:
+            base.model = item["model"]
+        if isinstance(item.get("overrides"), dict) and base.model:
+            base.overrides = dict(item["overrides"])
         base.builtin = False  # stored presets are custom by definition
         out.append(base)
     return out
@@ -93,6 +104,12 @@ def serialize_customs(customs: list[TrainPreset]) -> str:
 def all_presets(store_json: str) -> list[TrainPreset]:
     """Built-ins first, then customs (sorted by name)."""
     return list(BUILTINS) + sorted(parse_customs(store_json), key=lambda p: p.name.lower())
+
+
+def presets_for(store_json: str, model_id: str) -> list[TrainPreset]:
+    """The presets offered while `model_id` is selected: built-ins, model-less
+    customs, and customs saved for that model."""
+    return [p for p in all_presets(store_json) if p.model in ("", model_id)]
 
 
 def find(store_json: str, name: str) -> TrainPreset | None:
