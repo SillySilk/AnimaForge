@@ -33,7 +33,8 @@ from core.caption_progress import parse_progress
 from core.caption_rules import parse_rules
 from core.caption_runner import CaptionJob, CaptionRunner
 from core.dataset_manager import (
-    SUPPORTED_EXTENSIONS, apply_prefix, combine_all, save_caption, scan_folder,
+    NL_EXT, SUPPORTED_EXTENSIONS, apply_prefix, combine_all, read_sidecar, save_caption,
+    scan_folder,
 )
 from core.tagger import TaggerProcess, TAGGER_MODELS, read_tagger_defaults
 from core.joycaption import JoyCaptionProcess
@@ -295,6 +296,17 @@ class ImageCard(QWidget):
     def _on_delete_clicked(self):
         """Emit signal to request deletion of this image."""
         self.image_deleted.emit(self._image_path)
+
+    def show_description(self, text: str):
+        """A description (.nl) written mid-run, shown before Combine turns it into the
+        training .txt, so a bad structure is caught while Stop can still save the rest."""
+        if (text or "").strip():
+            self._set_preview_text(text)
+            self.set_status("partial")
+
+    @property
+    def image_path(self) -> str:
+        return self._image_path
 
     def refresh_caption(self, caption: str):
         """Update the read-only preview after an edit in the modal (or the refresh timer)."""
@@ -1288,6 +1300,11 @@ class DatasetTab(QWidget):
         self._caption_bar.setValue(done)
         self._caption_file.setText(filename)
         self._set_processing_frame(filename)
+        # A describe tick means that image's description just landed: show it now
+        # rather than after Combine.
+        card = self._cards_by_name.get(filename)
+        if card is not None and step_key == "describe":
+            card.show_description(read_sidecar(card.image_path, NL_EXT))
         self.caption_tick.emit(phase, done, total)
 
     def _pre_combine_stage(self):

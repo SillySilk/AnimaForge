@@ -648,3 +648,39 @@ def test_describe_dialog_cancel_launches_nothing(tmp_path, monkeypatch):
                         lambda overwrite=False: launched.append(overwrite))
     t._describe_joycaption()
     assert launched == []
+
+
+def test_card_shows_a_fresh_description_and_marks_it_partial():
+    c = _card()
+    c.show_description("a woman in a red coat")
+    assert c._caption_preview.text() == "a woman in a red coat"
+    assert c._status == "partial"
+
+
+def test_blank_description_leaves_the_card_alone():
+    c = _card()
+    before = c._caption_preview.text()
+    c.show_description("   ")
+    assert c._caption_preview.text() == before
+
+
+def test_describe_tick_puts_that_images_description_on_its_card(tmp_path):
+    from ui.dataset_tab import DatasetTab
+    (tmp_path / "a.png").write_bytes(b"x")
+    (tmp_path / "a.nl").write_text("a man on a bench", encoding="utf-8")
+    t = DatasetTab()
+    card = ImageCard(str(tmp_path / "a.png"), str(tmp_path / "a.txt"), "", 0)
+    t._cards_by_name = {"a.png": card}
+    t._runner.tick.emit("Describe", 1, 1, "a.png")
+    assert card._caption_preview.text() == "a man on a bench"
+
+
+def test_tag_tick_does_not_touch_the_card(tmp_path):
+    from ui.dataset_tab import DatasetTab
+    (tmp_path / "a.png").write_bytes(b"x")
+    (tmp_path / "a.nl").write_text("a man on a bench", encoding="utf-8")
+    t = DatasetTab()
+    card = ImageCard(str(tmp_path / "a.png"), str(tmp_path / "a.txt"), "orig", 0)
+    t._cards_by_name = {"a.png": card}
+    t._runner.tick.emit("Tag", 1, 1, "a.png")
+    assert card._caption_preview.text() == "orig"
