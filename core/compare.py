@@ -87,3 +87,51 @@ def record(entry: dict, root=None) -> None:
 
 def find(group_id: str, root=None):
     return next((e for e in load_all(root) if e.get("id") == group_id), None)
+
+
+_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
+
+
+def _kohya_finals(run_dir: Path, name: str) -> dict:
+    """{prompt index: image} from the highest epoch sd-scripts sampled."""
+    import re
+    pattern = re.compile(rf"^{re.escape(name)}_e(\d+)_(\d+)_.*\.png$")
+    by_epoch = {}
+    folder = run_dir / "sample"
+    if folder.is_dir():
+        for f in folder.iterdir():
+            m = pattern.match(f.name)
+            if m:
+                by_epoch.setdefault(int(m.group(1)), {})[int(m.group(2))] = str(f)
+    return by_epoch[max(by_epoch)] if by_epoch else {}
+
+
+def _onetrainer_finals(run_dir: Path) -> dict:
+    """{prompt index: image} from the shipped file's final render (samples.json order)."""
+    from core.engines.onetrainer import render
+    dest = Path(render.destination(str(run_dir)))
+    if not dest.is_dir():
+        return {}
+    images = sorted((f for f in dest.rglob("*") if f.suffix.lower() in _IMAGE_SUFFIXES),
+                    key=lambda f: str(f))
+    return {i: str(f) for i, f in enumerate(images)}
+
+
+def final_previews(entry: dict, output_base: str, statuses: dict) -> list:
+    """One row per prompt: {"prompt", "a", "b", "status": {"a", "b"}}. A side with no
+    images is None; its status comes from the batch (done / failed), else pending."""
+    from core import paths
+    engine = models.get(entry.get("model") or models.DEFAULT_MODEL).engine
+    sides = []
+    for run in entry["runs"][:2]:
+        base = paths.from_portable(run.get("output_dir") or output_base)
+        run_dir = Path(paths.run_output_dir(base, run["name"]))
+        finals = (_onetrainer_finals(run_dir) if engine == models.ONETRAINER
+                  else _kohya_finals(run_dir, run["name"]))
+        sides.append((finals, statuses.get(run["name"], "pending")))
+    rows = []
+    for i, prompt in enumerate(entry.get("prompts") or []):
+        rows.append({"prompt": prompt,
+                     "a": sides[0][0].get(i), "b": sides[1][0].get(i),
+                     "status": {"a": sides[0][1], "b": sides[1][1]}})
+    return rows

@@ -73,3 +73,46 @@ def test_records_round_trip_and_hide_from_sets(tmp_path):
 def test_compare_group_round_trips():
     rd = RunDefinition(lora_name="a", dataset_folder="d", image_count=1, compare_group="g")
     assert RunDefinition.from_dict(rd.to_dict()).compare_group == "g"
+
+
+def _entry(tmp_path, model="anima"):
+    return {"id": "g", "model": model, "prompts": ["p0", "p1"],
+            "runs": [{"name": "Mr X-prose-tags", "style": "prose+tags", "output_dir": ""},
+                     {"name": "Mr X-tags", "style": "tags", "output_dir": ""}]}
+
+
+def test_kohya_previews_pair_by_prompt_from_the_last_epoch(tmp_path):
+    from core import paths
+    entry = _entry(tmp_path)
+    for run in entry["runs"]:
+        sample = __import__("pathlib").Path(paths.run_output_dir(str(tmp_path), run["name"])) / "sample"
+        sample.mkdir(parents=True)
+        for epoch in (2, 10):
+            for i in range(2):
+                (sample / f"{run['name']}_e{epoch:06d}_{i:02d}_2026.png").write_bytes(b"x")
+    rows = compare.final_previews(entry, str(tmp_path), {"Mr X-prose-tags": "done", "Mr X-tags": "done"})
+    assert [r["prompt"] for r in rows] == ["p0", "p1"]
+    assert rows[1]["a"].endswith("Mr X-prose-tags_e000010_01_2026.png")
+    assert rows[0]["b"].endswith("Mr X-tags_e000010_00_2026.png")
+    assert rows[0]["status"] == {"a": "done", "b": "done"}
+
+
+def test_krea_previews_pair_by_prompt(tmp_path):
+    from pathlib import Path
+    from core import paths
+    from core.engines.onetrainer import render
+    entry = _entry(tmp_path, model="krea2")
+    for run in entry["runs"]:
+        dest = Path(render.destination(paths.run_output_dir(str(tmp_path), run["name"])))
+        dest.mkdir(parents=True)
+        for i in range(2):
+            (dest / f"final-{i}.jpg").write_bytes(b"x")
+    rows = compare.final_previews(entry, str(tmp_path), {})
+    assert rows[1]["a"].endswith("final-1.jpg") and rows[1]["b"].endswith("final-1.jpg")
+
+
+def test_a_failed_side_is_shown_as_failed(tmp_path):
+    entry = _entry(tmp_path)
+    rows = compare.final_previews(entry, str(tmp_path), {"Mr X-prose-tags": "failed"})
+    assert rows[0]["a"] is None and rows[0]["status"]["a"] == "failed"
+    assert rows[0]["status"]["b"] == "pending"
