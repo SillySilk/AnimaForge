@@ -222,3 +222,14 @@ def test_only_file_removed_after_failed_stage_and_after_stop(tmp_path, monkeypat
 
     runner2.stop()
     assert not Path(only_path2).exists()
+
+
+def test_describe_stage_names_the_subject_by_trigger(monkeypatch):
+    seen = {}
+    runner = CaptionRunner()
+    monkeypatch.setattr(runner._joy, "start", lambda **kw: seen.update(kw))
+    runner._job = _job(trigger="mrx")
+    runner._stages = [("describe", ["a.png"])]
+    runner._running = True
+    runner._next()
+    assert seen["name"] == "mrx"

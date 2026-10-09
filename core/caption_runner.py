@@ -188,7 +188,8 @@ class CaptionRunner(QObject):
                             image_folder=job.dataset_folder,
                             overwrite=(job.policy == cp.OVERWRITE),
                             model_id=job.describe_model_id,
-                            cache_dir=job.describe_cache_dir)
+                            cache_dir=job.describe_cache_dir,
+                            name=job.trigger)
         elif stage == "combine":
             written, errors = combine_all(
                 job.dataset_folder, prefix=job.combine_prefix(), order=job.order,

@@ -6,6 +6,27 @@ from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, Signal
 from utils.proc import apply_no_window
 
 
+def build_args(script: str, image_folder: str, ext: str = ".nl", overwrite: bool = False,
+               prompt: str = "", model_id: str = "", cache_dir: str = "",
+               name: str = "") -> list:
+    args = [script, image_folder, f"--ext={ext}"]
+    if overwrite:
+        args.append("--overwrite")
+    if prompt.strip():
+        args.append(f"--prompt={prompt.strip()}")
+    if model_id.strip():
+        args.append(f"--model_id={model_id.strip()}")
+    # Empty means auto — the flag is omitted entirely so Hugging Face falls back
+    # to HF_HUB_CACHE / HF_HOME / ~/.cache/huggingface/hub and finds a model the
+    # user already has (including one reached through a directory junction).
+    if cache_dir.strip():
+        args.append(f"--cache_dir={cache_dir.strip()}")
+    # The trigger word the prose calls the subject by when no character is assigned.
+    if name.strip():
+        args.append(f"--name={name.strip()}")
+    return args
+
+
 class JoyCaptionProcess(QObject):
     """QProcess wrapper that runs scripts/joycaption_run.py in the sd-scripts venv.
 
@@ -28,6 +49,7 @@ class JoyCaptionProcess(QObject):
         prompt: str = "",
         model_id: str = "",
         cache_dir: str = "",
+        name: str = "",
     ):
         if self._process is not None and self._process.state() != QProcess.NotRunning:
             return
@@ -38,18 +60,7 @@ class JoyCaptionProcess(QObject):
 
         script = str(Path(__file__).resolve().parents[1] / "scripts" / "joycaption_run.py")
 
-        args = [script, image_folder, f"--ext={ext}"]
-        if overwrite:
-            args.append("--overwrite")
-        if prompt.strip():
-            args.append(f"--prompt={prompt.strip()}")
-        if model_id.strip():
-            args.append(f"--model_id={model_id.strip()}")
-        # Empty means auto — the flag is omitted entirely so Hugging Face falls back
-        # to HF_HUB_CACHE / HF_HOME / ~/.cache/huggingface/hub and finds a model the
-        # user already has (including one reached through a directory junction).
-        if cache_dir.strip():
-            args.append(f"--cache_dir={cache_dir.strip()}")
+        args = build_args(script, image_folder, ext, overwrite, prompt, model_id, cache_dir, name)
 
         self._process = QProcess(self)
         apply_no_window(self._process)  # no console window pop-up on Windows

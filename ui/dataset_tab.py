@@ -1386,6 +1386,7 @@ class DatasetTab(QWidget):
             sdscripts_path=self._sdscripts_path,
             image_folder=self._folder_path,
             overwrite=overwrite,
+            name=self.get_trigger_word(),
         )
         self._begin_caption(self._joycaption)
 

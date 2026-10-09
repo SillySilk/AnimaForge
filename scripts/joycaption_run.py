@@ -63,6 +63,8 @@ def main():
     parser.add_argument("--ext", default=".nl", help="sidecar extension to write")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--prompt", default=DEFAULT_PROMPT)
+    parser.add_argument("--name", default="",
+                        help="trigger word to call the subject by when no character is assigned")
     parser.add_argument("--cache_dir", default=None, help="model cache directory")
     parser.add_argument("--model_id", default=DEFAULT_MODEL_ID,
                         help="Hugging Face repo ID of the describe model")
@@ -177,17 +179,24 @@ def main():
     log(f"[JoyCaption] Model ready on {device} ({'4-bit' if loaded_4bit else 'bf16'}). "
         f"Captioning {len(todo)} image(s)…")
 
-    convo = [
-        {"role": "system", "content": "You are a helpful image captioner."},
-        {"role": "user", "content": args.prompt},
-    ]
-    convo_string = processor.apply_chat_template(
-        convo, tokenize=False, add_generation_prompt=True
-    )
+    # Named people go into the prompt so the prose uses their names (core/characters.py).
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from core import characters
+
+    cast = characters.load(str(folder))
+
+    def convo_for(img):
+        convo = [
+            {"role": "system", "content": "You are a helpful image captioner."},
+            {"role": "user", "content": characters.describe_prompt_for_image(
+                args.prompt, cast, img.name, trigger=args.name)},
+        ]
+        return processor.apply_chat_template(convo, tokenize=False, add_generation_prompt=True)
 
     done = 0
     for img in todo:
         try:
+            convo_string = convo_for(img)
             image = Image.open(img).convert("RGB")
             inputs = processor(text=[convo_string], images=[image], return_tensors="pt").to(device)
             if "pixel_values" in inputs:
