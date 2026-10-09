@@ -9,6 +9,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal
 
+from core import models
 from core.caption_policy import ASK
 from core.caption_runner import CaptionRunner
 from core.config_generator import generate_configs
@@ -130,6 +131,11 @@ def resolve_sample_prompts(run: RunDefinition):
     return grab_caption_blocks(run.dataset_folder, SAMPLE_COUNT)
 
 
+def _default_onetrainer_session(parent):
+    from core.engines.onetrainer.session import TrainingSession
+    return TrainingSession(parent)
+
+
 def save_queue(path: str, runs) -> None:
     Path(path).write_text(
         json.dumps([r.to_dict() for r in runs], indent=2), encoding="utf-8"
@@ -157,8 +163,12 @@ class BatchRunner(QObject):
     log_line = Signal(str)
     progress_updated = Signal(int, int)  # index, step
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, onetrainer_factory=None):
         super().__init__(parent)
+        self._onetrainer_factory = onetrainer_factory or _default_onetrainer_session
+        self._session = None          # the live OneTrainer session, if any
+        self._session_starting = False
+        self._session_refusal = ""
         self._runs = []
         self._idx = -1
         self._running = False
@@ -207,6 +217,8 @@ class BatchRunner(QObject):
             self._captioner.stop()
         if self._trainer.is_running():
             self._trainer.stop()
+        if self._session is not None and self._session.is_running():
+            self._session.cancel()
         self.batch_finished.emit()
 
     # ------------------------------------------------------------------
@@ -319,6 +331,13 @@ class BatchRunner(QObject):
         """
         self.run_phase.emit(self._idx, TRAINING)
         try:
+            engine = models.get(run.model).engine
+        except KeyError as e:
+            self._mark_failed(f"'{run.lora_name}': {e}")
+            return False
+        if engine == models.ONETRAINER:
+            return self._start_onetrainer(run)
+        try:
             params = calculate_training_params(run.image_count, target_steps=run.target_steps)
             self._trainer.set_total_steps(params["total_steps"])
             app = AppSettings()
@@ -390,6 +409,47 @@ class BatchRunner(QObject):
 
         self._trainer.start(cfg, run.sdscripts_path)
         return True
+
+    def _start_onetrainer(self, run) -> bool:
+        """Hand a OneTrainer-engine run to a fresh session. Same contract as
+        _start_training: True once async work is in flight; False after a
+        synchronous refusal (already _mark_failed), never calling _advance()."""
+        from core.engines.onetrainer.adapter import to_onetrainer_params
+        session = self._onetrainer_factory(self)
+        session.progress.connect(self._on_session_progress)
+        session.done.connect(lambda path: self._on_session_end(True, f"finished: {path}"))
+        session.failed.connect(lambda msg: self._on_session_end(False, msg))
+        session.canceled.connect(lambda: self._on_session_end(False, "canceled"))
+        self._session = session
+        self._session_refusal = ""
+        # The session's preflight fails synchronously by emitting `failed` from
+        # inside start(); that must not re-enter the queue on this stack.
+        self._session_starting = True
+        try:
+            started = session.start(to_onetrainer_params(run))
+        except Exception as e:  # mapping or session construction refused the run
+            started, self._session_refusal = False, str(e)
+        finally:
+            self._session_starting = False
+        if not started:
+            self._session = None
+            self._mark_failed(f"'{run.lora_name}' did not start: "
+                              f"{self._session_refusal or 'OneTrainer refused the run'}")
+            return False
+        return True
+
+    def _on_session_progress(self, d: dict):
+        self.progress_updated.emit(self._idx, int(d.get("global_step") or 0))
+
+    def _on_session_end(self, ok: bool, message: str):
+        if self._session_starting:
+            self._session_refusal = message
+            return
+        self._session = None
+        if not self._running:
+            return
+        self.log_line.emit(f"[Batch] '{self._runs[self._idx].lora_name}': {message}")
+        self._on_run_finished(ok)
 
     def _on_run_finished(self, success: bool):
         if not self._running:
