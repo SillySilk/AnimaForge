@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from core import models
 from core.caption_rules import parse_rules
 from core.config_generator import generate_configs, get_config_summary
 from core.describe_models import read_describe_defaults
@@ -206,6 +207,7 @@ class TrainTab(QWidget):
     run_progress = Signal(object)            # RunProgress payload mirrored onto Home
     optimizer_changed = Signal(str)          # preset label for the Home OPTIMIZER tile
     training_active = Signal(bool)           # run started/ended -> Home Start/Stop state
+    model_changed = Signal(str)              # model preset id (Home mirrors it)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -242,6 +244,13 @@ class TrainTab(QWidget):
         # (Dataset, Batch) without importing them; defaults to a no-op so a standalone
         # TrainTab() (as in tests) keeps working.
         self._gpu_busy_check = lambda: None
+        # Model preset (core/models.py): which base model this run trains and how.
+        self._model = models.DEFAULT_MODEL
+        self._caption_style = models.get(self._model).caption_style
+        self._onetrainer_root = ""
+        self._session = None            # live OneTrainer session for a Krea 2 run
+        self._ot_output = ""            # the file that session reported finishing
+        self._onetrainer_factory = None  # tests inject a fake session here
         self._build_ui()
         self._connect_trainer()
 
@@ -308,6 +317,55 @@ class TrainTab(QWidget):
 
     def get_target_steps(self) -> int:
         return self._target_steps_spin.value()
+
+    def model(self) -> str:
+        return self._model
+
+    def engine(self) -> str:
+        return models.get(self._model).engine
+
+    def set_model(self, model_id: str):
+        preset = models.get(model_id)          # KeyError names an unknown id
+        if model_id == self._model:
+            return                             # re-selecting keeps the user's step target
+        self._model = model_id
+        spin = self._target_steps_spin
+        spin.blockSignals(True)
+        if preset.engine == models.ONETRAINER:
+            spin.setRange(0, 40000)
+            spin.setSpecialValueText("Auto")   # shown at the minimum, 0
+            spin.setValue(preset.default_target_steps)
+        else:
+            spin.setSpecialValueText("")
+            spin.setRange(500, 40000)
+            default = (self._app_settings.get("default_target_steps")
+                       if self._app_settings else preset.default_target_steps)
+            spin.setValue(max(500, int(default or preset.default_target_steps)))
+        spin.blockSignals(False)
+        self._caption_style = preset.caption_style
+        self._recalculate()
+        self.model_changed.emit(model_id)
+
+    def caption_style(self) -> str:
+        return self._caption_style
+
+    def set_caption_style(self, style: str):
+        if style not in models.CAPTION_STYLES:
+            raise ValueError(f"unknown caption style {style!r}")
+        self._caption_style = style
+
+    def set_onetrainer_root(self, path: str):
+        self._onetrainer_root = (path or "").strip()
+
+    def summary_steps(self) -> int:
+        """The step count Home shows: Anima's target, or Krea 2's planned total."""
+        if self.engine() == models.ONETRAINER:
+            from core.engines.onetrainer import steps
+            if not self._image_count:
+                return 0
+            return steps.plan(self._image_count, self._lora_type_for_subject() or "character",
+                              self.get_target_steps())["total_steps"]
+        return self.get_target_steps()
 
     def start_from_cockpit(self):
         """Entry point for Home's Run button — same path as Start Training, but unattended
@@ -1151,7 +1209,7 @@ class TrainTab(QWidget):
     def build_run_definition(self):
         """Snapshot current settings into a RunDefinition. Returns (rd|None, message)."""
         from core.batch import RunDefinition
-        valid, msg = self._validate_for_config()
+        valid, msg = self._validate_for_model()
         if not valid:
             return None, msg
         self._ensure_sample_prompts()
@@ -1196,11 +1254,17 @@ class TrainTab(QWidget):
             qwen3_path=self._qwen3_path,
             vae_path=self._vae_path,
             output_dir=self._output_dir,
+            model=self._model,
+            onetrainer_root=self._onetrainer_root,
+            caption_style=self._caption_style,
         )
         return rd, ""
 
     def apply_run_definition(self, rd):
         """Inverse of build_run_definition: push a saved set back into the widgets."""
+        self.set_model(getattr(rd, "model", "") or models.DEFAULT_MODEL)
+        if getattr(rd, "caption_style", ""):
+            self.set_caption_style(rd.caption_style)
         self._lora_name_edit.setText(rd.lora_name or "")
         self._set_optimizer(getattr(rd, "optimizer", "prodigy"))
         self._lr_spin.setValue(rd.learning_rate)
@@ -1495,6 +1559,22 @@ class TrainTab(QWidget):
             self._resume_check.setChecked(False)
 
     def _recalculate(self):
+        if self.engine() == models.ONETRAINER:
+            # OneTrainer plans its own epochs from the image count (Auto) or the target;
+            # Kohya's calculate_training_params is meaningless here and must not run on 0.
+            self._training_params = {}
+            if self._image_count > 0:
+                target = self.get_target_steps()
+                self._step_calc_label.setText(
+                    f"Krea 2 · {self.summary_steps():,} steps planned "
+                    f"({'Auto' if target == 0 else 'fixed target'})")
+                self._rp(kind="progress", step=0, total=self.summary_steps())
+            else:
+                self._step_calc_label.setText("No images loaded")
+                self._rp(kind="reset")
+            self._style_step_calc("ok")
+            self._update_sample_schedule()
+            return
         if self._image_count > 0:
             target = self._target_steps_spin.value()
             params = calculate_training_params(self._image_count, target_steps=target)
@@ -2343,6 +2423,29 @@ class TrainTab(QWidget):
         ):
             return False, "Resume is checked but no saved state was found."
         return True, ""
+
+    def _validate_common(self) -> tuple:
+        if not self._output_dir:
+            return False, "Output directory is not set. Go to Setup tab."
+        if not self._dataset_path or not Path(self._dataset_path).is_dir():
+            return False, "Dataset folder is not set or does not exist."
+        if self._image_count == 0:
+            return False, "Dataset folder contains no supported images."
+        if not self._lora_name_edit.text().strip():
+            return False, "LoRA name cannot be empty."
+        return True, ""
+
+    def _validate_for_onetrainer(self) -> tuple:
+        from core.engines.onetrainer import engine
+        ok, why = engine.validate(self._onetrainer_root)
+        if not ok:
+            return False, f"Krea 2 trains with OneTrainer: {why} Set its folder in the Setup tab."
+        return self._validate_common()
+
+    def _validate_for_model(self) -> tuple:
+        if self.engine() == models.ONETRAINER:
+            return self._validate_for_onetrainer()
+        return self._validate_for_config()
 
     def _validate_for_training(self) -> tuple:
         valid, msg = self._validate_for_config()

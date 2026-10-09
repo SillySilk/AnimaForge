@@ -214,3 +214,20 @@ def auto_format(folder, image_names, category: str | None = None):
         rename_image(str(folder), temp[old], new)
         applied.append((old, new))
     return applied
+
+
+def trigger_from_lora_name(lora_name: str) -> str:
+    """The trigger word to use when the user never set one: the LoRA's own name.
+
+    An unset trigger used to refuse the run, which meant a dialog on the one path
+    the app exists to make unattended. But a LoRA with no trigger is a LoRA with no
+    way to call it, so the answer is not "train without one" — it is to use the name
+    the user already typed, which is the token they will reach for anyway.
+
+    Commas are stripped rather than kept: the caption lead is comma-separated, so a
+    comma inside the trigger would split it into two tokens neither of which is the
+    trigger. Everything else about the name survives — a trigger only has to be
+    distinctive and present in the captions.
+    """
+    collapsed = " ".join((lora_name or "").replace(",", " ").split())
+    return collapsed.strip()

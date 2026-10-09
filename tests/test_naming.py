@@ -158,3 +158,9 @@ def test_auto_format_no_category_does_nothing(tmp_path):
     (tmp_path / "junk.png").write_bytes(b"x")
     applied = N.auto_format(str(tmp_path), ["junk.png"])
     assert applied == [] and (tmp_path / "junk.png").is_file()
+
+
+def test_trigger_from_lora_name_collapses_spaces_and_drops_commas():
+    from core.naming import trigger_from_lora_name
+    assert trigger_from_lora_name("  Mr,  X  ") == "Mr X"
+    assert trigger_from_lora_name("") == ""
