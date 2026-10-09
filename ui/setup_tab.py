@@ -447,6 +447,10 @@ class SetupTab(QWidget):
         self._krea_weights_label.setWordWrap(True)
         self._krea_weights_label.setOpenExternalLinks(True)
         col.addWidget(self._krea_weights_label)
+        self._profiles_check = QCheckBox("Write OneTrainer profiler traces (for diagnosing slow runs)")
+        self._profiles_check.setChecked(bool(self._app.get("debug_profiles")))
+        self._profiles_check.toggled.connect(lambda b: self._app.set("debug_profiles", b))
+        col.addWidget(self._profiles_check)
         self._revalidate_onetrainer()
         self._refresh_krea_weights()
         return grp

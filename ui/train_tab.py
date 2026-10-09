@@ -1350,6 +1350,7 @@ class TrainTab(QWidget):
             onetrainer_root=self._onetrainer_root,
             caption_style=self._caption_style,
             config_overrides=dict(self._config_overrides),
+            debug_profiles=bool(AppSettings().get("debug_profiles")),
         )
         return rd, ""
 

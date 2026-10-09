@@ -54,6 +54,9 @@ DEFAULTS = {
     "vae_path": "",
     "output_dir": "",
     "onetrainer_root": "",
+    # Ask OneTrainer for profiler traces (OT_DEBUG_PROFILES) on Krea 2 runs; the
+    # session moves them into the run folder afterwards.
+    "debug_profiles": False,
     # Model preset id (core/models.py) the app opens on: the last one chosen.
     "model": "anima",
     # Connections

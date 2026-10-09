@@ -17,4 +17,5 @@ def to_onetrainer_params(run) -> RunParams:
         quality_prefix=run.quality_prefix,
         target_steps=run.target_steps,
         config_overrides=dict(run.config_overrides),
+        debug_profiles=bool(run.debug_profiles),
     )

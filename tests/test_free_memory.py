@@ -76,3 +76,11 @@ def test_saying_yes_closes_each_program_once(window):
     w._free_memory()
     assert calls["closed"] == [11, 12]
 
+
+def test_profiler_switch_reaches_a_krea_run(tmp_path, monkeypatch):
+    from core.batch import RunDefinition
+    from core.engines.onetrainer.adapter import to_onetrainer_params
+    rd = RunDefinition(lora_name="a", dataset_folder="d", image_count=1, model="krea2",
+                       debug_profiles=True)
+    assert to_onetrainer_params(rd).debug_profiles is True
+    assert RunDefinition.from_dict(rd.to_dict()).debug_profiles is True

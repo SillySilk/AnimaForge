@@ -97,6 +97,8 @@ class RunDefinition:
     model: str = "anima"
     # Advanced settings: {dotted.path: value} over the engine's generated config.
     config_overrides: dict = field(default_factory=dict)
+    # Krea 2: write OneTrainer profiler traces (Setup switch, snapshotted per run).
+    debug_profiles: bool = False
     # Runtime
     status: str = QUEUED
 
