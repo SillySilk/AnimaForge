@@ -471,6 +471,10 @@ class MainWindow(QMainWindow):
         self._advanced_panel = None
         self._home_tab.advanced_settings_requested.connect(self._open_advanced_settings)
         self._home_tab.free_memory_requested.connect(self._free_memory)
+        self._home_tab.compare_requested.connect(self._open_compare)
+        self._batch_tab.run_done.connect(self._on_batch_run_done)
+        self._compare_root = None        # sets/ root for comparison records (tests: tmp)
+        self._comparisons_shown = set()
         self._train_tab.config_overrides_changed.connect(self._home_tab.set_advanced_count)
         # 📜 beside Start → the same config preview the Options modal offers
         self._home_tab.preview_config_requested.connect(self._train_tab._preview_config)
@@ -646,6 +650,116 @@ class MainWindow(QMainWindow):
 
         select_btn.clicked.connect(_select)
         lst.itemDoubleClicked.connect(lambda _i: _select())
+        modal.open()
+
+    # ------------------------------------------------------------------
+    # Caption-style comparison
+    # ------------------------------------------------------------------
+
+    def _open_compare(self):
+        """Queue a caption-style comparison of this set, or view a finished one."""
+        from core import compare, models
+        from PySide6.QtWidgets import QComboBox, QHBoxLayout, QPushButton
+        from ui.forge_modal import ForgeModal
+        current = self._train_tab.caption_style()
+        modal = ForgeModal(
+            self, title="Compare caption styles", eyebrow="The Set · Compare",
+            subtitle=f"Two batch runs of this set, identical except caption style "
+                     f"({compare.STYLE_LABEL[current]} vs the one you pick). The folder is "
+                     "captioned with both prose and tags first when needed. When both "
+                     "finish, their previews open side by side.",
+            max_width=640)
+        combo = QComboBox()
+        for style in models.CAPTION_STYLES:
+            if style != current:
+                combo.addItem(compare.STYLE_LABEL[style], style)
+        modal.body.addWidget(combo)
+        name = self._train_tab._lora_name_edit.text().strip()
+        past = [e for e in compare.load_all(root=self._compare_root) if e.get("set") == name]
+        for entry in past[:8]:
+            row = QHBoxLayout()
+            styles = " vs ".join(compare.STYLE_LABEL.get(r["style"], r["style"])
+                                 for r in entry["runs"])
+            lbl = QLabel(f"{entry.get('created', '')} — {styles}")
+            lbl.setObjectName("label_field")
+            view = QPushButton("View")
+            view.setObjectName("af_btn_ghost")
+            view.clicked.connect(lambda _c=False, g=entry["id"]: (
+                modal.close_modal(), self._show_comparison(g)))
+            row.addWidget(lbl, 1)
+            row.addWidget(view)
+            modal.body.addLayout(row)
+        modal.add_footer_button("Cancel").clicked.connect(modal.close_modal)
+        queue = modal.add_footer_button("Queue comparison", primary=True)
+        queue.clicked.connect(
+            lambda: self._queue_comparison(combo.currentData()) and modal.close_modal())
+        modal.open()
+
+    def _queue_comparison(self, other_style: str) -> bool:
+        from core import compare
+        from core.batch import resolve_sample_prompts
+        rd, msg = self._train_tab.build_run_definition()
+        if rd is None:
+            QMessageBox.warning(self, "Compare caption styles", msg)
+            return False
+        prompts = resolve_sample_prompts(rd)
+        if not prompts:
+            QMessageBox.warning(
+                self, "Compare caption styles",
+                "Write at least one sample prompt (Train options → Sample previews) or "
+                "caption the set first: both runs preview the same prompts.")
+            return False
+        try:
+            run_a, run_b, entry = compare.plan(rd, other_style, prompts)
+        except ValueError as e:
+            QMessageBox.warning(self, "Compare caption styles", str(e))
+            return False
+        compare.record(entry, root=self._compare_root)
+        self._batch_tab.add_run(run_a)
+        self._batch_tab.add_run(run_b)
+        self._status_bar.showMessage(
+            "Queued 2 comparison runs — start the batch to run them.", 10000)
+        return True
+
+    def _comparison_statuses(self, entry: dict) -> dict:
+        from core.batch import DONE, FAILED
+        names = {r["name"] for r in entry["runs"]}
+        out = {}
+        for run in self._batch_tab.runs():
+            if run.lora_name in names and run.compare_group == entry["id"]:
+                out[run.lora_name] = ("done" if run.status == DONE else
+                                      "failed" if run.status == FAILED else "pending")
+        return out
+
+    def _on_batch_run_done(self, run, ok: bool):
+        """Open the comparison when its second run finishes (once per comparison)."""
+        from core import compare
+        group = getattr(run, "compare_group", "")
+        if not group or group in self._comparisons_shown:
+            return
+        entry = compare.find(group, root=self._compare_root)
+        if entry is None:
+            return
+        statuses = self._comparison_statuses(entry)
+        if len(statuses) == 2 and "pending" not in statuses.values():
+            self._comparisons_shown.add(group)
+            self._show_comparison(group)
+
+    def _show_comparison(self, group_id: str):
+        from core import compare
+        from ui.compare_view import CompareView
+        from ui.forge_modal import ForgeModal
+        entry = compare.find(group_id, root=self._compare_root)
+        if entry is None:
+            return
+        rows = compare.final_previews(entry, self._train_tab._output_dir,
+                                      self._comparison_statuses(entry))
+        modal = ForgeModal(self, title="Caption style comparison",
+                           eyebrow="The Set · Compare",
+                           subtitle="Same prompts, same seeds — only the caption style differs.",
+                           max_width=880)
+        modal.body.addWidget(CompareView(entry, rows))
+        modal.add_footer_button("Close", primary=True).clicked.connect(modal.close_modal)
         modal.open()
 
     def _free_memory(self):

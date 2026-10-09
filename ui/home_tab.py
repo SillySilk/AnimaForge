@@ -61,6 +61,7 @@ class HomeTab(QWidget):
     preset_pick_requested = Signal()  # PRESET button — MainWindow opens the picker (owns the data)
     model_changed = Signal(str)          # model preset id (Anima / Krea 2)
     caption_style_changed = Signal(str)  # prose / tags / prose+tags
+    compare_requested = Signal()  # "Compare caption styles…" — MainWindow queues / shows
     free_memory_requested = Signal()  # "Free memory…" — MainWindow names what it would close, asks
     advanced_settings_requested = Signal()  # "Advanced…" — MainWindow opens the settings editor
     preview_config_requested = Signal()  # 📜 beside Start — inspect the exact TOMLs pre-launch
@@ -716,6 +717,15 @@ class HomeTab(QWidget):
             "Queue this set — caption and train — to run later on the Batch screen")
         self._add_batch_btn.clicked.connect(self.add_to_batch_requested.emit)
         h.addWidget(self._add_batch_btn)
+        self._compare_btn = QPushButton("Compare caption styles…")
+        self._compare_btn.setObjectName("af_btn_ghost")
+        self._compare_btn.setMinimumHeight(52)
+        self._compare_btn.setCursor(Qt.PointingHandCursor)
+        self._compare_btn.setToolTip(
+            "Queue two runs of this set that differ only in caption style, then see "
+            "their previews side by side")
+        self._compare_btn.clicked.connect(self.compare_requested.emit)
+        h.addWidget(self._compare_btn)
 
         forge = QPushButton("⚒  Forge It")
         forge.setObjectName("af_btn_forge")
@@ -1017,6 +1027,7 @@ class HomeTab(QWidget):
         self._style_combo.setEnabled(not active)
         self._advanced_btn.setEnabled(not active)
         self._free_memory_btn.setEnabled(not active)
+        self._compare_btn.setEnabled(not active)
 
     def set_advanced_count(self, n: int):
         """Show how many advanced settings this run changes (hidden when none)."""

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -31,6 +31,8 @@ _STATUS_COLOR = {
 
 
 class BatchTab(QWidget):
+    run_done = Signal(object, bool)   # the RunDefinition that finished, success
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._runs = load_queue(QUEUE_PATH)
@@ -65,6 +67,9 @@ class BatchTab(QWidget):
 
     def is_running(self) -> bool:
         return self._runner.is_running()
+
+    def runs(self) -> list:
+        return list(self._runs)
 
     def add_run(self, run_definition):
         self._runs.append(run_definition)
@@ -437,6 +442,8 @@ class BatchTab(QWidget):
         self._refresh_queue()
 
     def _on_run_finished(self, idx: int, success: bool):
+        if 0 <= idx < len(self._runs):
+            self.run_done.emit(self._runs[idx], bool(success))
         if idx == self._phase_idx:
             self._phase_idx = None
             self._phase_text = ""
