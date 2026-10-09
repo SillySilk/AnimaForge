@@ -148,3 +148,83 @@ def test_anima_runs_still_use_kohya(tmp_path, monkeypatch):
     run.model, run.sdscripts_path = "anima", "C:/sd"
     r.start([run])
     assert kohya == ["C:/sd"]
+
+
+# ---- final-review fixes ----------------------------------------------------
+
+def test_stale_cancel_from_a_stopped_batch_cannot_touch_the_next_batch(tmp_path):
+    # Stop, then restart before the old trainer reports its cancel: the late
+    # signal must not fail the new run, drop the live session, or start another.
+    a, b, c = FakeSession(), FakeSession(), FakeSession()
+    r = runner_with([a, b, c])
+    runs = make(tmp_path, n=2)
+    r.start(runs)
+    r.stop()
+    r.reset_statuses(runs)
+    a._running = False
+    r.start(runs)                      # b now trains K0
+    assert b.started_with.lora_name == "K0"
+    a.canceled.emit()                  # the old session's late report
+    assert runs[0].status == batch_mod.RUNNING
+    assert c.started_with is None
+    assert r._session is b
+
+
+def test_stale_progress_is_not_reported_against_the_next_run(tmp_path):
+    a, b = FakeSession(), FakeSession()
+    r = runner_with([a, b])
+    seen = []
+    r.progress_updated.connect(lambda i, n: seen.append((i, n)))
+    r.start(make(tmp_path, n=2))
+    a.done.emit("K0.safetensors")      # run 0 finishes, b starts run 1
+    a.progress.emit({"global_step": 999})
+    b.progress.emit({"global_step": 5})
+    assert seen == [(1, 5)]
+
+
+def test_start_is_refused_while_a_session_is_still_running(tmp_path):
+    a, b = FakeSession(), FakeSession()
+    r = runner_with([a, b])
+    runs = make(tmp_path)
+    r.start(runs)
+    r._running = False                 # e.g. stopped, but the trainer has not exited yet
+    r.start(runs)
+    assert b.started_with is None
+
+
+def test_session_construction_error_fails_only_that_run(tmp_path):
+    good = FakeSession()
+    made = iter([RuntimeError("psutil missing"), good])
+
+    def factory(parent):
+        item = next(made)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    r = BatchRunner(onetrainer_factory=factory)
+    logs = []
+    r.log_line.connect(logs.append)
+    runs = make(tmp_path, n=2)
+    r.start(runs)
+    assert runs[0].status == FAILED
+    assert any("psutil missing" in line for line in logs)
+    assert good.started_with.lora_name == "K1"
+
+
+def test_auto_deliver_uses_the_file_the_session_reported(tmp_path, monkeypatch):
+    shipped = tmp_path / "elsewhere" / "K 0 (final).safetensors"
+    shipped.parent.mkdir()
+    shipped.write_bytes(b"lora")
+    delivered = []
+    monkeypatch.setattr(batch_mod.AppSettings, "get", lambda self, k: {
+        "forge_auto_deliver": True, "forge_lora_dir": str(tmp_path / "forge"),
+        "forge_api_url": "http://127.0.0.1:1"}.get(k))
+    import core.forge_api as forge_api
+    monkeypatch.setattr(forge_api, "deliver_lora",
+                        lambda src, lora_dir, url, dest_name=None: delivered.append(src) or "ok")
+    s = FakeSession()
+    r = runner_with([s])
+    r.start(make(tmp_path))
+    s.done.emit(str(shipped))
+    assert delivered == [str(shipped)]

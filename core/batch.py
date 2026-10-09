@@ -191,6 +191,12 @@ class BatchRunner(QObject):
     def start(self, runs, continue_on_error: bool = True, skip_done: bool = True):
         if self._running or not runs:
             return
+        # A stopped OneTrainer run keeps training until its process exits; starting
+        # now would put a second trainer on the same GPU.
+        if self._session is not None and self._session.is_running():
+            self.log_line.emit("[Batch] the previous run is still shutting down; "
+                               "start again in a moment.")
+            return
         self._runs = runs
         self._continue_on_error = continue_on_error
         self._skip_done = skip_done
@@ -414,50 +420,65 @@ class BatchRunner(QObject):
         """Hand a OneTrainer-engine run to a fresh session. Same contract as
         _start_training: True once async work is in flight; False after a
         synchronous refusal (already _mark_failed), never calling _advance()."""
-        from core.engines.onetrainer.adapter import to_onetrainer_params
-        session = self._onetrainer_factory(self)
-        session.progress.connect(self._on_session_progress)
-        session.done.connect(lambda path: self._on_session_end(True, f"finished: {path}"))
-        session.failed.connect(lambda msg: self._on_session_end(False, msg))
-        session.canceled.connect(lambda: self._on_session_end(False, "canceled"))
-        self._session = session
         self._session_refusal = ""
         # The session's preflight fails synchronously by emitting `failed` from
         # inside start(); that must not re-enter the queue on this stack.
         self._session_starting = True
+        session = None
         try:
+            from core.engines.onetrainer.adapter import to_onetrainer_params
+            session = self._onetrainer_factory(self)
+            # Each slot carries its own session: a session's signals can arrive
+            # after the queue has moved on (cancel is asynchronous), and must then
+            # be ignored rather than land on whichever run is current.
+            session.progress.connect(lambda d, s=session: self._on_session_progress(s, d))
+            session.done.connect(lambda path, s=session: self._on_session_end(
+                s, True, f"finished: {path}", path))
+            session.failed.connect(lambda msg, s=session: self._on_session_end(s, False, msg))
+            session.canceled.connect(lambda s=session: self._on_session_end(s, False, "canceled"))
+            self._session = session
             started = session.start(to_onetrainer_params(run))
-        except Exception as e:  # mapping or session construction refused the run
+        except Exception as e:  # import, construction or mapping refused the run
             started, self._session_refusal = False, str(e)
         finally:
             self._session_starting = False
         if not started:
-            self._session = None
+            self._release_session(session)
             self._mark_failed(f"'{run.lora_name}' did not start: "
                               f"{self._session_refusal or 'OneTrainer refused the run'}")
             return False
         return True
 
-    def _on_session_progress(self, d: dict):
+    def _release_session(self, session):
+        if session is not None and session is self._session:
+            self._session = None
+        if session is not None and hasattr(session, "deleteLater"):
+            session.deleteLater()
+
+    def _on_session_progress(self, session, d: dict):
+        if session is not self._session:
+            return
         self.progress_updated.emit(self._idx, int(d.get("global_step") or 0))
 
-    def _on_session_end(self, ok: bool, message: str):
+    def _on_session_end(self, session, ok: bool, message: str, shipped: str = ""):
         if self._session_starting:
             self._session_refusal = message
             return
-        self._session = None
+        if session is not self._session:
+            return  # a stale report from a session the queue has already left
+        self._release_session(session)
         if not self._running:
             return
         self.log_line.emit(f"[Batch] '{self._runs[self._idx].lora_name}': {message}")
-        self._on_run_finished(ok)
+        self._on_run_finished(ok, shipped)
 
-    def _on_run_finished(self, success: bool):
+    def _on_run_finished(self, success: bool, shipped: str = ""):
         if not self._running:
             return
         run = self._runs[self._idx]
         run.status = DONE if success else FAILED
         if success:
-            self._maybe_deliver(run)
+            self._maybe_deliver(run, shipped)
         self.run_finished.emit(self._idx, success)
         if not success:
             self._advance_or_stop()
@@ -467,14 +488,21 @@ class BatchRunner(QObject):
     def _on_progress(self, step: int):
         self.progress_updated.emit(self._idx, step)
 
-    def _maybe_deliver(self, run):
-        """Auto-deliver the finished LoRA to Forge if enabled in Settings (best-effort)."""
+    def _maybe_deliver(self, run, shipped: str = ""):
+        """Auto-deliver the finished LoRA to Forge if enabled in Settings (best-effort).
+
+        `shipped` is the file the engine reported finishing (OneTrainer runs); the
+        Kohya path has no such report and rebuilds the conventional location."""
         try:
             app = AppSettings()
             if not app.get("forge_auto_deliver"):
                 return
             lora_dir = app.get("forge_lora_dir")
-            src = Path(run_output_dir(run.output_dir, run.lora_name)) / f"{run.lora_name}.safetensors"
+            src = Path(shipped) if shipped else (
+                Path(run_output_dir(run.output_dir, run.lora_name)) / f"{run.lora_name}.safetensors")
+            if lora_dir and not src.is_file():
+                self.log_line.emit(f"[Batch] deliver skipped: {src} not found")
+                return
             if lora_dir and src.is_file():
                 from core import forge_api
                 from core.paths import delivery_filename
