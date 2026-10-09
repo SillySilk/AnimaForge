@@ -463,6 +463,7 @@ class BatchRunner(QObject):
         except Exception:
             pass
 
+        self._trainer.set_safety(run_dir, run.lora_name, run.save_last_n_epochs)
         self._trainer.start(cfg, run.sdscripts_path)
         return True
 

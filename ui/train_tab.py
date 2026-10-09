@@ -1125,6 +1125,7 @@ class TrainTab(QWidget):
         self._trainer.training_started.connect(self._on_training_started)
         self._trainer.training_finished.connect(self._on_training_finished)
         self._trainer.log_line.connect(self._on_log_line)
+        self._trainer.safety_note.connect(self.status_message.emit)
         self._trainer.progress_updated.connect(self._on_progress_updated)
 
     def _rp(self, **payload):
@@ -1880,6 +1881,8 @@ class TrainTab(QWidget):
             sets.mark_run_active(rd)
             run_manifest.write_start(self._run_dir(), rd)
 
+        self._trainer.set_safety(self._run_dir(), self._lora_name_edit.text().strip(),
+                                 self._keep_epochs_spin.value())
         self._trainer.start(self._config_path, self._setup_path)
 
     def _check_empty_captions(self, interactive: bool = True) -> bool:

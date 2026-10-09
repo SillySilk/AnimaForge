@@ -220,16 +220,35 @@ class TrainingProcess(QObject):
     log_line = Signal(str)           # raw log line string
     training_finished = Signal(bool) # True = success, False = error/killed
     training_started = Signal()
+    safety_note = Signal(str)        # run safety shipped a snapshot: one sentence why
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._process = None
         self._total_steps = 3000
         self._current_step = 0
+        # Run safety (core/engines/kohya/safety.py), armed per run by set_safety().
+        self._safety = None
+        self._watch = None
+        self._safety_found = None
+        self._user_stopped = False
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    def set_safety(self, run_dir: str, output_name: str, keep_last: int):
+        """Watch the next run: stop a blow-up and ship its last good epoch save,
+        ship the best one after an overshoot, refuse a final file that never
+        learned, then apply keep-last. Cleared when that run ends."""
+        self._safety = {"run_dir": run_dir, "output_name": output_name,
+                        "keep_last": int(keep_last or 0)}
+
+    def _arm_safety(self):
+        from core.engines.kohya.safety import LossWatch
+        self._user_stopped = False
+        self._safety_found = None
+        self._watch = LossWatch() if self._safety else None
 
     def set_total_steps(self, total_steps: int):
         self._total_steps = max(1, total_steps)
@@ -293,13 +312,18 @@ class TrainingProcess(QObject):
         self._process.setProcessEnvironment(env)
 
         self._current_step = 0
+        self._arm_safety()
         self._process.start(program, args)
         self.training_started.emit()
         self.log_line.emit(f"[AnimaForge] Launching: {program} {' '.join(args)}")
         self.log_line.emit(f"[AnimaForge] {self._libuv_log_status()}")
 
     def stop(self):
-        """Terminate the running training process."""
+        """Terminate the running training process (a user stop: never judged)."""
+        self._user_stopped = True
+        self._stop_process()
+
+    def _stop_process(self):
         if self._process is not None:
             if self._process.state() != QProcess.NotRunning:
                 self._process.terminate()
@@ -323,18 +347,32 @@ class TrainingProcess(QObject):
         text = bytes(data).decode("utf-8", errors="replace")
         for line in text.splitlines():
             if line:
-                if "impl_abstract" in line:
-                    continue
-                self.log_line.emit(line)
-                hint = failure_hint(line)
-                if hint:
-                    self.log_line.emit(hint)
-                step = self._parse_progress(line)
-                if step is not None:
-                    self._current_step = step
-                    self.progress_updated.emit(step)
+                self._handle_line(line)
+
+    def _handle_line(self, line: str):
+        if "impl_abstract" in line:
+            return
+        self.log_line.emit(line)
+        hint = failure_hint(line)
+        if hint:
+            self.log_line.emit(hint)
+        step = self._parse_progress(line)
+        if step is not None:
+            self._current_step = step
+            self.progress_updated.emit(step)
+        if self._watch is not None and self._safety_found is None:
+            found = self._watch.feed(line)
+            if found:
+                from core.engines.onetrainer import verify
+                self._safety_found = found
+                self.log_line.emit(f"[AnimaForge] {verify.describe_divergence(found)}")
+                self._stop_process()
 
     def _on_finished(self, exit_code: int, exit_status):
+        safety, self._safety = self._safety, None
+        if safety is not None and not self._user_stopped:
+            self._finish_with_safety(safety, exit_code)
+            return
         success = exit_code == 0
         # The exit-code line goes out BEFORE training_finished. The Train tab closes
         # its on-disk run log when that signal arrives, and on a failed run the exit
@@ -387,3 +425,33 @@ class TrainingProcess(QObject):
     @property
     def current_step(self) -> int:
         return self._current_step
+
+    def _finish_with_safety(self, safety: dict, exit_code: int):
+        """The end of a watched run: ship a snapshot when the curve went bad, refuse
+        a final file that never learned, apply keep-last."""
+        from core.engines.kohya import safety as ks
+        run_dir, name = safety["run_dir"], safety["output_name"]
+        found = self._safety_found
+        if found is None and exit_code == 0 and self._watch is not None:
+            found = ks.verdict(self._watch.final_losses(), self._watch.total)
+        if found is None and exit_code != 0:
+            self.log_line.emit(f"[AnimaForge] Training process finished with exit code {exit_code}.")
+            self.training_finished.emit(False)
+            return
+        note = ""
+        if found is not None:
+            _epoch, note = ks.ship(run_dir, name, found)
+        problem = ks.final_problem(run_dir, name)
+        if problem:
+            self.log_line.emit(f"[AnimaForge] {problem}")
+            self.log_line.emit("[AnimaForge] Training process finished, but its LoRA is not usable.")
+            self.training_finished.emit(False)
+            return
+        ks.prune(run_dir, name, safety["keep_last"])
+        if note:
+            self.log_line.emit(f"[AnimaForge] {note}")
+            self.safety_note.emit(note)
+            self.log_line.emit("[AnimaForge] Training process stopped early by run safety.")
+        else:
+            self.log_line.emit("[AnimaForge] Training process completed successfully.")
+        self.training_finished.emit(True)

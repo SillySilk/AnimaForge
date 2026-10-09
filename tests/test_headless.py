@@ -16,6 +16,7 @@ class FakeTrainer(QObject):
     log_line = Signal(str)
     training_finished = Signal(bool)
     training_started = Signal()
+    safety_note = Signal(str)
 
     succeed = True
 
@@ -24,6 +25,9 @@ class FakeTrainer(QObject):
         self._running = False
 
     def set_total_steps(self, n):
+        pass
+
+    def set_safety(self, run_dir, output_name, keep_last):
         pass
 
     def is_running(self):

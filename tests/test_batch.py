@@ -607,3 +607,23 @@ def test_start_training_passes_the_runs_overrides(tmp_path, monkeypatch):
                        config_overrides={"training_arguments.noise_offset": 0.05})
     runner.start([run])
     assert seen["overrides"] == {"training_arguments.noise_offset": 0.05}
+
+
+def test_batch_reports_a_safety_stop_as_done(tmp_path, monkeypatch):
+    from core.batch import BatchRunner, DONE
+    import core.batch as batch_mod
+
+    monkeypatch.setattr(batch_mod, "generate_configs", lambda **kw: ("cfg", None))
+    runner = BatchRunner()
+    armed = []
+    monkeypatch.setattr(runner._trainer, "set_safety", lambda *a: armed.append(a))
+    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd: None)
+    log = []
+    runner.log_line.connect(log.append)
+    run = _caption_run(tmp_path, "ds0", captioned=True, save_last_n_epochs=2)
+    runner.start([run])
+    assert armed and armed[0][1] == run.lora_name and armed[0][2] == 2
+    runner._trainer.log_line.emit("[AnimaForge] Training blew up ... Shipped the epoch 4 snapshot instead.")
+    runner._trainer.training_finished.emit(True)
+    assert run.status == DONE
+    assert any("epoch 4" in line for line in log)
