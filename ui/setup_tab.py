@@ -354,6 +354,9 @@ class SetupTab(QWidget):
         output_layout.addLayout(output_row)
         layout.addWidget(output_group)
 
+        # Krea 2 trains in an external OneTrainer install.
+        layout.addWidget(self._build_onetrainer_group())
+
         # Which model writes the natural-language captions.
         layout.addWidget(self._build_describe_group())
 
@@ -409,6 +412,76 @@ class SetupTab(QWidget):
         for edit in (self._sdscripts_edit, self._dit_edit, self._qwen3_edit,
                      self._vae_edit, self._output_edit):
             edit.textChanged.connect(self._on_text_changed)
+
+    # ------------------------------------------------------------------
+    # Krea 2 — the OneTrainer engine and the Krea 2 Raw weights
+    # ------------------------------------------------------------------
+
+    KREA_REPO = "krea/Krea-2-Raw"
+
+    def _build_onetrainer_group(self) -> QGroupBox:
+        grp = QGroupBox("Krea 2 — OneTrainer")
+        col = QVBoxLayout(grp)
+        col.setSpacing(8)
+        hint = QLabel(
+            "Krea 2 LoRAs train in a stock OneTrainer install, driven in the background. "
+            "Point this at the folder holding its venv and scripts\\train.py — Anima Forge "
+            "never modifies it. Not needed for Anima.")
+        hint.setObjectName("label_field")
+        hint.setWordWrap(True)
+        col.addWidget(hint)
+        row = QHBoxLayout()
+        self._ot_edit = QLineEdit(self.get_app_settings().get("onetrainer_root") or "")
+        self._ot_edit.setPlaceholderText("Locate your OneTrainer folder")
+        self._ot_edit.textChanged.connect(self._on_ot_root_changed)
+        self._ot_dot = self._make_status_dot()
+        ot_browse = QPushButton("Browse…")
+        ot_browse.setFixedWidth(108)
+        ot_browse.clicked.connect(self._browse_onetrainer)
+        row.addWidget(self._ot_edit)
+        row.addWidget(self._ot_dot)
+        row.addWidget(ot_browse)
+        col.addLayout(row)
+        self._krea_weights_label = QLabel("")
+        self._krea_weights_label.setObjectName("label_field")
+        self._krea_weights_label.setWordWrap(True)
+        self._krea_weights_label.setOpenExternalLinks(True)
+        col.addWidget(self._krea_weights_label)
+        self._revalidate_onetrainer()
+        self._refresh_krea_weights()
+        return grp
+
+    def get_onetrainer_root(self) -> str:
+        return self._ot_edit.text().strip()
+
+    def _browse_onetrainer(self):
+        folder = QFileDialog.getExistingDirectory(
+            self, "Locate the OneTrainer folder", self._ot_edit.text())
+        if folder:
+            self._ot_edit.setText(folder)
+
+    def _on_ot_root_changed(self, text: str):
+        self.get_app_settings().set("onetrainer_root", text.strip())
+        self._revalidate_onetrainer()
+        self.settings_changed.emit()
+
+    def _revalidate_onetrainer(self):
+        from core.engines.onetrainer import engine
+        root = self._ot_edit.text().strip()
+        ok, why = engine.validate(root)
+        self._set_status(self._ot_dot, ok, bool(root))
+        self._ot_dot.setToolTip("" if ok else why)
+
+    def _refresh_krea_weights(self):
+        from core import describe_models
+        if describe_models.has_model_snapshot(describe_models.hf_default_cache_dir(),
+                                              self.KREA_REPO):
+            self._krea_weights_label.setText("Krea 2 Raw is downloaded.")
+        else:
+            self._krea_weights_label.setText(
+                "Krea 2 Raw downloads on the first Krea 2 run (tens of GB). It is a gated "
+                "model: accept its licence first at https://huggingface.co/krea/Krea-2-Raw "
+                "while signed in to Hugging Face.")
 
     def _make_status_dot(self) -> QLabel:
         dot = QLabel("●")

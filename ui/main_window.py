@@ -1122,3 +1122,4 @@ class MainWindow(QMainWindow):
             output_dir=self._setup_tab.get_output_dir(),
         )
         self._dataset_tab.set_sdscripts_path(sd_path)
+        self._train_tab.set_onetrainer_root(self._setup_tab.get_onetrainer_root())
