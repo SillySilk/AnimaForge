@@ -56,6 +56,18 @@ class _MemoryStatusEx(ctypes.Structure):
                 ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
 
 
+_DLLS = {}
+
+
+def _dll(name: str):
+    """This module's own handle on a system DLL. Setting argtypes/restype on the
+    shared ctypes.windll objects would change them for every ctypes user in the
+    process (Qt, PyTorch helpers, other modules)."""
+    if name not in _DLLS:
+        _DLLS[name] = ctypes.WinDLL(name)
+    return _DLLS[name]
+
+
 class _UnicodeString(ctypes.Structure):
     # Buffer is a raw pointer: the text is exactly Length bytes and need not be
     # NUL-terminated, so it must never be read as a C string.
@@ -98,7 +110,7 @@ def available_commit_gb():
     try:
         status = _MemoryStatusEx()
         status.dwLength = ctypes.sizeof(_MemoryStatusEx)
-        if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+        if not _dll("kernel32").GlobalMemoryStatusEx(ctypes.byref(status)):
             return None
         return status.ullAvailPageFile / _GB
     except (AttributeError, OSError, ValueError):
@@ -106,7 +118,7 @@ def available_commit_gb():
 
 
 def _process_ids():
-    psapi = ctypes.windll.psapi
+    psapi = _dll("psapi")
     array = (ctypes.c_ulong * _MAX_PIDS)()
     returned = ctypes.c_ulong()
     if not psapi.EnumProcesses(ctypes.byref(array), ctypes.sizeof(array),
@@ -118,7 +130,7 @@ def _process_ids():
 def _command_line(handle) -> str:
     """The process's full command line, or "" when the OS declines to give it."""
     try:
-        ntdll = ctypes.windll.ntdll
+        ntdll = _dll("ntdll")
         ntdll.NtQueryInformationProcess.restype = ctypes.c_long
         ntdll.NtQueryInformationProcess.argtypes = [
             ctypes.c_void_p, ctypes.c_ulong, ctypes.c_void_p, ctypes.c_ulong,
@@ -148,7 +160,7 @@ def _label(handle, pid: int) -> str:
     if not text:
         name = ctypes.create_unicode_buffer(_MAX_PATH_W)
         size = ctypes.c_ulong(_MAX_PATH_W)
-        if ctypes.windll.kernel32.QueryFullProcessImageNameW(
+        if _dll("kernel32").QueryFullProcessImageNameW(
                 handle, 0, name, ctypes.byref(size)):
             text = name.value
     if not text:
@@ -162,7 +174,7 @@ def _commit_gb(handle):
     """Commit charge in GB for an open process handle, or None."""
     counters = _ProcessMemoryCounters()
     counters.cb = ctypes.sizeof(_ProcessMemoryCounters)
-    if not ctypes.windll.psapi.GetProcessMemoryInfo(
+    if not _dll("psapi").GetProcessMemoryInfo(
             handle, ctypes.byref(counters), counters.cb):
         return None
     return counters.PagefileUsage / _GB
@@ -177,7 +189,7 @@ def top_committer():
     if sys.platform != "win32":
         return None
     try:
-        kernel32 = ctypes.windll.kernel32
+        kernel32 = _dll("kernel32")
         kernel32.OpenProcess.restype = ctypes.c_void_p
         best_gb, best_name = 0.0, ""
         for pid in _process_ids():

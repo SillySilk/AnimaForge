@@ -141,3 +141,18 @@ def test_command_line_reads_exactly_length_not_up_to_a_nul():
     us.MaximumLength = us.Length
     us.Buffer = ctypes.cast(raw, ctypes.c_void_p).value
     assert sysmem._unicode_string_text(us) == text
+
+
+def test_reading_processes_leaves_shared_ctypes_state_alone():
+    # Setting argtypes/restype on ctypes.windll's shared function objects changes
+    # them for every other ctypes user in the process.
+    if sys.platform != "win32":
+        return
+    import ctypes
+    nt = ctypes.windll.ntdll.NtQueryInformationProcess
+    k = ctypes.windll.kernel32.OpenProcess
+    nt.argtypes, nt.restype = None, ctypes.c_int
+    k.restype = ctypes.c_int
+    sysmem.top_committer()
+    assert nt.argtypes is None and nt.restype is ctypes.c_int
+    assert k.restype is ctypes.c_int
