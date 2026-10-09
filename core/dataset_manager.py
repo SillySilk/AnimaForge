@@ -213,7 +213,8 @@ def _txt_has_text(image_path) -> bool:
 
 
 def combine_all(folder_path: str, prefix: str = "", order: str = "nl_first",
-                apply_anchors: bool = True, only=None, rules=None) -> tuple:
+                apply_anchors: bool = True, only=None, rules=None,
+                sources=("nl", "tags")) -> tuple:
     """
     For every image, merge its .nl and .tags sidecars into the training .txt file.
 
@@ -227,6 +228,10 @@ def combine_all(folder_path: str, prefix: str = "", order: str = "nl_first",
     `rules`, if given, is passed straight through to combine_caption — applied to the .txt this
     builds, never to the .nl/.tags sidecars on disk, so changing a rule and re-running Combine
     recomputes from pristine sources instead of compounding edits.
+
+    `sources` names which sidecars feed the caption: ("nl",) for prose-only,
+    ("tags",) for tags-only, both by default. A sidecar left out is ignored, never
+    deleted -- switching style back later rebuilds from it again.
 
     An image with neither sidecar has no caption body to rebuild from, so the only .txt this
     could produce is `prefix, lead` — the trigger word and the character token. That is never
@@ -255,8 +260,8 @@ def combine_all(folder_path: str, prefix: str = "", order: str = "nl_first",
         allowed = {Path(p).name for p in only}
         images = [i for i in images if i.name in allowed]
     for img in images:
-        nl = read_sidecar(str(img), NL_EXT)
-        tags = read_sidecar(str(img), TAGS_EXT)
+        nl = read_sidecar(str(img), NL_EXT) if "nl" in sources else ""
+        tags = read_sidecar(str(img), TAGS_EXT) if "tags" in sources else ""
         if not nl and not tags and _txt_has_text(img):
             continue
         lead = ""

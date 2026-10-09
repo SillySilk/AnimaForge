@@ -26,6 +26,28 @@ def _default_chain():
     return ["tag", "describe", "combine"]
 
 
+_STYLE_CHAINS = {
+    "prose": ["describe", "combine"],
+    "tags": ["tag", "combine"],
+    "prose+tags": ["tag", "describe", "combine"],
+}
+_STYLE_SOURCES = {"prose": ("nl",), "tags": ("tags",), "prose+tags": ("nl", "tags")}
+
+
+def chain_for_style(style: str) -> list:
+    """The caption stages a caption style runs (core.models.CAPTION_STYLES)."""
+    if style not in _STYLE_CHAINS:
+        raise ValueError(f"unknown caption style {style!r}; expected one of {tuple(_STYLE_CHAINS)}")
+    return list(_STYLE_CHAINS[style])
+
+
+def sources_for_style(style: str) -> tuple:
+    """Which sidecars Combine reads for a caption style."""
+    if style not in _STYLE_SOURCES:
+        raise ValueError(f"unknown caption style {style!r}; expected one of {tuple(_STYLE_SOURCES)}")
+    return _STYLE_SOURCES[style]
+
+
 @dataclass
 class CaptionJob:
     dataset_folder: str
@@ -45,6 +67,9 @@ class CaptionJob:
     describe_model_id: str = ""
     describe_cache_dir: str = ""
     caption_rules: list = field(default_factory=list)
+    # core.models.CAPTION_STYLES; decides which sidecars Combine reads. The chain is
+    # set separately (chain_for_style builds the matching one for unattended runs).
+    caption_style: str = "prose+tags"
 
     def combine_prefix(self) -> str:
         """What `combine_all(prefix=...)` receives. The trigger is NOT a separate
@@ -167,7 +192,8 @@ class CaptionRunner(QObject):
         elif stage == "combine":
             written, errors = combine_all(
                 job.dataset_folder, prefix=job.combine_prefix(), order=job.order,
-                only=images, rules=job.caption_rules)
+                only=images, rules=job.caption_rules,
+                sources=sources_for_style(job.caption_style))
             self.log_line.emit(f"[Combine] {written} caption file(s) built, {errors} error(s).")
             self._step_done("combine", errors == 0)
 
