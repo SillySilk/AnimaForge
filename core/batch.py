@@ -81,6 +81,9 @@ class RunDefinition:
     style_anchor: str = ""
     caption_policy: str = ASK
     caption_rules: list = field(default_factory=list)
+    # core.models.CAPTION_STYLES. Unset ("") resolves to the model's default in
+    # __post_init__, so queue JSON without the key captions as it always did.
+    caption_style: str = ""
     # Environment
     sdscripts_path: str = ""
     dit_path: str = ""
@@ -95,10 +98,12 @@ class RunDefinition:
     status: str = QUEUED
 
     def __post_init__(self):
-        if self.target_steps == -1:
-            preset = models.MODELS.get(self.model)
-            if preset is not None:
+        preset = models.MODELS.get(self.model)
+        if preset is not None:
+            if self.target_steps == -1:
                 self.target_steps = preset.default_target_steps
+            if not self.caption_style:
+                self.caption_style = preset.caption_style
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -112,7 +117,9 @@ class RunDefinition:
         """The CaptionJob this queued run should caption with — built from the run's own
         snapshot, never from whatever sits in the live UI when the batch reaches it."""
         from core.caption_runner import CaptionJob
-        chain = ["tag", "describe", "combine"]
+        from core.caption_runner import chain_for_style
+        style = self.caption_style or "prose+tags"
+        chain = chain_for_style(style)
         return CaptionJob(
             dataset_folder=self.dataset_folder, sdscripts_path=sdscripts_path,
             trigger=self.trigger_word, prefix=self.quality_prefix,
@@ -122,7 +129,8 @@ class RunDefinition:
             tagger_use_onnx=self.tagger_use_onnx,
             describe_model_id=self.describe_model_id,
             describe_cache_dir=self.describe_cache_dir,
-            caption_rules=self.caption_rules)
+            caption_rules=self.caption_rules,
+            caption_style=style)
 
 
 def resolve_sample_prompts(run: RunDefinition):

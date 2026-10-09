@@ -553,3 +553,25 @@ def test_model_fields_roundtrip():
     r = RunDefinition("K", "C:/ds", 12, model="krea2", onetrainer_root="D:/OT")
     back = RunDefinition.from_dict(r.to_dict())
     assert (back.model, back.onetrainer_root) == ("krea2", "D:/OT")
+
+
+def test_v2_run_captions_with_full_chain():
+    r = RunDefinition.from_dict({"lora_name": "Old", "dataset_folder": "C:/ds", "image_count": 3})
+    job = r.to_caption_job("C:/sd", "C:/ds/chars.json", "keep")
+    assert r.caption_style == "prose+tags"
+    assert job.chain == ["tag", "describe", "combine"] and job.caption_style == "prose+tags"
+
+
+def test_krea2_run_defaults_to_prose_and_tags():
+    assert RunDefinition("K", "C:/ds", 3, model="krea2").caption_style == "prose+tags"
+
+
+def test_prose_style_run_skips_tagging():
+    r = RunDefinition("K", "C:/ds", 3, model="krea2", caption_style="prose")
+    job = r.to_caption_job("C:/sd", "", "keep")
+    assert job.chain == ["describe", "combine"] and job.caption_style == "prose"
+
+
+def test_caption_style_roundtrips():
+    r = RunDefinition("K", "C:/ds", 3, caption_style="tags")
+    assert RunDefinition.from_dict(r.to_dict()).caption_style == "tags"
