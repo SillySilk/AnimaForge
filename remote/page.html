@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Anima Forge Remote</title>
+<style>
+:root { --bg:#141312; --panel:#1d1b19; --line:#2c2925; --text:#e9e0cc; --mute:#9a907e;
+        --gold:#d4af37; --ok:#7fb069; --bad:#d0613f; --run:#5fa8d3; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--text); font:15px/1.45 system-ui, sans-serif; }
+header { position:sticky; top:0; z-index:2; background:var(--panel); border-bottom:1px solid var(--line);
+         padding:10px 16px; display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+header h1 { font-size:17px; margin:0; color:var(--gold); font-weight:600; }
+header .grow { flex:1; }
+main { padding:16px; max-width:1100px; margin:0 auto; display:grid; gap:16px; }
+section { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:14px; min-width:0; }
+section h2 { margin:0 0 10px; font-size:14px; letter-spacing:.06em; text-transform:uppercase; color:var(--mute); font-weight:600; }
+button { font:inherit; color:var(--bg); background:var(--gold); border:0; border-radius:6px; padding:8px 14px;
+         cursor:pointer; min-height:38px; }
+button.ghost { background:transparent; color:var(--text); border:1px solid var(--line); }
+button.danger { background:var(--bad); color:#fff; }
+button:disabled { opacity:.4; cursor:default; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible { outline:2px solid var(--gold); outline-offset:2px; }
+input, select { font:inherit; color:var(--text); background:#0f0e0d; border:1px solid var(--line); border-radius:6px;
+                padding:8px 10px; width:100%; min-height:38px; }
+label { display:block; font-size:13px; color:var(--mute); margin:10px 0 4px; }
+.pill { font-size:12px; padding:3px 9px; border-radius:99px; border:1px solid var(--line); color:var(--mute); white-space:nowrap; }
+.pill.running { color:var(--run); border-color:var(--run); }
+.pill.done { color:var(--ok); border-color:var(--ok); }
+.pill.failed { color:var(--bad); border-color:var(--bad); }
+.notice { border:1px solid var(--gold); border-radius:8px; padding:10px 12px; display:flex; gap:10px;
+          align-items:center; flex-wrap:wrap; }
+.notice.bad { border-color:var(--bad); }
+.notice p { margin:0; flex:1; min-width:200px; }
+.runs { display:grid; gap:8px; }
+.run { border:1px solid var(--line); border-radius:6px; padding:10px; cursor:pointer; background:#181715; }
+.run.sel { border-color:var(--gold); }
+.run .top { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.run .name { font-weight:600; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.run .sub { color:var(--mute); font-size:12px; margin-top:4px; overflow-wrap:anywhere; }
+.run .x { background:transparent; color:var(--mute); border:1px solid var(--line); min-height:30px; padding:2px 10px; }
+.bar { height:6px; background:#0f0e0d; border-radius:3px; margin-top:8px; overflow:hidden; }
+.bar i { display:block; height:100%; background:var(--run); width:0; }
+.empty { color:var(--mute); margin:0; }
+.row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(120px, 1fr)); gap:8px; }
+.grid.small { grid-template-columns:repeat(auto-fill, minmax(72px, 1fr)); gap:6px; }
+.grid a { display:block; background:#0d0c0b; border:1px solid var(--line); border-radius:6px; overflow:hidden; }
+.grid img { display:block; width:100%; aspect-ratio:1; object-fit:contain; }
+img.failed { outline:2px dashed var(--gold); outline-offset:-6px; }
+.files a { color:var(--gold); }
+.files li { margin:4px 0; overflow-wrap:anywhere; }
+pre { background:#0d0c0b; border:1px solid var(--line); border-radius:6px; padding:10px; font-size:12px;
+      max-height:260px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; margin:0; }
+svg.loss { width:100%; height:140px; display:block; background:#0d0c0b; border:1px solid var(--line); border-radius:6px; }
+.crumbs a { color:var(--gold); }
+.crumbs { font-size:13px; color:var(--mute); margin-bottom:8px; overflow-wrap:anywhere; }
+.folders { display:grid; gap:4px; max-height:260px; overflow:auto; margin-bottom:10px; }
+.folders button { text-align:left; background:#181715; color:var(--text); border:1px solid var(--line); }
+.picked { color:var(--ok); font-size:13px; margin-top:6px; overflow-wrap:anywhere; }
+#toast { position:fixed; left:16px; right:16px; bottom:16px; margin:auto; max-width:520px; background:var(--panel);
+         border:1px solid var(--gold); border-radius:8px; padding:10px 14px; display:none; z-index:3; }
+@media (min-width: 900px) { main { grid-template-columns: 1fr 1fr; } .wide { grid-column: 1 / -1; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Anima Forge · Remote</h1>
+  <span id="status" class="pill">connecting…</span>
+  <span class="grow"></span>
+  <button id="start">Start queue</button>
+  <button id="stop" class="danger">Stop</button>
+</header>
+<main>
+  <div id="notices" class="wide" style="display:grid;gap:8px"></div>
+
+  <section>
+    <h2>Queue</h2>
+    <div id="runs" class="runs"><p class="empty">Loading…</p></div>
+  </section>
+
+  <section id="detail">
+    <h2 id="detail-title">Run</h2>
+    <p class="empty" id="detail-empty">Pick a run in the queue to see its progress, previews and files.</p>
+    <div id="detail-body" hidden>
+      <label>Loss</label>
+      <svg class="loss" id="loss" viewBox="0 0 300 100" preserveAspectRatio="none" role="img" aria-label="Loss over the run"></svg>
+      <label>Finished LoRA files</label>
+      <ul class="files" id="loras"></ul>
+      <label>Preview images (newest first)</label>
+      <div class="grid" id="previews"></div>
+      <label>Log</label>
+      <pre id="log"></pre>
+    </div>
+  </section>
+
+  <section class="wide">
+    <h2>New run</h2>
+    <div class="crumbs" id="crumbs"></div>
+    <div class="folders" id="folders"></div>
+    <div class="grid small" id="folder-images"></div>
+    <div class="row" style="margin-top:10px">
+      <button id="use-folder" class="ghost" disabled>Use this folder</button>
+      <span id="folder-count" class="empty"></span>
+    </div>
+    <div class="picked" id="picked"></div>
+    <label for="name">LoRA name</label>
+    <input id="name" autocomplete="off">
+    <label for="trigger">Trigger word</label>
+    <input id="trigger" autocomplete="off">
+    <label for="template">Settings from saved set (sets the model: Anima or Krea 2)</label>
+    <select id="template"></select>
+    <div class="row" style="margin-top:12px"><button id="add">Add to queue</button></div>
+  </section>
+</main>
+<div id="toast" role="status" aria-live="polite"></div>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let state = null, selected = null, browsePath = "", pickedFolder = "", lastPreviews = "";
+
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.style.display = "block";
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => t.style.display = "none", 5000);
+}
+async function getJSON(url) {
+  const r = await fetch(url, {cache: "no-store"});
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || r.statusText);
+  return r.json();
+}
+async function post(url, body) {
+  const r = await fetch(url, {method: "POST", headers: {"Content-Type": "application/json"},
+                              body: JSON.stringify(body || {})});
+  return r.json().catch(() => ({ok: false, message: "No answer from the PC."}));
+}
+
+// Thumbnails load a few at a time and retry: a slow link drops bursts of requests.
+const thumbQueue = []; let thumbActive = 0;
+function loadThumb(img, attempt) {
+  thumbActive++;
+  const probe = new Image();
+  probe.onload = () => { img.src = probe.src; thumbActive--; pumpThumbs(); };
+  probe.onerror = () => {
+    thumbActive--;
+    if (attempt < 4) setTimeout(() => loadThumb(img, attempt + 1), 1500 * attempt);
+    else { img.classList.add("failed"); img.title = "Didn't load"; }
+    pumpThumbs();
+  };
+  probe.src = img.dataset.src + (attempt > 1 ? "&r=" + attempt : "");
+}
+function pumpThumbs() { while (thumbActive < 3 && thumbQueue.length) loadThumb(thumbQueue.shift(), 1); }
+function queueThumbs(root) { root.querySelectorAll("img[data-src]").forEach(i => thumbQueue.push(i)); pumpThumbs(); }
+
+function renderNotices() {
+  const box = $("notices"); box.innerHTML = "";
+  if (state.app_open) {
+    box.insertAdjacentHTML("beforeend",
+      `<div class="notice bad"><p>Anima Forge is open on the PC. The queue can't change or start while it is.</p>
+       <button class="ghost" id="close-app">Close it from here</button></div>`);
+    $("close-app").onclick = async () => {
+      if (!confirm("Close Anima Forge on the PC? Anything not saved in it is lost.")) return;
+      toast((await post("/api/close-app")).message); refresh();
+    };
+  }
+  if (state.gpu_apps.length && !state.running) {
+    box.insertAdjacentHTML("beforeend",
+      `<div class="notice"><p>Also using the graphics card: ${esc(state.gpu_apps.join(", "))}.
+       Starting will ask before sharing it.</p></div>`);
+  }
+}
+
+function renderRuns() {
+  const box = $("runs");
+  if (!state.runs.length) { box.innerHTML = `<p class="empty">The queue is empty. Add a run below.</p>`; return; }
+  const idle = !state.running && !state.app_open;
+  box.innerHTML = state.runs.map(r => {
+    const pct = r.target_steps ? Math.min(100, 100 * r.current_step / r.target_steps) : 0;
+    const label = r.state === "running" ? (r.phase || "running") : r.state;
+    const steps = r.state === "running" && r.phase === "training" && r.target_steps
+      ? ` · step ${r.current_step} / ${r.target_steps}` : "";
+    return `<div class="run ${selected === r.index ? "sel" : ""}" data-i="${r.index}" tabindex="0">
+      <div class="top"><span class="name">${esc(r.lora_name)}</span>
+        <span class="pill">${esc(r.model_name)}</span>
+        <span class="pill ${esc(r.state)}">${esc(label)}</span>
+        ${idle ? `<button class="x" data-remove="${r.index}" aria-label="Remove ${esc(r.lora_name)}">Remove</button>` : ""}</div>
+      <div class="sub">${r.image_count} images · ${esc(r.dataset_folder)}${steps}</div>
+      ${r.state === "running" ? `<div class="bar"><i style="width:${pct}%"></i></div>` : ""}
+      ${r.error_tail ? `<div class="sub" style="color:var(--bad)">${esc(r.error_tail.slice(-3).join(" · "))}</div>` : ""}
+    </div>`;
+  }).join("");
+  box.querySelectorAll(".run").forEach(el => {
+    const pick = () => { selected = +el.dataset.i; lastPreviews = ""; renderRuns(); refreshDetail(); };
+    el.onclick = pick; el.onkeydown = e => { if (e.key === "Enter") pick(); };
+  });
+  box.querySelectorAll("[data-remove]").forEach(b => b.onclick = async e => {
+    e.stopPropagation();
+    const r = await post("/api/remove", {index: +b.dataset.remove});
+    toast(r.message); if (selected === +b.dataset.remove) selected = null; refresh();
+  });
+}
+
+function renderLoss(points) {
+  const svg = $("loss");
+  if (points.length < 2) { svg.innerHTML = `<text x="150" y="55" fill="#9a907e" font-size="9" text-anchor="middle">No loss readings yet</text>`; return; }
+  const ys = points.map(p => p[1]), lo = Math.min(...ys), hi = Math.max(...ys), span = (hi - lo) || 1;
+  const x0 = points[0][0], xs = (points[points.length - 1][0] - x0) || 1;
+  const d = points.map((p, i) => `${i ? "L" : "M"}${(300 * (p[0] - x0) / xs).toFixed(1)},${(95 - 88 * (p[1] - lo) / span).toFixed(1)}`).join("");
+  svg.innerHTML = `<path d="${d}" fill="none" stroke="#d4af37" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
+    <text x="4" y="10" fill="#9a907e" font-size="8">${hi.toFixed(4)}</text>
+    <text x="4" y="97" fill="#9a907e" font-size="8">${lo.toFixed(4)}</text>`;
+}
+
+async function refreshDetail() {
+  if (selected === null) { $("detail-body").hidden = true; $("detail-empty").hidden = false; return; }
+  let d;
+  try { d = await getJSON(`/api/run?index=${selected}`); }
+  catch (e) { selected = null; return refreshDetail(); }
+  const run = state && state.runs.find(r => r.index === selected);
+  $("detail-title").textContent = run ? run.lora_name : "Run";
+  $("detail-empty").hidden = true; $("detail-body").hidden = false;
+  renderLoss(d.loss);
+  $("loras").innerHTML = d.files.loras.length ? d.files.loras.map(f =>
+    `<li><a href="/run-file?index=${selected}&name=${encodeURIComponent(f.name)}&download=1">${esc(f.name)}</a>
+     <span class="empty">${(f.size / 1048576).toFixed(1)} MB</span></li>`).join("")
+    : `<li class="empty">None yet.</li>`;
+  const key = selected + "|" + d.files.previews.join("|");
+  if (key !== lastPreviews) {
+    lastPreviews = key;
+    const grid = $("previews");
+    grid.innerHTML = d.files.previews.length ? d.files.previews.slice(0, 60).map(p => {
+      const q = `index=${selected}&name=${encodeURIComponent(p)}`;
+      return `<a href="/run-file?${q}" target="_blank" rel="noopener"><img data-src="/run-thumb?${q}" alt="${esc(p)}"></a>`;
+    }).join("") : `<p class="empty">None yet.</p>`;
+    queueThumbs(grid);
+  }
+  const log = $("log"), atEnd = log.scrollTop + log.clientHeight >= log.scrollHeight - 4;
+  log.textContent = d.log.join("\n") || "Nothing logged yet.";
+  if (atEnd) log.scrollTop = log.scrollHeight;
+}
+
+async function refresh() {
+  try { state = await getJSON("/api/state"); }
+  catch (e) { $("status").textContent = "PC not answering"; $("status").className = "pill failed"; return; }
+  const s = $("status");
+  s.textContent = state.running ? "Training queue running" : state.app_open ? "Desktop app open" : "Idle";
+  s.className = "pill " + (state.running ? "running" : "");
+  $("start").disabled = state.running || state.app_open || !state.has_work;
+  $("stop").disabled = !state.running;
+  $("add").disabled = state.running || state.app_open;
+  renderNotices(); renderRuns();
+}
+
+$("start").onclick = async () => {
+  let r = await post("/api/start");
+  if (!r.ok && r.message.startsWith("gpu:")) {
+    if (!confirm(`These are also using the graphics card: ${r.message.slice(4)}.\nStart anyway?`)) return;
+    r = await post("/api/start", {force: true});
+  }
+  toast(r.message); refresh();
+};
+$("stop").onclick = async () => {
+  if (!confirm("Stop the training queue? The current run will start over next time.")) return;
+  toast("Stopping…"); toast((await post("/api/stop")).message); refresh();
+};
+
+async function browse(path) {
+  let d;
+  try { d = await getJSON("/api/folders?path=" + encodeURIComponent(path)); }
+  catch (e) { toast(e.message); return; }
+  browsePath = d.path;
+  $("crumbs").innerHTML = d.path ? `<a href="#" id="up">◂ Up</a> · ${esc(d.path)}` : "This PC";
+  if (d.path) $("up").onclick = e => { e.preventDefault(); browse(d.parent || ""); };
+  $("folders").innerHTML = d.folders.map(f =>
+    `<button data-path="${esc(f.path)}">${esc(f.name)}</button>`).join("") || `<p class="empty">No folders inside.</p>`;
+  $("folders").querySelectorAll("button").forEach(b => b.onclick = () => browse(b.dataset.path));
+  $("folder-images").innerHTML = d.images.map(p =>
+    `<a><img data-src="/thumb?path=${encodeURIComponent(p)}" alt=""></a>`).join("");
+  queueThumbs($("folder-images"));
+  $("folder-count").textContent = d.path ? `${d.image_count} images here` : "";
+  $("use-folder").disabled = !d.image_count;
+}
+$("use-folder").onclick = () => {
+  pickedFolder = browsePath;
+  $("picked").textContent = "Training images: " + pickedFolder;
+  if (!$("name").value) $("name").value = pickedFolder.split(/[\\/]/).filter(Boolean).pop() || "";
+};
+$("add").onclick = async () => {
+  const r = await post("/api/queue", {folder: pickedFolder, name: $("name").value,
+                                      trigger: $("trigger").value, template: $("template").value});
+  toast(r.message);
+  if (r.ok) { $("name").value = ""; $("trigger").value = ""; refresh(); }
+};
+
+async function loadSets() {
+  const sets = await getJSON("/api/sets");
+  $("template").innerHTML = sets.length ? `<option value="">Choose a saved set…</option>` + sets.map(s =>
+    `<option value="${esc(s.name)}">${esc(s.name)} — ${esc(s.model_name)}, ${esc(s.subject_type)}</option>`).join("")
+    : `<option value="">No saved sets yet — save one in Anima Forge first</option>`;
+}
+
+refresh(); loadSets(); browse("");
+setInterval(refresh, 3000);
+setInterval(() => { if (selected !== null) refreshDetail(); }, 5000);
+</script>
+</body>
+</html>
