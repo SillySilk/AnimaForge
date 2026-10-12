@@ -477,6 +477,8 @@ class MainWindow(QMainWindow):
         self._compare_root = None        # sets/ root for comparison records (tests: tmp)
         self._comparisons_shown = set()
         self._train_tab.config_overrides_changed.connect(self._home_tab.set_advanced_count)
+        self._train_tab.config_overrides_changed.connect(
+            lambda _n: self._refresh_home_summary())
         # 📜 beside Start → the same config preview the Options modal offers
         self._home_tab.preview_config_requested.connect(self._train_tab._preview_config)
 
@@ -966,9 +968,9 @@ class MainWindow(QMainWindow):
             # live pillar readouts (Home condenses these into the two step cards)
             "caption_stage_counts": self._dataset_tab.caption_stage_counts(),
             "optimizer_label": self._train_tab.optimizer_label(),
-            "net_dim": self._train_tab._dim_spin.value(),
-            "net_alpha": self._train_tab._alpha_spin.value(),
-            "net_res": 1024,
+            "net_dim": self._train_tab.network_summary()[1],
+            "net_alpha": self._train_tab.network_summary()[2],
+            "net_res": self._train_tab.network_summary()[3],
         }
 
     def _on_home_folder_chosen(self, folder: str):
@@ -999,6 +1001,14 @@ class MainWindow(QMainWindow):
         from core.settings import AppSettings
         AppSettings().set("model", model_id)
         self._refresh_rail()
+        self._refresh_home_summary()
+
+    def _refresh_home_summary(self):
+        """The Train pillar's optimizer tile and dim/alpha/px line follow the model:
+        Krea 2 runs on its own preset, not on the Anima controls."""
+        tt = self._train_tab
+        opt, dim, alpha, res = tt.network_summary()
+        self._home_tab.set_train_summary(optimizer=opt, dim=dim, alpha=alpha, res=res)
 
     def _on_train_caption_style(self, style: str):
         """A loaded set (or anything else) changed the Train tab's style."""

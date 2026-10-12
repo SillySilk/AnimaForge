@@ -1170,9 +1170,34 @@ class TrainTab(QWidget):
     def _current_optimizer(self) -> str:
         return self._optimizer_combo.currentData() or "prodigy"
 
+    # OneTrainer optimizer enum -> Home tile name.
+    _OT_OPT_TILE = {"ADAMW_8BIT": "AdamW8bit", "ADAMW": "AdamW", "PRODIGY": "Prodigy",
+                    "PRODIGY_PLUS_SCHEDULE_FREE": "Prodigy+ SF", "ADAFACTOR": "Adafactor"}
+
     def optimizer_label(self) -> str:
         """Short name for the Home cockpit tile."""
+        if self.engine() == models.ONETRAINER:
+            return self.network_summary()[0]
         return self._OPT_TILE.get(self._current_optimizer(), "Prodigy")
+
+    def network_summary(self) -> tuple:
+        """(optimizer label, rank, alpha, resolution px) the next run will really use.
+        Kohya runs read this tab's controls; a OneTrainer run reads its preset with
+        the advanced overrides laid over it, since those controls don't drive it."""
+        if self.engine() != models.ONETRAINER:
+            return (self._OPT_TILE.get(self._current_optimizer(), "Prodigy"),
+                    self._dim_spin.value(), self._alpha_spin.value(), 1024)
+        from core import config_overrides
+        from core.engines.onetrainer import preset
+        try:
+            cfg = config_overrides.apply(preset.load_template(), self._config_overrides)
+        except ValueError:
+            cfg = preset.load_template()
+        opt = str(cfg.get("optimizer", {}).get("optimizer", ""))
+        alpha = float(cfg.get("lora_alpha", 0))
+        return (self._OT_OPT_TILE.get(opt, opt.replace("_", " ").title()),
+                int(cfg.get("lora_rank", 0)), int(alpha) if alpha.is_integer() else alpha,
+                int(str(cfg.get("resolution", "0")).split(",")[0].split("x")[0]))
 
     def _set_optimizer(self, optimizer: str):
         idx = self._optimizer_combo.findData((optimizer or "prodigy").lower())

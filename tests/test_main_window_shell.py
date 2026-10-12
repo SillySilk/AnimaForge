@@ -188,3 +188,14 @@ def test_gpu_busy_check_injected_bidirectionally_excludes_self(monkeypatch):
     assert w._train_tab._gpu_busy_check() is not None
     # ...but Batch does not report itself as the reason it's busy.
     assert w._batch_tab._gpu_busy_check() is None
+
+
+def test_home_shows_krea2_preset_settings_not_the_anima_controls():
+    from ui.train_tab import TrainTab
+    t = TrainTab()
+    t.set_model("krea2")
+    assert t.network_summary() == ("AdamW8bit", 32, 32, 512)
+    assert t.optimizer_label() == "AdamW8bit"
+    t.set_model("anima")
+    opt, dim, alpha, res = t.network_summary()
+    assert (dim, alpha, res) == (t._dim_spin.value(), t._alpha_spin.value(), 1024)
