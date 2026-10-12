@@ -20,23 +20,21 @@ def test_recipe_guard_locks_the_proven_knobs():
     assert t["resolution"] == "512"
     assert t["lora_rank"] == 32
     assert t["output_model_format"] == "COMFY_LORA"
-    assert t["optimizer"]["optimizer"] == "PRODIGY"
+    assert t["optimizer"]["optimizer"] == "ADAMW_8BIT"
     assert t["cloud"]["enabled"] is False
 
 
-def test_prodigy_learning_rate_is_the_multiplier_not_an_adamw_rate():
-    """Prodigy is learning-rate-free: `lr` scales the step size it estimates for
-    itself, so the convention is 1.0 (prodigyopt's own default). Handing it an
-    AdamW-shaped 3e-4 multiplies its estimate by 3e-4 instead of setting it --
-    and because Prodigy derives its estimate from terms that are themselves
-    proportional to `lr` (dlr = d*lr, d0 = 1e-6), the run cannot climb back out.
-    run_B (2026-08-17) trained 1254 steps that way and landed lora_B at
-    ~1.7e-08 against a working LoRA's ~4.0e-02: a numerical no-op that loads
-    fine and changes nothing in the image."""
+def test_adamw_runs_at_a_fixed_rate_the_krea2_guides_use():
+    """Prodigy blew up three Krea 2 runs (run_H, run_S, ModernFam 2026-10-12), the
+    last one while capped. AdamW8bit at a fixed 1e-4 is what the Krea 2 character
+    guides train at, and an AdamW-sized rate is a real step size here, not a
+    multiplier: 1.0 would wreck the run in a step."""
     t = preset.load_template()
-    assert t["optimizer"]["optimizer"] == "PRODIGY"
-    assert t["learning_rate"] == 1.0
-    assert t["optimizer"]["d0"] == 1e-6      # Prodigy's own starting estimate
+    assert t["optimizer"]["optimizer"] == "ADAMW_8BIT"
+    assert t["learning_rate"] == 1e-4
+    assert t["optimizer"]["weight_decay"] == 0.01
+    assert t["learning_rate_scheduler"] == "CONSTANT"
+    assert t["learning_rate_warmup_steps"] > 0
 
 
 def test_output_format_matches_the_naming_the_inference_side_reads():
@@ -47,17 +45,6 @@ def test_output_format_matches_the_naming_the_inference_side_reads():
     common, so the loader matches nothing and silently applies nothing."""
     t = preset.load_template()
     assert t["output_model_format"] == "COMFY_LORA"
-
-
-def test_prodigy_safeguards_the_warmup_the_preset_actually_uses():
-    """prodigyopt: "safeguard_warmup: Remove lr from the denominator of D estimate
-    to avoid issues during warm-up stage. Off by default." This preset always warms
-    up (learning_rate_warmup_steps is a PATCHED_FIELD, never zero), so the default
-    off is the wrong pairing -- the D estimate is distorted over exactly the early
-    steps that set the step size for the rest of the run."""
-    t = preset.load_template()
-    assert t["learning_rate_warmup_steps"] > 0
-    assert t["optimizer"]["safeguard_warmup"] is True
 
 
 def test_lora_alpha_equals_rank_so_the_applied_scale_is_one():

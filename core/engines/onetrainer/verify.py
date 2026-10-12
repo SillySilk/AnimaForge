@@ -190,8 +190,9 @@ def verify_output(path: str, namespace: str = READABLE_PREFIX + ".") -> str | No
                 f"{peak:.3e}, below the {MIN_TRAINED_ABSMAX:.0e} floor "
                 "(a working LoRA sits near 4e-02). lora_B starts at zero, so "
                 "this means training never moved it — the LoRA will load and "
-                "change nothing. Check the optimizer's learning rate: PRODIGY "
-                "reads it as a multiplier on its own step size and wants 1.0.")
+                "change nothing. Check the optimizer's learning rate: AdamW wants "
+                "about 1e-4, while PRODIGY reads it as a multiplier on its own "
+                "step size and wants 1.0.")
     return None
 
 

@@ -85,6 +85,18 @@ images) settled at 7.3e-04 and blew up to noise at epoch 11 of 33; run_H's
 5.8e-04 overshot late; four healthy runs sat at 2.9e-04..3.4e-04. The cap sits
 just above the healthy band. UNPROVEN until a capped run ships a working file.
 
+Since 2026-10-12 the optimizer is ADAMW_8BIT at a fixed 1e-4 (weight decay 0.01,
+same 200-step warmup, constant schedule). Prodigy blew up a third run despite the
+cap: ModernFam (330 images, 7 people) hit 5.5e-04 within the first epoch, sat on
+the 4e-04 cap from then on, and its previews turned to noise between epochs 4 and
+6 while the loss never fell below ~0.12. Prodigy's self-chosen step grows with set
+size, which is exactly the cast sets this preset is for. 1e-4 is what the Krea 2
+character guides use, a third of the step healthy Prodigy runs settled at, and a
+fixed rate also overtrains less, which keeps a character LoRA stackable with style
+LoRAs. The Prodigy cap and prodigy_steps stay wired for a run that picks Prodigy
+in the advanced settings; onetrainer_train.py only installs the cap for Prodigy.
+UNPROVEN until a full AdamW run ships a working file.
+
 Only the fields in PATCHED_FIELDS ever change per run (a dotted name is a nested
 field); everything else passes through untouched. Any change to a learning knob
 needs a generated LoRA whose lora_B magnitude is in the 1e-2 range before it is

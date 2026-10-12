@@ -59,9 +59,23 @@ def install_cap(cap: float) -> bool:
     return True
 
 
+def _optimizer_name(argv) -> str:
+    """The optimizer named in the --config-path file, or "" if it can't be read."""
+    import json
+    try:
+        path = argv[argv.index("--config-path") + 1]
+        with open(path, encoding="utf-8") as f:
+            return str(json.load(f).get("optimizer", {}).get("optimizer", ""))
+    except (ValueError, IndexError, OSError, AttributeError, json.JSONDecodeError):
+        return ""
+
+
 def main() -> None:
     train_script, cap = sys.argv[1], float(sys.argv[2])
-    install_cap(cap)
+    # Only Prodigy picks its own step size; a fixed-rate optimizer has nothing to cap,
+    # and announcing a cap there would misdescribe the run.
+    if _optimizer_name(sys.argv[3:]) == "PRODIGY":
+        install_cap(cap)
     # train.py reads its own arguments and imports its siblings (util.import_util)
     # relative to its folder, exactly as if it had been launched directly.
     sys.argv = [train_script, *sys.argv[3:]]
