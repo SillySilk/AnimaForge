@@ -340,6 +340,7 @@ class DatasetTab(QWidget):
     open_characters_requested = Signal()  # "name characters" prompt -> jump to Characters tab
     caption_finished = Signal()        # caption step status changed -> refresh progress rail
     caption_tick = Signal(str, int, int)  # (phase, done, total) per-image tick -> Home's stage chips
+    caption_stage_started = Signal(str)   # step key launching, before its first tick -> Home's chip
     auto_caption_finished = Signal(bool)  # headless Process chain ended (Home pipeline)
     caption_stage_done = Signal(str)   # "captioned" (passes done) / "processed" (combine done) -> project autosave
 
@@ -370,6 +371,7 @@ class DatasetTab(QWidget):
         self._runner = CaptionRunner(self)
         self._runner.log_line.connect(self._on_runner_log)
         self._runner.tick.connect(self._on_runner_tick)
+        self._runner.stage_started.connect(self._on_stage_started)
         self._runner.stage_done.connect(self._on_stage_done)
         self._runner.finished.connect(self._on_caption_finished)
         self._auto_mode = False   # True while the Home pipeline runs the chain headless
@@ -1326,6 +1328,17 @@ class DatasetTab(QWidget):
         if card is not None and step_key == "describe":
             card.show_description(read_sidecar(card.image_path, NL_EXT))
         self.caption_tick.emit(phase, done, total)
+
+    def _on_stage_started(self, stage: str):
+        """A step is launching. Its model can take a minute to load before the first
+        image ticks, so say it has started and run the bar busy until then."""
+        if stage not in STEP_NAMES:
+            return
+        self._phase_label.setText(
+            phase_text(stage, self._active_chain).replace("…", " — starting…"))
+        self._caption_bar.setRange(0, 0)
+        self._caption_file.setText("")
+        self.caption_stage_started.emit(stage)
 
     def _pre_combine_stage(self):
         """The stage immediately before 'combine' in the active job's chain — the last raw

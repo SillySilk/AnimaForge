@@ -686,6 +686,18 @@ def test_tag_tick_does_not_touch_the_card(tmp_path):
     assert card._caption_preview.text() == "orig"
 
 
+def test_stage_start_says_started_before_the_first_tick():
+    from ui.dataset_tab import DatasetTab
+    t = DatasetTab()
+    t._active_chain = ["tag", "describe", "combine"]
+    seen = []
+    t.caption_stage_started.connect(seen.append)
+    t._runner.stage_started.emit("describe")
+    assert t._phase_label.text() == "Step 2/3 · Describe — starting…"
+    assert t._caption_bar.maximum() == 0          # busy bar until images tick
+    assert seen == ["describe"]
+
+
 def _describe_kwargs(t, monkeypatch, tmp_path):
     seen = {}
     t._folder_path = str(tmp_path)

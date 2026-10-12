@@ -419,6 +419,7 @@ class MainWindow(QMainWindow):
         # Home's stage chips: per-caption ticks while an engine runs, authoritative
         # sidecar counts the moment each step lands.
         self._dataset_tab.caption_tick.connect(self._home_tab.apply_caption_tick)
+        self._dataset_tab.caption_stage_started.connect(self._home_tab.apply_stage_started)
         self._dataset_tab.caption_finished.connect(
             lambda: self._home_tab.set_stage_counts(
                 *self._dataset_tab.caption_stage_counts()))

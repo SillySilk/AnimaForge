@@ -136,6 +136,7 @@ def _has_sidecar(image: str, ext: str) -> bool:
 class CaptionRunner(QObject):
     log_line = Signal(str)
     tick = Signal(str, int, int, str)   # phase, done, total, filename
+    stage_started = Signal(str)         # a stage is launching (model loads come before any tick)
     stage_done = Signal(str)
     finished = Signal(bool)
 
@@ -227,6 +228,7 @@ class CaptionRunner(QObject):
             return
         stage, images = self._stages[0]
         job = self._job
+        self.stage_started.emit(stage)
         if stage == "tag":
             self._tagger.start(
                 sdscripts_path=job.sdscripts_path, image_folder=job.dataset_folder,

@@ -642,6 +642,13 @@ class HomeTab(QWidget):
         self._stage_count_labels[key].setText(self._stage_count_text(done, total))
         self._set_live_stage(key)
 
+    def apply_stage_started(self, key: str):
+        """A caption step is launching — light its chip before the first image lands."""
+        if key not in self._stage_count_labels:
+            return
+        self._stage_count_labels[key].setText("starting…")
+        self._set_live_stage(key)
+
     def _set_live_stage(self, live_key):
         for key, chip in self._stage_chips.items():
             name = "af_stage_chip_live" if key == live_key else "af_stage_chip"
