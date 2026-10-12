@@ -31,3 +31,22 @@ def test_group_by_round_newest_first_prompt_order():
 
 def test_group_by_round_empty():
     assert group_by_round([]) == []
+
+
+def test_onetrainer_samples_group_by_epoch_and_find_their_prompt(tmp_path):
+    import json
+    from core.samples import group_by_round, prompt_for_file
+    run = tmp_path / "Run"
+    (run / "workspace" / "samples" / "0 - Ann reads").mkdir(parents=True)
+    (run / "workspace" / "samples" / "1 - Bob waters").mkdir(parents=True)
+    (run / "samples.json").write_text(json.dumps(
+        [{"prompt": "Ann reads"}, {"prompt": "Bob waters"}]), encoding="utf-8")
+    files = []
+    for d, step, ep in (("0 - Ann reads", 0, 0), ("0 - Ann reads", 326, 2),
+                        ("1 - Bob waters", 326, 2)):
+        f = run / "workspace" / "samples" / d / f"2026-10-12_11-44-30-training-sample-{step}-{ep}-0.jpg"
+        f.write_bytes(b"x")
+        files.append(str(f))
+    labels = [label for label, _ in group_by_round(files)]
+    assert labels == ["epoch 2", "start"]
+    assert prompt_for_file(files[2], "unused.txt") == "Bob waters"
