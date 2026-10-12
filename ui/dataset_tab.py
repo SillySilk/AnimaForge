@@ -1780,38 +1780,49 @@ class DatasetTab(QWidget):
             QMessageBox.warning(self, "Tagging Failed", "The tagger exited with an error. Check the log above.")
 
     def _on_image_delete_requested(self, image_path: str):
-        """Handle deletion of an image and its caption file."""
-        msg = QMessageBox(self)
-        msg.setWindowTitle("Delete Image")
-        msg.setIcon(QMessageBox.Question)
-        filename = Path(image_path).name
-        msg.setText(
-            f"Delete '{filename}' and its caption file?\n\n"
-            "This cannot be undone."
-        )
-        msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-        msg.setDefaultButton(QMessageBox.No)
-
-        if msg.exec() != QMessageBox.Yes:
-            return
-
+        """Trash-can click: send the image and its caption files to the Recycle Bin and
+        drop just its card. No confirm — culling is routine, and the Recycle Bin is the
+        undo. Rebuilding the whole gallery took ~10 s on a 300-image set, so only a
+        stem twin (hero.png + hero.jpg, whose DOUBLE badges change) reloads it."""
+        from core import recycle
+        p = Path(image_path)
+        # Trash the caption + sidecar files too — UNLESS another image still shares
+        # this stem: the survivor owns the same .txt, and trashing one twin must not
+        # orphan its caption.
+        stem_twins = [f for f in p.parent.iterdir()
+                      if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS
+                      and f != p and f.stem.lower() == p.stem.lower()]
+        doomed = [p] if stem_twins else [p] + [
+            p.with_suffix(ext) for ext in (".txt", ".tags", ".nl")
+            if p.with_suffix(ext).is_file()]
         try:
-            p = Path(image_path)
-            p.unlink()
-            # Delete the caption + sidecar files too — UNLESS another image still
-            # shares this stem (a "double" like hero.png + hero.jpg): the survivor
-            # owns the same .txt, and trashing one twin must not orphan its caption.
-            stem_twins = [f for f in p.parent.iterdir()
-                          if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS
-                          and f.stem.lower() == p.stem.lower()]
-            if not stem_twins:
-                for ext in (".txt", ".tags", ".nl"):
-                    sidecar = p.with_suffix(ext)
-                    if sidecar.is_file():
-                        sidecar.unlink()
-
-            # Reload the gallery — the card vanishing is the feedback (a success
-            # popup per deletion made cleaning several doubles a chore).
-            self._load_images()
-        except Exception as e:
+            recycle.to_recycle_bin(doomed)
+        except OSError as e:
             QMessageBox.warning(self, "Delete Failed", f"Could not delete file:\n{e}")
+            return
+        if stem_twins:
+            self._load_images()
+        else:
+            self._drop_card(p.name)
+
+    def _drop_card(self, name: str):
+        """Remove one image's card and refresh the counts, without rebuilding the gallery."""
+        card = self._cards_by_name.pop(name, None)
+        if card is None:
+            return
+        if card is self._processing_card:
+            self._processing_card = None
+        self._cards.remove(card)
+        self._gallery_layout.removeWidget(card)
+        card.setParent(None)
+        card.deleteLater()
+        self._image_data = [d for d in self._image_data
+                            if Path(d["image_path"]).name != name]
+        count = len(self._image_data)
+        self._count_label.setText(f"Image count: {count}")
+        set_name = Path(self._folder_path).name if self._folder_path else ""
+        self._set_name_label.setText(
+            f"Set · {set_name} · {count} images" if set_name else "No set loaded")
+        self._apply_filter()
+        self._refresh_step_status()
+        self.dataset_loaded.emit(self._folder_path, count)

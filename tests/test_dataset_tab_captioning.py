@@ -1,3 +1,4 @@
+import pytest
 import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import sys
@@ -748,3 +749,46 @@ def test_dataset_tab_refuses_an_unknown_style():
     from ui.dataset_tab import DatasetTab
     with pytest.raises(ValueError, match="haiku"):
         DatasetTab().set_caption_style("haiku")
+
+
+def _gallery(tmp_path, names):
+    from PIL import Image
+    from ui.dataset_tab import DatasetTab
+    for n in names:
+        Image.new("RGB", (8, 8)).save(tmp_path / n)
+    t = DatasetTab()
+    t._folder_path = str(tmp_path)
+    t._load_images()
+    return t
+
+
+def test_trash_can_recycles_without_asking_and_drops_only_that_card(tmp_path, monkeypatch):
+    import core.recycle as rc
+    t = _gallery(tmp_path, ["a.png", "b.png", "c.png"])
+    (tmp_path / "b.txt").write_text("cap", encoding="utf-8")
+    (tmp_path / "b.tags").write_text("tags", encoding="utf-8")
+    binned = []
+    monkeypatch.setattr(rc, "to_recycle_bin", lambda paths: binned.extend(paths))
+    monkeypatch.setattr(t, "_load_images", lambda: pytest.fail("whole gallery rebuilt"))
+    monkeypatch.setattr("ui.dataset_tab.QMessageBox.exec",
+                        lambda self: pytest.fail("a dialog was shown"))
+    kept = t._cards_by_name["a.png"]
+    loads = []
+    t.dataset_loaded.connect(lambda f, n: loads.append(n))
+    t._on_image_delete_requested(str(tmp_path / "b.png"))
+    assert sorted(Path(p).name for p in binned) == ["b.png", "b.tags", "b.txt"]
+    assert sorted(t._cards_by_name) == ["a.png", "c.png"]
+    assert t._cards_by_name["a.png"] is kept
+    assert [Path(d["image_path"]).name for d in t._image_data] == ["a.png", "c.png"]
+    assert t._count_label.text() == "Image count: 2"
+    assert loads == [2]
+
+
+def test_trashing_one_stem_twin_keeps_the_shared_caption(tmp_path, monkeypatch):
+    import core.recycle as rc
+    t = _gallery(tmp_path, ["hero.png", "hero.jpg"])
+    (tmp_path / "hero.txt").write_text("cap", encoding="utf-8")
+    binned = []
+    monkeypatch.setattr(rc, "to_recycle_bin", lambda paths: binned.extend(paths))
+    t._on_image_delete_requested(str(tmp_path / "hero.jpg"))
+    assert [Path(p).name for p in binned] == ["hero.jpg"]
