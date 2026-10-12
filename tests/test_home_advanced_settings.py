@@ -43,6 +43,13 @@ def test_home_shows_how_many_settings_changed():
 def _window(monkeypatch, base):
     from ui.main_window import MainWindow
     w = MainWindow()
+    # MainWindow restores the last-used model from the real user settings; these
+    # tests are about an Anima run (on Krea 2, "epochs" is a run-locked field, so an
+    # override of it is dropped). Pin the model without signals, so the switch is not
+    # written back to the user's settings.
+    w._train_tab.blockSignals(True)
+    w._train_tab.set_model("anima")
+    w._train_tab.blockSignals(False)
     monkeypatch.setattr(w._train_tab, "base_config", lambda: base)
     return w
 
