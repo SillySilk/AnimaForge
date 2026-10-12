@@ -1096,10 +1096,14 @@ class TrainTab(QWidget):
         self._preview_scroll = QScrollArea()
         self._preview_scroll.setWidgetResizable(True)
         self._preview_scroll.setWidget(self._preview_container)
-        self._preview_scroll.setFixedHeight(430)  # one labeled epoch row of portrait tiles + gap
+        # Grows with the window rather than a fixed 430 px: on a short window the fixed
+        # height plus the dials overflowed the column and the log was drawn on top of
+        # the previews. The previews get most of the spare height; the log keeps a
+        # readable minimum below them.
+        self._preview_scroll.setMinimumHeight(220)
         self._preview_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._preview_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        right_layout.addWidget(self._preview_scroll)
+        right_layout.addWidget(self._preview_scroll, 3)
 
         # Log output
         self._log_edit = QTextEdit()
@@ -1110,7 +1114,8 @@ class TrainTab(QWidget):
             "background-color: #0c0b0a; color: #c6c6ce; "
             "border: 1px solid #2a2a1e; border-radius: 5px;"
         )
-        right_layout.addWidget(self._log_edit)
+        self._log_edit.setMinimumHeight(110)
+        right_layout.addWidget(self._log_edit, 1)
 
         splitter.addWidget(right_widget)
         splitter.setStretchFactor(0, 1)

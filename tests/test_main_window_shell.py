@@ -199,3 +199,13 @@ def test_home_shows_krea2_preset_settings_not_the_anima_controls():
     t.set_model("anima")
     opt, dim, alpha, res = t.network_summary()
     assert (dim, alpha, res) == (t._dim_spin.value(), t._alpha_spin.value(), 1024)
+
+
+def test_train_log_never_draws_over_the_previews():
+    from PySide6.QtWidgets import QApplication
+    from ui.train_tab import TrainTab
+    t = TrainTab()
+    t.resize(1300, 840)
+    t.show()
+    QApplication.processEvents()
+    assert t._log_edit.geometry().top() > t._preview_scroll.geometry().bottom()
