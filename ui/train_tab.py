@@ -1564,10 +1564,12 @@ class TrainTab(QWidget):
             self._sample_prompts_edit.clear()
 
     def _fill_sample_prompts(self, folder_path: str):
-        """Drop N random verbatim caption blocks (N = preview count) into the box."""
-        from core.sample_prompts import grab_caption_blocks
-        n = SAMPLE_COUNT
-        blocks = grab_caption_blocks(folder_path, n)
+        """Drop verbatim caption blocks into the box: one per named subject when the set
+        has a character roster (each preview checks a different person), otherwise N
+        random blocks (N = preview count)."""
+        from core.sample_prompts import character_caption_blocks, grab_caption_blocks
+        blocks = (character_caption_blocks(folder_path)
+                  or grab_caption_blocks(folder_path, SAMPLE_COUNT))
         if not blocks:
             return
         self._sample_prompts_edit.setPlainText("\n".join(blocks))

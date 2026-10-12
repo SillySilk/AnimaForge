@@ -29,3 +29,42 @@ def grab_caption_blocks(folder, n: int, rng=None):
         rng.shuffle(out)
         return out
     return rng.sample(blocks, n)
+
+
+def character_caption_blocks(folder, rng=None):
+    """One verbatim caption block per named subject, for a set with a character roster.
+
+    Each subject gets a caption that names them, from the picture where they appear
+    with the fewest others (solo when one exists), so every preview checks a
+    different person's likeness by name. No picture is used twice. Subjects with no
+    named caption are skipped. A set with no roster subjects yields [] (the caller
+    falls back to random blocks). Pass a seeded `random.Random` for determinism.
+    """
+    import re
+    from pathlib import Path
+    from core import characters as ch
+    from core.dataset_manager import scan_folder
+
+    if not folder:
+        return []
+    data = ch.load(folder)
+    subjects = [c.token for c in data.roster if c.role == "subject" and c.token.strip()]
+    if not subjects:
+        return []
+    rng = rng or random
+    present = {name: a.get("present", []) for name, a in data.assignments.items()}
+    captions = {Path(d["image_path"]).name: d.get("caption", "").strip()
+                for d in scan_folder(folder)}
+    used, out = set(), []
+    for token in subjects:
+        named = re.compile(rf"(?<!\w){re.escape(token)}(?!\w)", re.IGNORECASE)
+        pool = [(len(present.get(name, [])) if token in present.get(name, []) else 99, name)
+                for name, cap in captions.items()
+                if cap and name not in used and named.search(cap)]
+        if not pool:
+            continue
+        fewest = min(n for n, _ in pool)
+        name = rng.choice(sorted(name for n, name in pool if n == fewest))
+        used.add(name)
+        out.append(captions[name])
+    return out
