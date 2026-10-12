@@ -219,3 +219,12 @@ def test_the_app_labels_its_own_keys_as_animaforge(tmp_path):
     meta = metadata.build_metadata("Toshi", str(tmp_path), trigger_word="toshi")
     assert "animaforge_version" in meta and meta["animaforge_trigger"] == "toshi"
     assert not any(k.startswith("krea_forge_") for k in meta)
+
+
+def test_metadata_reports_the_rank_the_run_trains_at(tmp_path):
+    from core.engines.onetrainer.metadata import build_metadata
+    from core.engines.onetrainer.preset import load_template
+    t = load_template()
+    meta = build_metadata("x", str(tmp_path))
+    assert meta["ss_network_dim"] == str(t["lora_rank"]) == "32"
+    assert meta["ss_network_alpha"] == "32.0"

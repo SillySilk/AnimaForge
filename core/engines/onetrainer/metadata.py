@@ -172,6 +172,8 @@ def build_metadata(lora_name: str, dataset_dir: str, trigger_word: str = "",
     plan = plan or {}
     words = trained_words(dataset_dir, trigger_word, quality_prefix)
     stamp = (when or datetime.now()).replace(microsecond=0).isoformat()
+    from core.engines.onetrainer.preset import load_template
+    _template = load_template()
     meta = {
         # SAI model spec — the block ComfyUI and Forge look for first.
         "modelspec.sai_model_spec": "1.0.0",
@@ -184,8 +186,8 @@ def build_metadata(lora_name: str, dataset_dir: str, trigger_word: str = "",
         "ss_output_name": lora_name,
         "ss_base_model_version": "krea/Krea-2-Raw",
         "ss_network_module": "networks.lora",
-        "ss_network_dim": "16",
-        "ss_network_alpha": "16.0",
+        "ss_network_dim": str(_template["lora_rank"]),
+        "ss_network_alpha": str(float(_template["lora_alpha"])),
         "ss_tag_frequency": json.dumps(tag_frequency(dataset_dir),
                                        ensure_ascii=False),
         "ss_num_train_images": str(int(image_count or 0)),

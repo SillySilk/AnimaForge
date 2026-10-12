@@ -19,6 +19,10 @@ in the same pass:
                                   key, so the loader applied nothing.
   lora_alpha       1.0 -> 16.0    alpha == rank, so the applied scale is 1.0
                                   whether or not the loader honours alpha.
+                                  (Rank and alpha both 32 since 2026-10-12: a
+                                  Krea 2 guide measured rank 16 at ~60% likeness
+                                  by 1000 steps and rank 32 clearly better by 1500,
+                                  and multi-person cast sets need the room.)
   safeguard_warmup false -> true  this preset always warms up; Prodigy needs this
                                   on or the D estimate is distorted over exactly
                                   the steps that set the rate for the whole run.

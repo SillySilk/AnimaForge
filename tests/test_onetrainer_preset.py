@@ -18,7 +18,7 @@ def test_recipe_guard_locks_the_proven_knobs():
     assert t["transformer"]["gradient_checkpointing"] is True
     assert t["batch_size"] == 2
     assert t["resolution"] == "512"
-    assert t["lora_rank"] == 16
+    assert t["lora_rank"] == 32
     assert t["output_model_format"] == "COMFY_LORA"
     assert t["optimizer"]["optimizer"] == "PRODIGY"
     assert t["cloud"]["enabled"] is False
