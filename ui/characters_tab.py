@@ -87,7 +87,23 @@ class CharactersTab(QWidget):
             data = (naming.write_characters_from_names(self._folder_path, names) if names
                     else characters_mod.load(self._folder_path))
             self._set_anchor_text(data.style_anchor)
-        self._render()
+        self._render_when_seen()
+
+    def _render_when_seen(self):
+        """Render now if the tab is on screen; otherwise on its next show. Building
+        every bundle's thumbnails takes ~10 s on a 300-image set, and a Dataset-tab
+        delete calls set_dataset each time."""
+        if self.isVisible():
+            self._render()
+            self._stale = False
+        else:
+            self._stale = True
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if getattr(self, "_stale", False):
+            self._stale = False
+            self._render()
 
     def reload_characters(self):
         """Re-render from disk after the validator or Dataset tab changed things."""

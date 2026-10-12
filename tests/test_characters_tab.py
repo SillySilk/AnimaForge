@@ -35,6 +35,7 @@ def test_set_dataset_renders_solo_and_combined_bundles(tmp_path: Path):
     _make_images(tmp_path, ["Homer_001_Character.png", "Homer_002_Character.png",
                             "Homer-Marge_003_Character.png", "Lisa_001_Character.png"])
     tab = CharactersTab()
+    tab.show()
     tab.set_dataset(str(tmp_path))
     titles = _bundle_titles(tab)
     assert "Homer" in titles
@@ -64,6 +65,7 @@ def test_set_dataset_preserves_existing_style_anchor(tmp_path: Path):
 def test_needs_naming_bundle_only_when_nonconforming(tmp_path: Path):
     _make_images(tmp_path, ["Homer_001_Character.png", "scene.png"])
     tab = CharactersTab()
+    tab.show()
     tab.set_dataset(str(tmp_path))
     assert any("Needs naming" in t for t in _bundle_titles(tab))
 
@@ -90,3 +92,14 @@ def test_auto_detect_from_filenames_returns_subject_count(tmp_path: Path):
     tab = CharactersTab()
     tab.set_dataset(str(tmp_path))
     assert tab.auto_detect_from_filenames() == 3
+
+
+def test_hidden_tab_defers_bundles_until_shown(tmp_path: Path):
+    # A Dataset-tab delete calls set_dataset every time; rebuilding every bundle's
+    # thumbnails while the tab is off screen made each delete take seconds.
+    _make_images(tmp_path, ["Homer_001_Character.png"])
+    tab = CharactersTab()
+    tab.set_dataset(str(tmp_path))
+    assert _bundle_titles(tab) == []
+    tab.show()
+    assert "Homer" in _bundle_titles(tab)
