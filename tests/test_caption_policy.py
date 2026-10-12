@@ -113,7 +113,7 @@ def test_nonempty_survives_a_non_utf8_sidecar(tmp_path):
 def test_stage_and_tag_noop_when_nothing_to_do(tmp_path, monkeypatch):
     import scripts.wd14_tag_run as w
     called = []
-    monkeypatch.setattr(w.subprocess, "call", lambda *a, **k: called.append(a) or 0)
+    monkeypatch.setattr(w.subprocess, "Popen", lambda *a, **k: called.append(a))
     assert w.stage_and_tag(str(tmp_path), [], ["python", "x"]) == 0
     assert called == []          # the tagger subprocess never launched
 
@@ -123,20 +123,56 @@ def test_stage_and_tag_copies_tags_back(tmp_path, monkeypatch):
     img = tmp_path / "a.png"
     img.write_bytes(b"\x89PNG\r\n\x1a\n")
 
-    def fake_call(argv):
-        stage = Path(argv[-1])
-        (stage / "a.tags").write_text("1girl, solo", encoding="utf-8")
-        return 0
-
-    monkeypatch.setattr(w.subprocess, "call", fake_call)
-    assert w.stage_and_tag(str(tmp_path), [str(img)], ["python", "x"]) == 0
+    monkeypatch.setattr(w.subprocess, "Popen", _FakeTagger(["a"], 0))
+    assert w.stage_and_tag(str(tmp_path), [str(img)], ["python", "x"], poll=0) == 0
     assert (tmp_path / "a.tags").read_text(encoding="utf-8") == "1girl, solo"
+
+
+def test_stage_and_tag_lands_each_tag_while_the_tagger_runs(tmp_path, monkeypatch, capsys):
+    import scripts.wd14_tag_run as w
+    imgs = []
+    for n in ("a", "b"):
+        (tmp_path / f"{n}.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        imgs.append(str(tmp_path / f"{n}.png"))
+    fake = _FakeTagger(["a", "b"], 0, polls_per_file=3)
+    landed_mid_run = []
+    fake.on_poll = lambda: landed_mid_run.append((tmp_path / "a.tags").exists())
+    monkeypatch.setattr(w.subprocess, "Popen", fake)
+    assert w.stage_and_tag(str(tmp_path), imgs, ["python", "x"], poll=0) == 0
+    assert any(landed_mid_run)                     # a.tags reached the folder mid-run
+    out = capsys.readouterr().out
+    assert "[Tagger] (1/2) a.png: 1girl, solo" in out
+    assert "[Tagger] (2/2) b.png: 1girl, solo" in out
+
+
+class _FakeTagger:
+    """Stands in for subprocess.Popen: writes one .tags per few polls, then exits."""
+
+    def __init__(self, stems, rc, polls_per_file=1):
+        self._stems, self._rc, self._every = list(stems), rc, polls_per_file
+        self._polls = 0
+        self.on_poll = lambda: None
+        self.returncode = None
+
+    def __call__(self, argv):
+        self._stage = Path(argv[-1])
+        return self
+
+    def poll(self):
+        self.on_poll()
+        self._polls += 1
+        if self._stems and self._polls % self._every == 0:
+            stem = self._stems.pop(0)
+            (self._stage / f"{stem}.tags").write_text("1girl, solo", encoding="utf-8")
+        if not self._stems and self._polls > self._every * 3:
+            self.returncode = self._rc
+        return self.returncode
 
 
 def test_stage_and_tag_propagates_tagger_failure(tmp_path, monkeypatch):
     import scripts.wd14_tag_run as w
     img = tmp_path / "a.png"
     img.write_bytes(b"\x89PNG\r\n\x1a\n")
-    monkeypatch.setattr(w.subprocess, "call", lambda argv: 1)
-    assert w.stage_and_tag(str(tmp_path), [str(img)], ["python", "x"]) == 1
+    monkeypatch.setattr(w.subprocess, "Popen", _FakeTagger([], 1))
+    assert w.stage_and_tag(str(tmp_path), [str(img)], ["python", "x"], poll=0) == 1
     assert not (tmp_path / "a.tags").exists()

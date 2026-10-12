@@ -33,7 +33,7 @@ from core.caption_progress import parse_progress
 from core.caption_rules import parse_rules
 from core.caption_runner import CaptionJob, CaptionRunner
 from core.dataset_manager import (
-    NL_EXT, SUPPORTED_EXTENSIONS, apply_prefix, combine_all, read_sidecar, save_caption,
+    NL_EXT, SUPPORTED_EXTENSIONS, TAGS_EXT, apply_prefix, combine_all, read_sidecar, save_caption,
     scan_folder,
 )
 from core.tagger import TaggerProcess, TAGGER_MODELS, read_tagger_defaults
@@ -297,9 +297,9 @@ class ImageCard(QWidget):
         """Emit signal to request deletion of this image."""
         self.image_deleted.emit(self._image_path)
 
-    def show_description(self, text: str):
-        """A description (.nl) written mid-run, shown before Combine turns it into the
-        training .txt, so a bad structure is caught while Stop can still save the rest."""
+    def show_draft(self, text: str):
+        """Tags or a description written mid-run, shown before Combine turns them into
+        the training .txt, so a bad caption is caught while Stop can still save the rest."""
         if (text or "").strip():
             self._set_preview_text(text)
             self.set_status("partial")
@@ -1322,12 +1322,16 @@ class DatasetTab(QWidget):
         self._caption_bar.setValue(done)
         self._caption_file.setText(filename)
         self._set_processing_frame(filename)
-        # A describe tick means that image's description just landed: show it now
-        # rather than after Combine.
-        card = self._cards_by_name.get(filename)
-        if card is not None and step_key == "describe":
-            card.show_description(read_sidecar(card.image_path, NL_EXT))
+        self._show_landed_draft(step_key, filename)
         self.caption_tick.emit(phase, done, total)
+
+    def _show_landed_draft(self, step_key, filename: str):
+        """A tag or describe tick means that image's sidecar just landed: show it on its
+        card now rather than after Combine."""
+        card = self._cards_by_name.get(filename)
+        ext = {"tag": TAGS_EXT, "describe": NL_EXT}.get(step_key)
+        if card is not None and ext:
+            card.show_draft(read_sidecar(card.image_path, ext))
 
     def _on_stage_started(self, stage: str):
         """A step is launching. Its model can take a minute to load before the first
@@ -1754,6 +1758,7 @@ class DatasetTab(QWidget):
             self._caption_bar.setValue(tick.done)
             self._caption_file.setText(tick.filename)
             self._set_processing_frame(tick.filename)
+            self._show_landed_draft(_PHASE_TO_STEP.get(tick.phase), tick.filename)
             self.caption_tick.emit(tick.phase, tick.done, tick.total)
 
     def _on_tagger_finished(self, success: bool):

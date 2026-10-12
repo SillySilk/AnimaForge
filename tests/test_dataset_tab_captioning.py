@@ -652,7 +652,7 @@ def test_describe_dialog_cancel_launches_nothing(tmp_path, monkeypatch):
 
 def test_card_shows_a_fresh_description_and_marks_it_partial():
     c = _card()
-    c.show_description("a woman in a red coat")
+    c.show_draft("a woman in a red coat")
     assert c._caption_preview.text() == "a woman in a red coat"
     assert c._status == "partial"
 
@@ -660,7 +660,7 @@ def test_card_shows_a_fresh_description_and_marks_it_partial():
 def test_blank_description_leaves_the_card_alone():
     c = _card()
     before = c._caption_preview.text()
-    c.show_description("   ")
+    c.show_draft("   ")
     assert c._caption_preview.text() == before
 
 
@@ -675,15 +675,16 @@ def test_describe_tick_puts_that_images_description_on_its_card(tmp_path):
     assert card._caption_preview.text() == "a man on a bench"
 
 
-def test_tag_tick_does_not_touch_the_card(tmp_path):
+def test_tag_tick_puts_that_images_tags_on_its_card(tmp_path):
     from ui.dataset_tab import DatasetTab
     (tmp_path / "a.png").write_bytes(b"x")
-    (tmp_path / "a.nl").write_text("a man on a bench", encoding="utf-8")
+    (tmp_path / "a.tags").write_text("1boy, glasses, plaid shirt", encoding="utf-8")
     t = DatasetTab()
-    card = ImageCard(str(tmp_path / "a.png"), str(tmp_path / "a.txt"), "orig", 0)
+    card = ImageCard(str(tmp_path / "a.png"), str(tmp_path / "a.txt"), "", 0)
     t._cards_by_name = {"a.png": card}
     t._runner.tick.emit("Tag", 1, 1, "a.png")
-    assert card._caption_preview.text() == "orig"
+    assert card._caption_preview.text() == "1boy, glasses, plaid shirt"
+    assert card._status == "partial"
 
 
 def test_stage_start_says_started_before_the_first_tick():
