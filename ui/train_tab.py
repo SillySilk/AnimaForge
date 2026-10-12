@@ -2067,7 +2067,7 @@ class TrainTab(QWidget):
                 self._session.cancel()
                 return
             self._trainer.stop()
-            self._on_log_line("[AnimaForge] Training stopped by user.")
+            self._on_log_line("[Lora Forge] Training stopped by user.")
             self._on_training_finished(False)
 
     # ------------------------------------------------------------------
@@ -2382,7 +2382,7 @@ class TrainTab(QWidget):
         from core.af_log import RunLog
         from core.version import __version__
         self._run_log = RunLog()
-        self._run_log.open(f"AnimaForge v{__version__} — training run started")
+        self._run_log.open(f"Lora Forge v{__version__} — training run started")
         self.status_message.emit("Training started…")
         self._last_preview = []
         self._preview_timer.start()
@@ -2419,7 +2419,7 @@ class TrainTab(QWidget):
                     or self._app_settings.get("forge_auto_test")):
                 # The Forge LoRA folder and test checkpoint are set up for Anima; a Krea 2
                 # LoRA dropped there, or rendered on an Anima checkpoint, is wrong.
-                self._on_log_line("[AnimaForge] Krea 2 LoRA not sent to Forge automatically "
+                self._on_log_line("[Lora Forge] Krea 2 LoRA not sent to Forge automatically "
                                   "(auto-deliver and auto-test are set up for Anima). "
                                   "Deliver it from Home when you want it in Forge.")
             elif self._app_settings:
@@ -2436,8 +2436,8 @@ class TrainTab(QWidget):
             run_log = getattr(self, "_run_log", None)
             if run_log is not None:
                 self._log_edit.append(
-                    f"\n[AnimaForge] Full log of this run saved to {run_log.path}"
-                    "\n[AnimaForge] Attach that file when reporting a problem — it "
+                    f"\n[Lora Forge] Full log of this run saved to {run_log.path}"
+                    "\n[Lora Forge] Attach that file when reporting a problem — it "
                     "holds the launch command and the error above."
                 )
             # A state was just written before the process exited. Surface it and
@@ -2587,7 +2587,7 @@ class TrainTab(QWidget):
             # to be called, so it is called by the name the user already typed.
             # (Forge It names it before captioning, so the captions carry it too.)
             self._trigger_word = trigger_from_lora_name(self._lora_name_edit.text())
-            notes.append(f"[AnimaForge] No trigger word set — using {self._trigger_word!r}.")
+            notes.append(f"[Lora Forge] No trigger word set — using {self._trigger_word!r}.")
         if not self._check_empty_captions(interactive=confirm):
             return
         rd, msg = self.build_run_definition()
@@ -2616,13 +2616,13 @@ class TrainTab(QWidget):
             self._on_log_line(line)
         try:
             for advice in engine.advisories(rd.dataset_folder, rd.trigger_word):
-                self._on_log_line(f"[AnimaForge] {advice}")
+                self._on_log_line(f"[Lora Forge] {advice}")
         except Exception as e:  # advice is optional; a failure here never blocks a run
-            self._on_log_line(f"[AnimaForge] Pre-run checks could not run: {e}")
+            self._on_log_line(f"[Lora Forge] Pre-run checks could not run: {e}")
         try:
             started = session.start(params)    # a refusal arrives via failed()
         except Exception as e:
-            self._on_log_line(f"[AnimaForge] The run could not start: {e}")
+            self._on_log_line(f"[Lora Forge] The run could not start: {e}")
             self._end_ot(False)
             return
         if started and self._session is session:
@@ -2667,20 +2667,20 @@ class TrainTab(QWidget):
             return
         self._ot_output = path
         for note in self._session.notes():
-            self._on_log_line(f"[AnimaForge] {note}")
-        self._on_log_line(f"[AnimaForge] Finished: {path}")
+            self._on_log_line(f"[Lora Forge] {note}")
+        self._on_log_line(f"[Lora Forge] Finished: {path}")
         self._end_ot(True)
 
     def _on_ot_failed(self, message: str):
         if self._session is None:
             return
-        self._on_log_line(f"[AnimaForge] {message}")
+        self._on_log_line(f"[Lora Forge] {message}")
         self._end_ot(False)
 
     def _on_ot_canceled(self):
         if self._session is None:
             return
-        self._on_log_line("[AnimaForge] Training stopped by user.")
+        self._on_log_line("[Lora Forge] Training stopped by user.")
         self._end_ot(False)
 
     def _samples_dir(self) -> str:

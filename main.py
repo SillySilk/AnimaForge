@@ -29,7 +29,7 @@ def build_app(argv=None):
 
     app = QApplication(sys.argv if argv is None else argv)
     app.setApplicationName("AnimaForge")
-    app.setApplicationDisplayName("Anima Forge LoRA Trainer")
+    app.setApplicationDisplayName("Lora Forge")
     app.setOrganizationName("AnimaForge")
     app.setOrganizationDomain("animaforge.local")
 

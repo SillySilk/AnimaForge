@@ -15,7 +15,7 @@ def test_lines_with_version_and_commits():
         "remote_version": "2.6.0", "local_version": "2.5.0",
         "ahead_by": 12, "latest_subject": "fix: batch icons", "head_sha": "f" * 40})
     body = "\n".join(lines)
-    assert "AnimaForge v2.6.0 is available." in body
+    assert "Lora Forge v2.6.0 is available." in body
     assert "You have v2.5.0" in body and "12 commits behind" in body
     assert "Latest: fix: batch icons" in body
     assert "untouched" in body
@@ -35,6 +35,6 @@ def test_lines_version_only_fallback():
         "remote_version": "2.6.0", "local_version": "2.5.0",
         "ahead_by": None, "latest_subject": None, "head_sha": None})
     body = "\n".join(lines)
-    assert "AnimaForge v2.6.0 is available." in body
+    assert "Lora Forge v2.6.0 is available." in body
     assert "commits behind" not in body        # ahead_by is None
     assert "Latest:" not in body

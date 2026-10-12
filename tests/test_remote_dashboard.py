@@ -303,7 +303,7 @@ def _post(url, body=None, headers=None):
 
 def test_page_and_state_load(site):
     base, *_ = site
-    assert b"Anima Forge Remote" in _get(base + "/")[2]
+    assert b"Lora Forge Remote" in _get(base + "/")[2]
     st = json.loads(_get(base + "/api/state")[2])
     assert st["running"] is False and st["runs"] == []
 

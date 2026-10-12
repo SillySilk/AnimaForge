@@ -134,7 +134,7 @@ def failure_hint(line: str):
     """
     low = (line or "").lower()
     if "libuv" in low and "without libuv" in low:
-        return ("[AnimaForge] That means this PyTorch build has no libuv support, and "
+        return ("[Lora Forge] That means this PyTorch build has no libuv support, and "
                 "the run reached torch's multi-process launcher, which needs it. "
                 "AnimaForge pins accelerate to a single-process config to stay off that "
                 "path, so seeing this means the pin did not take — please report it "
@@ -334,8 +334,8 @@ class TrainingProcess(QObject):
         self._arm_safety()
         self._process.start(program, args)
         self.training_started.emit()
-        self.log_line.emit(f"[AnimaForge] Launching: {program} {' '.join(args)}")
-        self.log_line.emit(f"[AnimaForge] {self._libuv_log_status()}")
+        self.log_line.emit(f"[Lora Forge] Launching: {program} {' '.join(args)}")
+        self.log_line.emit(f"[Lora Forge] {self._libuv_log_status()}")
 
     def stop(self):
         """Terminate the running training process (a user stop: never judged)."""
@@ -412,7 +412,7 @@ class TrainingProcess(QObject):
             if found:
                 from core.engines.onetrainer import verify
                 self._safety_found = found
-                self.log_line.emit(f"[AnimaForge] {verify.describe_divergence(found)}")
+                self.log_line.emit(f"[Lora Forge] {verify.describe_divergence(found)}")
                 # Out of this handler: stopping waits for the process, and its
                 # finished() can start the next queued run.
                 QTimer.singleShot(0, self._safety_stop)
@@ -429,7 +429,7 @@ class TrainingProcess(QObject):
         # code is the single line a bug report most needs — emitting it afterwards
         # dropped it from the file.
         status = "completed successfully" if success else f"finished with exit code {exit_code}"
-        self.log_line.emit(f"[AnimaForge] Training process {status}.")
+        self.log_line.emit(f"[Lora Forge] Training process {status}.")
         self.training_finished.emit(success)
 
     def _parse_progress(self, line: str):
@@ -485,7 +485,7 @@ class TrainingProcess(QObject):
         if found is None and exit_code == 0 and self._watch is not None:
             found = ks.verdict(self._watch.final_losses(), self._watch.total)
         if found is None and exit_code != 0:
-            self.log_line.emit(f"[AnimaForge] Training process finished with exit code {exit_code}.")
+            self.log_line.emit(f"[Lora Forge] Training process finished with exit code {exit_code}.")
             self.training_finished.emit(False)
             return
         note = ""
@@ -494,19 +494,19 @@ class TrainingProcess(QObject):
             self.last_shipped_epoch = int(_epoch or 0)
         problem = ks.final_problem(run_dir, name)
         if problem:
-            self.log_line.emit(f"[AnimaForge] {problem}")
-            self.log_line.emit("[AnimaForge] Training process finished, but its LoRA is not usable.")
+            self.log_line.emit(f"[Lora Forge] {problem}")
+            self.log_line.emit("[Lora Forge] Training process finished, but its LoRA is not usable.")
             self.training_finished.emit(False)
             return
         ks.prune(run_dir, name, safety["keep_last"], since=self._since)
         if note:
             self.last_safety_note = note
-            self.log_line.emit(f"[AnimaForge] {note}")
+            self.log_line.emit(f"[Lora Forge] {note}")
             self.safety_note.emit(note)
             self.log_line.emit(
-                "[AnimaForge] Training process stopped early by run safety."
+                "[Lora Forge] Training process stopped early by run safety."
                 if found.get("kind") == "diverged" else
-                "[AnimaForge] Training process finished; run safety shipped an earlier snapshot.")
+                "[Lora Forge] Training process finished; run safety shipped an earlier snapshot.")
         else:
-            self.log_line.emit("[AnimaForge] Training process completed successfully.")
+            self.log_line.emit("[Lora Forge] Training process completed successfully.")
         self.training_finished.emit(True)

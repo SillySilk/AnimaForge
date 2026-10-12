@@ -61,7 +61,7 @@ def _compose_lines(payload) -> list:
     remote __version__ actually moved; commits-behind only when ahead_by is known."""
     lines = []
     if payload.get("remote_version"):
-        lines.append(f"AnimaForge v{payload['remote_version']} is available.")
+        lines.append(f"Lora Forge v{payload['remote_version']} is available.")
     have = f"You have v{payload['local_version']}"
     if payload.get("ahead_by"):
         have += f" — {payload['ahead_by']} commits behind."
@@ -118,7 +118,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Anima Forge LoRA Trainer with Auto-Captioning")
+        self.setWindowTitle("Lora Forge")
         self.setMinimumSize(1100, 720)
         self.resize(1280, 800)
         self._update_busy = False
@@ -201,7 +201,7 @@ class MainWindow(QMainWindow):
         self._emblem.setStyleSheet("background-color: transparent;")
         brand_layout.addWidget(self._emblem)
 
-        self._wordmark = QLabel("AnimaForge")
+        self._wordmark = QLabel("Lora Forge")
         self._wordmark.setObjectName("af_wordmark")
         self._wordmark.setAlignment(Qt.AlignHCenter)
         brand_layout.addWidget(self._wordmark)
@@ -713,7 +713,7 @@ class MainWindow(QMainWindow):
         foreign = cp.scan(rd.dataset_folder).foreign
         if foreign and QMessageBox.question(
                 self, "Compare caption styles",
-                f"{foreign} caption(s) in this folder were not written by Anima Forge "
+                f"{foreign} caption(s) in this folder were not written by Lora Forge "
                 "(hand-written or from another tool). Each comparison run rebuilds every "
                 "caption in its own style, so those will be replaced. Existing prose "
                 "descriptions and tags are kept. Continue?",
@@ -1238,7 +1238,7 @@ class MainWindow(QMainWindow):
         self._ver_label.setText(f"v{__version__} · UPDATE AVAILABLE")
         if QMessageBox.question(
             self, "Update Available",
-            f"AnimaForge v{remote} is available (you have v{__version__}).\n\n"
+            f"Lora Forge v{remote} is available (you have v{__version__}).\n\n"
             "Download and update now? Your sets, settings, datasets, and models "
             "are untouched.",
         ) != QMessageBox.Yes:
@@ -1280,7 +1280,7 @@ class MainWindow(QMainWindow):
                  "launch." if req_changed else "")
         QMessageBox.information(
             self, "Update Applied",
-            f"AnimaForge v{version} is in place.\nRestart AnimaForge to finish.{extra}")
+            f"Lora Forge v{version} is in place.\nRestart Lora Forge to finish.{extra}")
 
     def _on_startup_update_applied(self, req_changed: bool, error: str):
         self._update_busy = False
@@ -1296,7 +1296,7 @@ class MainWindow(QMainWindow):
                  "launch." if req_changed else "")
         QMessageBox.information(
             self, "Update Applied",
-            f"AnimaForge updated to the latest main.\nRestart AnimaForge to finish.{extra}")
+            f"Lora Forge updated to the latest main.\nRestart Lora Forge to finish.{extra}")
 
     # ---- self-update (silent startup check) ----
 

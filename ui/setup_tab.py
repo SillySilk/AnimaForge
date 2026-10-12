@@ -200,7 +200,7 @@ class SetupTab(QWidget):
         sd_layout.addWidget(sd_hint)
         sd_row = QHBoxLayout()
         self._sdscripts_edit = QLineEdit()
-        self._sdscripts_edit.setPlaceholderText("e.g. .../AnimaForge/sd-scripts")
+        self._sdscripts_edit.setPlaceholderText("e.g. .../Lora Forge/sd-scripts")
         self._sdscripts_status = self._make_status_dot()
         sd_browse = QPushButton("Browse…")
         sd_browse.setFixedWidth(108)
@@ -303,8 +303,8 @@ class SetupTab(QWidget):
         libuv_layout.setSpacing(8)
         libuv_hint = QLabel(
             "Windows PyTorch builds without libuv can make training die at exit code 1 "
-            "before the first step. AnimaForge sets USE_LIBUV=0 automatically — unless "
-            "your own Windows environment already has a USE_LIBUV, which AnimaForge "
+            "before the first step. Lora Forge sets USE_LIBUV=0 automatically — unless "
+            "your own Windows environment already has a USE_LIBUV, which Lora Forge "
             "leaves alone by default. Use these if that's still causing crashes. "
             "(Runs are also pinned to a single-process launcher, which avoids the most "
             "common form of this crash on its own.)"
@@ -319,7 +319,7 @@ class SetupTab(QWidget):
         libuv_layout.addWidget(self._libuv_status_label)
 
         self._force_libuv_check = QCheckBox(
-            "Ignore my environment — always let AnimaForge set USE_LIBUV")
+            "Ignore my environment — always let Lora Forge set USE_LIBUV")
         libuv_layout.addWidget(self._force_libuv_check)
 
         libuv_btn_row = QHBoxLayout()
@@ -425,7 +425,7 @@ class SetupTab(QWidget):
         col.setSpacing(8)
         hint = QLabel(
             "Krea 2 LoRAs train in a stock OneTrainer install, driven in the background. "
-            "Point this at the folder holding its venv and scripts\\train.py — Anima Forge "
+            "Point this at the folder holding its venv and scripts\\train.py — Lora Forge "
             "never modifies it. Not needed for Anima.")
         hint.setObjectName("label_field")
         hint.setWordWrap(True)
@@ -647,7 +647,7 @@ class SetupTab(QWidget):
         text = libuv_status(force=self._app.get("force_use_libuv_off"))
         user_val = windows_user_env_libuv()
         if user_val is None and windows_system_env_libuv() is not None:
-            text += ("  Found at System scope — AnimaForge can only clear the User "
+            text += ("  Found at System scope — Lora Forge can only clear the User "
                      "scope; remove it via System Properties.")
         self._libuv_status_label.setText(text)
         self._clear_libuv_btn.setEnabled(user_val is not None)
@@ -660,13 +660,13 @@ class SetupTab(QWidget):
             self, "Clear USE_LIBUV",
             f"Delete USE_LIBUV={current} from your Windows user environment?\n\n"
             "New processes elsewhere will see the change immediately — restart "
-            "AnimaForge for it to apply here.",
+            "Lora Forge for it to apply here.",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
             return
         if clear_windows_user_env_libuv():
             self._torch_log.append(
                 f"Cleared USE_LIBUV={current} from your Windows user environment. "
-                "Restart AnimaForge for it to take effect here.")
+                "Restart Lora Forge for it to take effect here.")
         else:
             self._torch_log.append(
                 "Could not clear USE_LIBUV from Windows — check your permissions and try again.")
@@ -1475,7 +1475,7 @@ class SetupTab(QWidget):
         root = app_root()
 
         # sd-scripts: this install's bundled copy wins over an invalid path OR a path
-        # that leaked from another AnimaForge copy on the same machine. A user's own
+        # that leaked from another Lora Forge copy on the same machine. A user's own
         # external sd-scripts clone is still honored.
         default_sd = str(root / "sd-scripts")
         saved_sd = from_portable(self._settings.value("sdscripts_path", "", type=str))
@@ -1501,7 +1501,7 @@ class SetupTab(QWidget):
 
     def _show_install_dialog(self):
         dlg = QDialog(self)
-        dlg.setWindowTitle("AnimaForge Setup Instructions")
+        dlg.setWindowTitle("Lora Forge Setup Instructions")
         dlg.setMinimumWidth(620)
         layout = QVBoxLayout(dlg)
         layout.setSpacing(12)

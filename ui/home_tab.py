@@ -757,7 +757,7 @@ class HomeTab(QWidget):
         updates.setObjectName("af_btn_ghost")
         updates.setMinimumHeight(34)
         updates.setCursor(Qt.PointingHandCursor)
-        updates.setToolTip("Check GitHub for a newer AnimaForge and update in place")
+        updates.setToolTip("Check GitHub for a newer Lora Forge and update in place")
         updates.clicked.connect(self.update_check_requested.emit)
         row.addWidget(updates)
         detect = QPushButton("Auto-detect models")
@@ -801,7 +801,7 @@ class HomeTab(QWidget):
         name = (self._name_edit.text() or "animaforge").strip() or "animaforge"
         path, _ = QFileDialog.getSaveFileName(
             self, "Save Project", f"{name}.forge.json",
-            "AnimaForge Project (*.forge.json *.json)")
+            "Lora Forge Project (*.forge.json *.json)")
         if not path:
             return
         data = {
@@ -819,7 +819,7 @@ class HomeTab(QWidget):
     def _load_project(self):
         path, _ = QFileDialog.getOpenFileName(
             self, "Load Project", "",
-            "AnimaForge Project (*.forge.json *.json)")
+            "Lora Forge Project (*.forge.json *.json)")
         if not path:
             return
         try:

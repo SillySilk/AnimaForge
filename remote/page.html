@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Anima Forge Remote</title>
+<title>Lora Forge Remote</title>
 <style>
 :root { --bg:#141312; --panel:#1d1b19; --line:#2c2925; --text:#e9e0cc; --mute:#9a907e;
         --gold:#d4af37; --ok:#7fb069; --bad:#d0613f; --run:#5fa8d3; }
@@ -67,7 +67,7 @@ svg.loss { width:100%; height:140px; display:block; background:#0d0c0b; border:1
 </head>
 <body>
 <header>
-  <h1>Anima Forge · Remote</h1>
+  <h1>Lora Forge · Remote</h1>
   <span id="status" class="pill">connecting…</span>
   <span class="grow"></span>
   <button id="start">Start queue</button>
@@ -157,10 +157,10 @@ function renderNotices() {
   const box = $("notices"); box.innerHTML = "";
   if (state.app_open) {
     box.insertAdjacentHTML("beforeend",
-      `<div class="notice bad"><p>Anima Forge is open on the PC. The queue can't change or start while it is.</p>
+      `<div class="notice bad"><p>Lora Forge is open on the PC. The queue can't change or start while it is.</p>
        <button class="ghost" id="close-app">Close it from here</button></div>`);
     $("close-app").onclick = async () => {
-      if (!confirm("Close Anima Forge on the PC? Anything not saved in it is lost.")) return;
+      if (!confirm("Close Lora Forge on the PC? Anything not saved in it is lost.")) return;
       toast((await post("/api/close-app")).message); refresh();
     };
   }
@@ -297,7 +297,7 @@ async function loadSets() {
   const sets = await getJSON("/api/sets");
   $("template").innerHTML = sets.length ? `<option value="">Choose a saved set…</option>` + sets.map(s =>
     `<option value="${esc(s.name)}">${esc(s.name)} — ${esc(s.model_name)}, ${esc(s.subject_type)}</option>`).join("")
-    : `<option value="">No saved sets yet — save one in Anima Forge first</option>`;
+    : `<option value="">No saved sets yet — save one in Lora Forge first</option>`;
 }
 
 refresh(); loadSets(); browse("");

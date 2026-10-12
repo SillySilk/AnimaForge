@@ -1,4 +1,4 @@
-"""Remote dashboard: run Anima Forge's batch queue from another device.
+"""Remote dashboard: run Lora Forge's batch queue from another device.
 
 A small web server meant to be reached privately over Tailscale (tailscale serve
 proxies HTTPS to it). It queues runs on a folder of images using a saved set's
@@ -83,7 +83,7 @@ class Dashboard:
         if runners:
             return "The queue is running. Stop it first."
         if gui:
-            return "Anima Forge is open on the PC. Close it first (it holds the queue)."
+            return "Lora Forge is open on the PC. Close it first (it holds the queue)."
         return ""
 
     def add(self, body: dict):
@@ -129,7 +129,7 @@ class Dashboard:
                     p.kill()
                 except Exception:
                     pass
-            return (True, "Closed Anima Forge.") if gui else (False, "It wasn't open.")
+            return (True, "Closed Lora Forge.") if gui else (False, "It wasn't open.")
 
 
 def make_handler(dash: Dashboard, allowed_hosts, refresh_host=None):
@@ -298,7 +298,7 @@ def main():
     host = tailscale_name()
     httpd = ThreadingHTTPServer(("127.0.0.1", PORT),
                                 make_handler(Dashboard(paths, thumbs), {host}, tailscale_name))
-    print(f"Anima Forge remote dashboard on http://127.0.0.1:{PORT}"
+    print(f"Lora Forge remote dashboard on http://127.0.0.1:{PORT}"
           + (f" and {host}" if host else ""), file=sys.stderr)
     httpd.serve_forever()
 

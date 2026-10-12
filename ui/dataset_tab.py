@@ -68,14 +68,14 @@ def conflict_text(state) -> str:
     """The warning line for a folder that already holds captions. Pure — no Qt.
 
     `state.foreign` sharpens the wording only when it is non-zero: when every
-    existing caption is AnimaForge's own work (foreign == 0), "not written by
-    AnimaForge" would be alarmist and wrong.
+    existing caption is Lora Forge's own work (foreign == 0), "not written by
+    Lora Forge" would be alarmist and wrong.
     """
     n = len(state.captioned)
     todo = len(state.partial) + len(state.untouched)
     lead = f"⚠ {n} image{'s' if n != 1 else ''} already have captions"
     if state.foreign:
-        lead += f" — {state.foreign} of them were not written by AnimaForge"
+        lead += f" — {state.foreign} of them were not written by Lora Forge"
     return f"{lead}.\nRunning will overwrite them. Keeping them will caption {todo} instead."
 
 

@@ -277,7 +277,7 @@ def test_conflict_text_names_foreign_captions():
                             untouched=["u"] * 33, foreign=47)
     msg = conflict_text(st)
     assert "47" in msg
-    assert "not written by AnimaForge" in msg
+    assert "not written by Lora Forge" in msg
 
 
 def test_conflict_text_omits_foreign_wording_when_captions_are_ours():
@@ -287,7 +287,7 @@ def test_conflict_text_omits_foreign_wording_when_captions_are_ours():
                             untouched=["u"] * 33, foreign=0)
     msg = conflict_text(st)
     assert "47" in msg
-    assert "not written by AnimaForge" not in msg
+    assert "not written by Lora Forge" not in msg
 
 
 def _write_conflicting_folder(tmp_path):

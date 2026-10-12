@@ -260,7 +260,7 @@ class ImageEditorDialog(QDialog):
 
     def _flush_sidecars(self):
         """Autosave .tags/.nl edits. A sidecar that never existed is not created for
-        empty text — datasets captioned outside AnimaForge stay sidecar-free."""
+        empty text — datasets captioned outside Lora Forge stay sidecar-free."""
         self._sidecar_timer.stop()
         c = self._current()
         if not c:
