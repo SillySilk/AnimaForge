@@ -1133,6 +1133,14 @@ class MainWindow(QMainWindow):
         steps = self._home_tab.character_steps()
         runs, skipped = character_runs.plan(
             main, data, character_runs.image_names(folder), steps)
+        uncaptioned = [r.character_token for r in runs if not caption and not r.character_source
+                       and not workflow.caption_state(r.dataset_folder).get("done")]
+        if uncaptioned:
+            QMessageBox.warning(
+                self, "Not captioned",
+                "These characters' own sets have no captions yet: " + ", ".join(uncaptioned)
+                + ". Use Caption + Train Style + Characters.")
+            return
         if not runs:
             QMessageBox.warning(
                 self, "No characters",

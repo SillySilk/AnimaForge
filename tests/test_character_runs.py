@@ -172,3 +172,43 @@ def test_caption_variant_accepts_an_uncaptioned_set_and_asks_about_captions(tmp_
     w._on_home_cast_run(True)
     assert [r.lora_name for r in queued] == ["Fam", "Fam_Jay"]
     assert queued[0].caption_policy == "ask" and started == [True]
+
+
+# ---- a character's own set beside the main one (Lora Builder export) ----------------
+
+def _own_set(main_folder: Path, token: str, n: int, captioned=False):
+    folder = main_folder.with_name(main_folder.name + "_characters") / token
+    _set(folder, {token: n}, captioned=captioned)
+    return folder
+
+
+def test_plan_prefers_the_characters_own_set(tmp_path):
+    data = _set(tmp_path / "set", {"Jay": 6, "Gloria": 2})
+    own = _own_set(tmp_path / "set", "Gloria", 40)
+    runs, skipped = CR.plan(_main(tmp_path / "set", tmp_path / "out"), data,
+                            CR.image_names(str(tmp_path / "set")))
+    by = {r.character_token: r for r in runs}
+    assert skipped == []
+    assert by["Gloria"].dataset_folder == str(own) and by["Gloria"].image_count == 40
+    assert by["Gloria"].character_source == ""                # trains (and captions) in place
+    assert by["Jay"].character_source == str(tmp_path / "set")  # no own set: main set's solo shots
+
+
+def test_batch_captions_a_characters_own_set_like_any_run(tmp_path, monkeypatch):
+    data = _set(tmp_path / "set", {"Jay": 1})
+    own = _own_set(tmp_path / "set", "Jay", 6)
+    (run,), _ = CR.plan(_main(tmp_path / "set", tmp_path / "out", caption_policy="keep"), data,
+                        CR.image_names(str(tmp_path / "set")))
+    runner = BatchRunner()
+    jobs = []
+    monkeypatch.setattr(runner._captioner, "start", lambda job: jobs.append(job) or True)
+    runner.start([run])
+    assert jobs[0].dataset_folder == str(own) and jobs[0].trigger == "Jay"
+
+
+def test_train_only_refuses_an_uncaptioned_own_set(tmp_path, monkeypatch):
+    _set(tmp_path / "set", {"Jay": 1})
+    _own_set(tmp_path / "set", "Jay", 6, captioned=False)
+    w, queued, started, warned = _window(monkeypatch, tmp_path / "set", tmp_path / "out")
+    w._on_home_cast_run(False)
+    assert queued == [] and "Jay" in warned[0]

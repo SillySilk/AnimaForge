@@ -103,8 +103,9 @@ class RunDefinition:
     compare_group: str = ""
     # Set when run safety shipped an earlier epoch of this (Anima) run; 0 = the end.
     shipped_epoch: int = 0
-    # A per-character run (core/character_runs.py): its folder is rebuilt from this
-    # source set's solo images of this token when the run starts. "" = a normal run.
+    # A per-character run (core/character_runs.py) for this token; "" = a normal run.
+    # With a source set, its folder is rebuilt from that set's solo images of the token
+    # when the run starts; without one it trains on its own set like any run.
     character_source: str = ""
     character_token: str = ""
     # Runtime
@@ -308,7 +309,7 @@ class BatchRunner(QObject):
         Must never call _advance() itself.
         """
         from core import caption_policy as cp, characters as ch
-        if run.character_token:
+        if run.character_source:
             return self._begin_character_run(run)
         # ASK never reaches a runner: it is a UI-only prompt. Unattended, KEEP is the
         # safe resolution — existing captions are never destroyed.

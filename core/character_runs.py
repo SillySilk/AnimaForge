@@ -2,8 +2,14 @@
 
 Each named character with enough solo images gets its own short run, trained on just
 those images under their name, to load beside the main LoRA and lock that person in.
-The character's folder is built from the main set's captions at the moment its run
-starts, so a run queued before captioning still trains on the finished captions.
+
+Where a character's images come from:
+- Its own set beside the main one, `<set>_characters/<name>/` (Lora Builder exports one
+  per cast member: half the cast set's solo shots, half fresh ones). The run trains on
+  that folder like any set, captioning it first.
+- Otherwise the main set's solo images. That folder is built from the main set's
+  captions when the run starts, so a run queued before captioning still trains on the
+  finished captions.
 Pure stdlib apart from the RunDefinition it copies.
 """
 import shutil
@@ -46,22 +52,34 @@ def run_name(main_name: str, token: str) -> str:
     return sanitize_name(f"{main_name}_{token}".replace(" ", "_"))
 
 
+def own_set(main_folder: str, token: str) -> Path:
+    """Where a character's own set sits beside the main set."""
+    main = Path(main_folder)
+    return main.with_name(main.name + "_characters") / token
+
+
 def plan(main_run, data, names, steps: int = DEFAULT_STEPS):
     """The character runs to queue after `main_run`, and who was skipped.
 
-    Returns (runs, skipped) where skipped is [(token, solo count)] for characters
+    Returns (runs, skipped) where skipped is [(token, image count)] for characters
     under MIN_IMAGES."""
     runs, skipped = [], []
     for token, solo in solo_images(data, names).items():
-        if len(solo) < MIN_IMAGES:
-            skipped.append((token, len(solo)))
-            continue
         name = run_name(main_run.lora_name, token)
+        folder = own_set(main_run.dataset_folder, token)
+        if folder.is_dir():
+            count, dataset, source = len(image_names(str(folder))), str(folder), ""
+        else:
+            count, source = len(solo), main_run.dataset_folder
+            dataset = str(Path(run_output_dir(main_run.output_dir, name)) / "dataset")
+        if count < MIN_IMAGES:
+            skipped.append((token, count))
+            continue
         runs.append(replace(
             main_run,
             lora_name=name,
-            dataset_folder=str(Path(run_output_dir(main_run.output_dir, name)) / "dataset"),
-            image_count=len(solo),
+            dataset_folder=dataset,
+            image_count=count,
             trigger_word=token,
             target_steps=int(steps),
             # Previews draw from this character's own captions, not the main set's.
@@ -69,7 +87,7 @@ def plan(main_run, data, names, steps: int = DEFAULT_STEPS):
             network_weights="",
             compare_group="",
             shipped_epoch=0,
-            character_source=main_run.dataset_folder,
+            character_source=source,
             character_token=token,
             status="queued",
         ))

@@ -353,10 +353,11 @@ class BatchTab(QWidget):
 
         # A comparison run's caption policy was decided when it was queued
         # (core/compare.py); the conflict prompt never overrides it.
-        # Nor does a character run's: it never captions, it copies the main set's
-        # captions into a folder that doesn't exist until the run starts.
+        # Nor does a character run built from the main set's solo images: it never
+        # captions, it copies the main set's captions into a folder that doesn't exist
+        # until the run starts.
         pending = [r for r in candidates if not getattr(r, "compare_group", "")
-                   and not getattr(r, "character_token", "")]
+                   and not getattr(r, "character_source", "")]
         default = AppSettings().get("caption_existing_policy")
         conflicted = []
         plan = []   # [(run, policy), ...] — not applied until an accepted path
