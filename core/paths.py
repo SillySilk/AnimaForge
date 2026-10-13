@@ -9,6 +9,10 @@ import os
 import re
 from pathlib import Path
 
+# Where finished runs land until the user picks another folder in Setup: the shared
+# output folder the maintainer's apps all write into, one subfolder per app.
+DEFAULT_OUTPUT_DIR = r"C:\AI\Apps\Output\Lora Forge"
+
 # Characters illegal in Windows filenames (plus path separators), collapsed to "_".
 _ILLEGAL = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 

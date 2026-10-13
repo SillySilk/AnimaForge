@@ -21,7 +21,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject
 
-from core.paths import run_output_dir
+from core.paths import DEFAULT_OUTPUT_DIR, run_output_dir
 from core.settings import AppSettings
 from core.step_calculator import calculate_training_params
 
@@ -35,7 +35,7 @@ def default_status_path() -> str:
         out = AppSettings().get("output_dir") or ""
     except Exception:
         pass
-    return str(Path(out or "output") / "batch_status.json")
+    return str(Path(out or DEFAULT_OUTPUT_DIR) / "batch_status.json")
 
 
 class StatusWriter(QObject):

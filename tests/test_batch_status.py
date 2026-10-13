@@ -128,3 +128,17 @@ def test_status_payload_carries_the_phase(tmp_path):
     data = _read(path)
     assert data[0]["phase"] == "training"
     assert data[1]["phase"] == ""      # untouched run has no phase yet
+
+
+def test_status_file_defaults_to_the_shared_output_folder(monkeypatch):
+    """With no output folder chosen yet, the queue's status file sits in the
+    built-in default, C:\AI\Apps\Output\Lora Forge."""
+    import core.batch_status as bs
+    from core.paths import DEFAULT_OUTPUT_DIR
+
+    class _NoChoice:
+        def get(self, key):
+            return ""
+    monkeypatch.setattr(bs, "AppSettings", _NoChoice)
+    assert DEFAULT_OUTPUT_DIR == r"C:\AI\Apps\Output\Lora Forge"
+    assert bs.default_status_path() == str(Path(DEFAULT_OUTPUT_DIR) / "batch_status.json")

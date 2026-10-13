@@ -1489,7 +1489,8 @@ class SetupTab(QWidget):
         self._qwen3_edit.setText(from_portable(self._settings.value("qwen3_path", "", type=str)))
         self._vae_edit.setText(from_portable(self._settings.value("vae_path", "", type=str)))
 
-        default_out = str(root / "output")
+        from core.paths import DEFAULT_OUTPUT_DIR
+        default_out = DEFAULT_OUTPUT_DIR
         saved_out = from_portable(self._settings.value("output_dir", default_out, type=str))
         if not saved_out or in_other_install(saved_out):
             saved_out = default_out
