@@ -80,6 +80,8 @@ DEFAULTS = {
     "default_network_dim": 16,
     "default_network_alpha": 8,
     "default_target_steps": 500,
+    # Steps for each per-character LoRA (Home "Style + Characters", core/character_runs.py).
+    "character_lora_steps": 500,
     # Power-user escape hatch: when True the auto step suggestion ignores the soft cap
     # (SOFT_CAP_STEPS) so large datasets can train longer. The floor still applies.
     "default_uncap_steps": False,

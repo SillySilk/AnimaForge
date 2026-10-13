@@ -103,6 +103,10 @@ class RunDefinition:
     compare_group: str = ""
     # Set when run safety shipped an earlier epoch of this (Anima) run; 0 = the end.
     shipped_epoch: int = 0
+    # A per-character run (core/character_runs.py): its folder is rebuilt from this
+    # source set's solo images of this token when the run starts. "" = a normal run.
+    character_source: str = ""
+    character_token: str = ""
     # Runtime
     status: str = QUEUED
 
@@ -304,6 +308,8 @@ class BatchRunner(QObject):
         Must never call _advance() itself.
         """
         from core import caption_policy as cp, characters as ch
+        if run.character_token:
+            return self._begin_character_run(run)
         # ASK never reaches a runner: it is a UI-only prompt. Unattended, KEEP is the
         # safe resolution — existing captions are never destroyed.
         policy = run.caption_policy if run.caption_policy != cp.ASK else cp.KEEP
@@ -327,6 +333,20 @@ class BatchRunner(QObject):
             self._mark_failed(f"could not start captioning for '{run.lora_name}'")
             return False
         return True
+
+    def _begin_character_run(self, run) -> bool:
+        """Copy the character's solo images and their finished captions out of the
+        main set, then train. Never captions: the main set's captions are the ones
+        this person was named in."""
+        from core import character_runs
+        try:
+            run.image_count = character_runs.build_folder(run)
+        except (ValueError, OSError) as e:
+            self._mark_failed(f"'{run.lora_name}': {e}")
+            return False
+        self.log_line.emit(f"[Batch] '{run.lora_name}': {run.image_count} solo image(s) "
+                           f"of {run.character_token}, {run.target_steps} steps")
+        return self._start_training(run)
 
     def _rebuild_if_style_changed(self, run, state, policy):
         """The folder was captioned under another caption style. KEEP leaves those

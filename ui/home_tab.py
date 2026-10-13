@@ -6,7 +6,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QInputDialog,
-    QLabel, QLineEdit, QPushButton, QScrollArea, QVBoxLayout, QWidget,
+    QLabel, QLineEdit, QPushButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget,
 )
 
 from core import models
@@ -52,7 +52,10 @@ class HomeTab(QWidget):
     prefix_changed = Signal(str)   # quality prefix baked at Combine (single source; drives Dataset)
     type_changed = Signal(str)     # "character" / "concept" / "style" (auto-detect → Train)
     anchor_changed = Signal(str)
-    run_requested = Signal()          # "Forge It" — the unattended caption→train pipeline
+    run_requested = Signal()          # "Caption + Train" — the unattended caption→train pipeline
+    # "Train Style + Characters" (False) / "Caption + Train Style + Characters" (True):
+    # the main LoRA, then a short LoRA per named character (core/character_runs.py).
+    cast_run_requested = Signal(bool)
     add_to_batch_requested = Signal()  # "➕ Add to Batch" — queue this set for later
     run_caption_requested = Signal()  # pillar "Run Captioning" button
     start_train_requested = Signal()  # pillar "Start Training" button
@@ -481,7 +484,7 @@ class HomeTab(QWidget):
         tl.addWidget(self._network_line)
         tl.addStretch()
         # live run readout — real-time steps (143 / 800 · 17%) without leaving the front;
-        # the Forge It pipeline's Detecting/Captioning phases narrate here too
+        # the Caption + Train pipeline's Detecting/Captioning phases narrate here too
         self._train_progress = RunProgress()
         self._train_progress.setObjectName("af_transparent")
         tl.addWidget(self._train_progress)
@@ -524,6 +527,8 @@ class HomeTab(QWidget):
         config_btn.clicked.connect(self.preview_config_requested.emit)
         start_stop.addWidget(config_btn)
         tl.addLayout(start_stop)
+        tl.addSpacing(8)
+        tl.addLayout(self._cast_train_row())
         g.addWidget(tr, 0, 2)
 
         g.setColumnStretch(0, 1)
@@ -709,7 +714,7 @@ class HomeTab(QWidget):
         eb.setObjectName("af_eyebrow_flame")
         eb.setStyleSheet("color:#f4d160; letter-spacing:3px;")
         col.addWidget(eb)
-        mk = QLabel("Forge it — caption, then train. Walk away.")
+        mk = QLabel("Caption, then train. Walk away.")
         mk.setObjectName("af_marker")
         mk.setStyleSheet("color:#e9e0cc; font-size:18px;")
         col.addWidget(mk)
@@ -734,14 +739,54 @@ class HomeTab(QWidget):
         self._compare_btn.clicked.connect(self.compare_requested.emit)
         h.addWidget(self._compare_btn)
 
-        forge = QPushButton("⚒  Forge It")
+        cast = QPushButton("⚒  Caption + Train\nStyle + Characters")
+        cast.setObjectName("af_btn_ghost")
+        cast.setMinimumHeight(52)
+        cast.setCursor(Qt.PointingHandCursor)
+        cast.setToolTip(
+            "Caption the set, train the main LoRA, then a short LoRA for each named "
+            "character from their solo images — runs one after another on the Batch screen")
+        cast.clicked.connect(lambda: self.cast_run_requested.emit(True))
+        h.addWidget(cast)
+
+        forge = QPushButton("⚒  Caption + Train")
         forge.setObjectName("af_btn_forge")
         forge.setMinimumHeight(52)
         forge.setMinimumWidth(200)
         forge.setCursor(Qt.PointingHandCursor)
+        forge.setToolTip("Caption the set (if it isn't yet), then train it")
         forge.clicked.connect(self.run_requested.emit)
         h.addWidget(forge)
         return band
+
+    def _cast_train_row(self) -> QHBoxLayout:
+        """Train the captioned set plus one short LoRA per named character, with the
+        character runs' step count beside it (remembered between sessions)."""
+        from core.settings import AppSettings
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        btn = QPushButton("🚀  Train Style + Characters")
+        btn.setObjectName("af_btn_ghost")
+        btn.setMinimumHeight(40)
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.setToolTip(
+            "Train the main LoRA, then a short LoRA for each named character from "
+            "their solo images, to load beside it and lock the character in")
+        btn.clicked.connect(lambda: self.cast_run_requested.emit(False))
+        row.addWidget(btn, 1)
+        row.addWidget(self._field_label("Steps per character"))
+        self._character_steps = QSpinBox()
+        self._character_steps.setRange(50, 10000)
+        self._character_steps.setSingleStep(50)
+        self._character_steps.setMinimumHeight(40)
+        self._character_steps.setValue(AppSettings().get("character_lora_steps"))
+        self._character_steps.valueChanged.connect(
+            lambda v: AppSettings().set("character_lora_steps", int(v)))
+        row.addWidget(self._character_steps)
+        return row
+
+    def character_steps(self) -> int:
+        return self._character_steps.value()
 
     # ---- footer (recover / auto-detect / recent) ----
     def _build_footer(self) -> QWidget:

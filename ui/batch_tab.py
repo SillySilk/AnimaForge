@@ -122,7 +122,7 @@ class BatchTab(QWidget):
         run_row = QHBoxLayout()
         self._start_btn = QPushButton("▶  Start Batch")
         self._start_btn.setObjectName("btn_start")
-        self._start_btn.clicked.connect(self._start)
+        self._start_btn.clicked.connect(lambda: self._start())
         self._restart_btn = QPushButton("↻  Restart from Top")
         self._restart_btn.setObjectName("af_btn_ghost")
         self._restart_btn.setToolTip(
@@ -268,7 +268,13 @@ class BatchTab(QWidget):
     # Run control
     # ------------------------------------------------------------------
 
-    def _start(self):
+    def start_queue(self, ask_about_captions: bool = True):
+        """Start the pending runs from another screen (Home's Style + Characters
+        buttons). With ask_about_captions off, runs that would hit existing captions
+        keep them rather than prompting."""
+        self._start(ask_about_captions)
+
+    def _start(self, ask_about_captions: bool = True):
         reason = self._gpu_busy_check()
         if reason:
             QMessageBox.warning(
@@ -286,7 +292,7 @@ class BatchTab(QWidget):
                     self, "Nothing to Run",
                     "Every run in the queue is done. Use ↻ Restart from Top to run them again.")
             return
-        if not self._resolve_conflicts(pending):
+        if ask_about_captions and not self._resolve_conflicts(pending):
             return
         self._begin(lambda: self._runner.start(self._runs, continue_on_error=True,
                                                skip_done=True),
@@ -347,7 +353,10 @@ class BatchTab(QWidget):
 
         # A comparison run's caption policy was decided when it was queued
         # (core/compare.py); the conflict prompt never overrides it.
-        pending = [r for r in candidates if not getattr(r, "compare_group", "")]
+        # Nor does a character run's: it never captions, it copies the main set's
+        # captions into a folder that doesn't exist until the run starts.
+        pending = [r for r in candidates if not getattr(r, "compare_group", "")
+                   and not getattr(r, "character_token", "")]
         default = AppSettings().get("caption_existing_policy")
         conflicted = []
         plan = []   # [(run, policy), ...] — not applied until an accepted path

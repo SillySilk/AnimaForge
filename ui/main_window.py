@@ -508,6 +508,7 @@ class MainWindow(QMainWindow):
         self._home_tab.type_changed.connect(self._on_home_type_changed)
         self._home_tab.anchor_changed.connect(self._characters_tab.set_style_anchor)
         self._home_tab.run_requested.connect(self._on_home_run)
+        self._home_tab.cast_run_requested.connect(self._on_home_cast_run)
         # Pillar primary buttons drive the real engines (options live in the modals).
         self._home_tab.run_caption_requested.connect(self._dataset_tab._process_clicked)
         self._home_tab.start_train_requested.connect(
@@ -1095,6 +1096,68 @@ class MainWindow(QMainWindow):
         self._home_tab.apply_run_progress({"kind": "reset"})  # zero the bar before each run
         self._switch_tab(4)  # surface the live training log + sample previews
         self._qr_advance()
+
+    def _on_home_cast_run(self, caption: bool):
+        """Home "Style + Characters": queue the main run, then one short run per named
+        character (core/character_runs.py), and start the Batch line. With `caption`
+        the main run captions the set first; without, the set must be captioned."""
+        from core import workflow, characters as ch, character_runs, caption_policy as cp
+        folder = self._dataset_tab.get_folder_path()
+        if not folder:
+            QMessageBox.warning(self, "No dataset", "Choose a dataset folder on Home first.")
+            return
+        if not self._train_tab.get_lora_name():
+            QMessageBox.warning(self, "Name required", "Name the LoRA first (Home → LoRA name).")
+            return
+        busy = "a batch run is in progress" if self._batch_tab.is_running() \
+            else self._batch_tab._gpu_busy_check()
+        if busy:
+            QMessageBox.warning(self, "Cannot start", f"Cannot start — {busy}.")
+            return
+        if not caption and not workflow.caption_state(folder).get("done"):
+            QMessageBox.warning(
+                self, "Not captioned",
+                "Some images have no caption yet. Use Caption + Train Style + Characters, "
+                "or Run Captioning first.")
+            return
+        self._fill_krea_trigger()
+        if not any(c.token.strip() for c in ch.load(folder).roster):
+            self._characters_tab.auto_detect_from_filenames()
+        data = ch.load(folder)
+        main, msg = self._train_tab.build_run_definition()
+        if main is None:
+            QMessageBox.warning(self, "Cannot start", msg)
+            return
+        if not caption:
+            main.caption_policy = cp.KEEP
+        steps = self._home_tab.character_steps()
+        runs, skipped = character_runs.plan(
+            main, data, character_runs.image_names(folder), steps)
+        if not runs:
+            QMessageBox.warning(
+                self, "No characters",
+                f"No named character has {character_runs.MIN_IMAGES} or more solo images "
+                "in this set, so there is nothing to train per character.")
+            return
+        lines = [f"Main LoRA '{main.lora_name}' ({main.target_steps} steps)", ""]
+        lines += [f"  {r.character_token}: {r.image_count} solo images, {steps} steps"
+                  for r in runs]
+        if skipped:
+            lines += ["", "Skipped (under "
+                      f"{character_runs.MIN_IMAGES} solo images): "
+                      + ", ".join(f"{t} ({n})" for t, n in skipped)]
+        from core.batch import DONE
+        others = sum(1 for r in self._batch_tab.runs() if r.status != DONE)
+        if others:
+            lines += ["", f"{others} run(s) already waiting in the Batch line run too."]
+        if QMessageBox.question(
+                self, "Train Style + Characters",
+                "\n".join(lines) + "\n\nStart now?") != QMessageBox.Yes:
+            return
+        for rd in [main, *runs]:
+            self._batch_tab.add_run(rd)
+        self._switch_tab(5)
+        self._batch_tab.start_queue(ask_about_captions=caption)
 
     def _on_home_caption(self):
         folder = self._dataset_tab.get_folder_path()
