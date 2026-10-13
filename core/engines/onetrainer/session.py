@@ -346,7 +346,7 @@ class TrainingSession(QObject):
                                "cancelled. The LoRA itself is finished and verified.")
         elif exit_code == 0 and written:
             self._note(f"{written} final preview(s) of the shipped file rendered into "
-                       f"workspace\\samples\\final")
+                       f"workspace\\samples")
         else:
             self._preview_note(
                 f"The final previews of the finished LoRA did not render (exit code "

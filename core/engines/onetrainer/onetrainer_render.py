@@ -5,7 +5,7 @@ never imported by the app, and it imports nothing from the app.
 
     python onetrainer_render.py --config-path <run>/config.json
                                 --lora <run>/<name>.safetensors
-                                --destination <run>/workspace/samples/final
+                                --destination <run>/workspace/samples
 
 The run config says which base model, which weight types and which samples
 file; the LoRA is applied through OneTrainer's LoRA loader (the COMFY-format
@@ -82,7 +82,7 @@ def main() -> int:
         if not sample.enabled:
             continue
         sample.from_train_config(config)
-        dest = os.path.join(args.destination, f"{i} - final", f"final-{i}")
+        dest = os.path.join(args.destination, f"final-{i}")
         try:
             sampler.sample(
                 sample_config=sample,

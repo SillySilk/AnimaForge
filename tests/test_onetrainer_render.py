@@ -24,12 +24,12 @@ def test_the_render_runs_the_apps_script_under_onetrainers_python(tmp_path):
     """The script lives in the app but runs in OneTrainer's interpreter, from
     OneTrainer's root -- the same arrangement as train.py."""
     cmd = render.command(_install(tmp_path), r"C:\run\config.json",
-                         r"C:\run\Aria.safetensors", r"C:\run\workspace\samples\final")
+                         r"C:\run\Aria.safetensors", r"C:\run\workspace\samples")
     assert cmd[0] == str(tmp_path / "py.exe")
     assert cmd[1] == render.SCRIPT
     assert cmd[2:] == ["--config-path", r"C:\run\config.json",
                        "--lora", r"C:\run\Aria.safetensors",
-                       "--destination", r"C:\run\workspace\samples\final"]
+                       "--destination", r"C:\run\workspace\samples"]
 
 
 def test_the_script_exists_and_compiles():
@@ -46,17 +46,23 @@ def test_the_script_imports_nothing_from_the_app():
     assert "from ui" not in text and "from utils" not in text
 
 
-def test_final_previews_land_beside_the_training_previews(tmp_path):
+def test_final_previews_land_loose_beside_the_training_previews(tmp_path):
     run = tmp_path / "Aria"
-    assert Path(render.destination(str(run))) == run / "workspace" / "samples" / "final"
+    assert Path(render.destination(str(run))) == run / "workspace" / "samples"
 
 
-def test_count_images_reads_what_the_render_wrote(tmp_path):
-    dest = tmp_path / "final"
+def test_the_script_writes_each_prompt_loose_as_final_i():
+    text = Path(render.SCRIPT).read_text(encoding="utf-8")
+    assert 'os.path.join(args.destination, f"final-{i}")' in text
+
+
+def test_count_images_counts_only_the_final_previews(tmp_path):
+    """The training previews share the folder; only final-<i> images count."""
+    dest = tmp_path / "samples"
     assert render.count_images(str(dest)) == 0
-    (dest / "0 - final").mkdir(parents=True)
-    (dest / "0 - final" / "a.jpg").write_bytes(b"x")
-    (dest / "1 - final").mkdir()
-    (dest / "1 - final" / "b.png").write_bytes(b"x")
-    (dest / "notes.txt").write_text("x", encoding="utf-8")
+    dest.mkdir()
+    (dest / "final-0.jpg").write_bytes(b"x")
+    (dest / "final-1.png").write_bytes(b"x")
+    (dest / "2026-10-13_05-40-45-training-sample-0-0-0-p0.jpg").write_bytes(b"x")
+    (dest / "final-2.txt").write_text("x", encoding="utf-8")
     assert render.count_images(str(dest)) == 2

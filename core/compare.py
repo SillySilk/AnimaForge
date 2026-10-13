@@ -96,14 +96,16 @@ def _kohya_finals(run_dir: Path, name: str, epoch=None) -> tuple:
 
 def _onetrainer_finals(run_dir: Path) -> dict:
     """{prompt index: image} from the shipped file's final render. The render writes
-    prompt i into "<i> - final/"; a prompt whose render failed simply has no folder."""
+    prompt i loose into samples/ as "final-<i>"; a prompt whose render failed simply
+    has no image. Runs rendered before that kept them in samples/final/"<i> - final"/."""
     import re
     from core.engines.onetrainer import render
     dest = Path(render.destination(str(run_dir)))
-    out = {}
-    if not dest.is_dir():
+    out = render.final_images(str(dest))
+    older = dest / "final"
+    if out or not older.is_dir():
         return out
-    for folder in dest.iterdir():
+    for folder in older.iterdir():
         m = re.match(r"^(\d+) - final$", folder.name)
         if not (m and folder.is_dir()):
             continue

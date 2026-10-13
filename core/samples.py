@@ -4,8 +4,9 @@ sd-scripts names samples ``{name}_e{epoch:06d}_{i:02d}_{ts}{seed}.png`` for
 epoch-scheduled renders and ``{name}_{steps:06d}_{i:02d}_...`` for step-scheduled
 ones (``sample_at_first`` renders at step 0). Grouping by that tag gives the
 side-by-side "which epoch looked best?" comparison. OneTrainer names them
-``{ts}-training-sample-{global_step}-{epoch}-{epoch_step}.jpg`` inside one folder
-per prompt (``{index} - {prompt start}``). — the user picks the earliest
+``{ts}-training-sample-{global_step}-{epoch}-{epoch_step}.jpg``; the app saves
+them loose in samples/ with the prompt index appended (``...-p{index}.jpg``), where
+older runs kept one folder per prompt (``{index} - {prompt start}``). — the user picks the earliest
 strong checkpoint by eye (never auto-stopped).
 """
 
@@ -19,6 +20,7 @@ _STEP = re.compile(r"_(\d{4,})_")
 _PROMPT_INDEX = re.compile(r"_e?\d{4,}_(\d{1,3})_")
 _OT_SAMPLE = re.compile(r"training-sample-(\d+)-(\d+)-\d+")
 _OT_PROMPT_DIR = re.compile(r"^(\d+) - ")
+_OT_PROMPT_SUFFIX = re.compile(r"-p(\d+)$")
 
 
 def round_key(filename: str):
@@ -43,7 +45,8 @@ def prompt_index(filename: str) -> int | None:
     """The 0-based line index into the sample-prompts file this image was rendered
     from (the ``{i:02d}`` slot in sd-scripts' filename), or None if it can't be found."""
     if _OT_SAMPLE.search(Path(filename).name):
-        m = _OT_PROMPT_DIR.match(Path(filename).parent.name)
+        m = (_OT_PROMPT_SUFFIX.search(Path(filename).stem)
+             or _OT_PROMPT_DIR.match(Path(filename).parent.name))
         return int(m.group(1)) if m else None
     m = _PROMPT_INDEX.search(Path(filename).name)
     return int(m.group(1)) if m else None
@@ -52,7 +55,7 @@ def prompt_index(filename: str) -> int | None:
 def prompt_for_file(filename: str, prompts_file: str) -> str | None:
     """The prompt text that produced `filename`, read from the run's sample-prompts
     file, or None if the index or the file itself isn't available. A OneTrainer
-    sample reads its run's samples.json (run/workspace/samples/<prompt>/<file>)
+    sample reads its run's samples.json (run/workspace/samples/[<prompt>/]<file>)
     instead, whatever `prompts_file` says."""
     idx = prompt_index(filename)
     if idx is None:
@@ -60,9 +63,9 @@ def prompt_for_file(filename: str, prompts_file: str) -> str | None:
     if _OT_SAMPLE.search(Path(filename).name):
         import json
         try:
-            run_dir = Path(filename).parents[3]
+            run_dir = next(p.parent for p in Path(filename).parents if p.name == "workspace")
             entries = json.loads((run_dir / "samples.json").read_text(encoding="utf-8"))
-        except (OSError, ValueError, IndexError):
+        except (OSError, ValueError, StopIteration):
             return None
         return entries[idx].get("prompt") if 0 <= idx < len(entries) else None
     try:

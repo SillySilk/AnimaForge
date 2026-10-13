@@ -81,8 +81,8 @@ def test_krea_previews_pair_by_the_folder_index(tmp_path):
         for i in range(12):
             if i == 3:
                 continue                       # this prompt's render failed
-            (dest / f"{i} - final").mkdir(parents=True)
-            (dest / f"{i} - final" / f"final-{i}.jpg").write_bytes(b"x")
+            dest.mkdir(parents=True, exist_ok=True)
+            (dest / f"final-{i}.jpg").write_bytes(b"x")
     rows = compare.final_previews(entry, str(tmp_path), {})
     assert rows[3]["a"] is None
     assert rows[10]["a"].endswith("final-10.jpg") and rows[2]["b"].endswith("final-2.jpg")

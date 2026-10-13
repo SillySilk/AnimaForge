@@ -50,3 +50,23 @@ def test_onetrainer_samples_group_by_epoch_and_find_their_prompt(tmp_path):
     labels = [label for label, _ in group_by_round(files)]
     assert labels == ["epoch 2", "start"]
     assert prompt_for_file(files[2], "unused.txt") == "Bob waters"
+
+
+def test_loose_onetrainer_samples_carry_their_prompt_in_the_name(tmp_path):
+    """Previews now land loose in samples/ as "...-p<i>.jpg"; the prompt and the
+    round still come back from the name alone."""
+    import json
+    from core.samples import group_by_round, prompt_for_file, prompt_index
+    run = tmp_path / "Run"
+    samples = run / "workspace" / "samples"
+    samples.mkdir(parents=True)
+    (run / "samples.json").write_text(json.dumps(
+        [{"prompt": "Ann reads"}, {"prompt": "Bob waters"}]), encoding="utf-8")
+    files = []
+    for i, step, ep in ((0, 0, 0), (0, 326, 2), (1, 326, 2)):
+        f = samples / f"2026-10-12_11-44-30-training-sample-{step}-{ep}-0-p{i}.jpg"
+        f.write_bytes(b"x")
+        files.append(str(f))
+    assert [label for label, _ in group_by_round(files)] == ["epoch 2", "start"]
+    assert prompt_index(files[2]) == 1
+    assert prompt_for_file(files[2], "unused.txt") == "Bob waters"

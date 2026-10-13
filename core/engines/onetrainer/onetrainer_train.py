@@ -16,11 +16,47 @@ every optimizer step, `d` (and the `d_max` it grows toward) are clamped to the
 cap. The next step's learning rate is d * lr, read from the clamped value, so no
 update ever uses more than the cap. A run that settles below the cap is untouched.
 """
+import os
+import re
 import runpy
 import sys
 from pathlib import Path
 
 _announced = False
+
+# OneTrainer files each prompt's previews under samples/"<i> - <prompt start>"/.
+_PROMPT_DIR = re.compile(r"^(\d+) - ")
+
+
+def flat_destination(destination: str) -> str:
+    """Where a training preview goes instead: loose in samples/, with its prompt
+    index carried in the name ("<OneTrainer name>-p<i>") since the folder that
+    used to say it is gone. Anything not under a prompt folder is left alone."""
+    path = Path(destination)
+    m = _PROMPT_DIR.match(path.parent.name)
+    if not m or path.parent.parent.name != "samples":
+        return destination
+    return str(path.parent.parent / f"{path.name}-p{m.group(1)}")
+
+
+def install_flat_samples(onetrainer_root: str) -> bool:
+    """Wrap BaseModelSampler.save_sampler_output so training previews land loose in
+    samples/ rather than one folder per prompt. False when the sampler module is not
+    where this OneTrainer keeps it (previews then keep OneTrainer's own folders)."""
+    sys.path.insert(0, onetrainer_root)
+    try:
+        from modules.modelSampler.BaseModelSampler import BaseModelSampler
+    except ImportError:
+        print("[animaforge] OneTrainer's sampler was not found; previews keep their "
+              "per-prompt folders", flush=True)
+        return False
+    original = BaseModelSampler.save_sampler_output
+
+    def save_sampler_output(sampler_output, destination, *args, **kwargs):
+        return original(sampler_output, flat_destination(destination), *args, **kwargs)
+
+    BaseModelSampler.save_sampler_output = staticmethod(save_sampler_output)
+    return True
 
 
 def _clamp(optimizer, cap: float):
@@ -76,6 +112,8 @@ def main() -> None:
     # and announcing a cap there would misdescribe the run.
     if _optimizer_name(sys.argv[3:]) == "PRODIGY":
         install_cap(cap)
+    # Launched from OneTrainer's root (process.py sets the cwd), which holds modules/.
+    install_flat_samples(os.getcwd())
     # train.py reads its own arguments and imports its siblings (util.import_util)
     # relative to its folder, exactly as if it had been launched directly.
     sys.argv = [train_script, *sys.argv[3:]]

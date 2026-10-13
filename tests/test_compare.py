@@ -102,8 +102,8 @@ def test_krea_previews_pair_by_prompt(tmp_path):
     for run in entry["runs"]:
         dest = Path(render.destination(paths.run_output_dir(str(tmp_path), run["name"])))
         for i in range(2):
-            (dest / f"{i} - final").mkdir(parents=True)
-            (dest / f"{i} - final" / f"final-{i}.jpg").write_bytes(b"x")
+            dest.mkdir(parents=True, exist_ok=True)
+            (dest / f"final-{i}.jpg").write_bytes(b"x")
     rows = compare.final_previews(entry, str(tmp_path), {})
     assert rows[1]["a"].endswith("final-1.jpg") and rows[1]["b"].endswith("final-1.jpg")
 

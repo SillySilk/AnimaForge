@@ -202,7 +202,7 @@ def _render_ok(s):
     lands as DONE only after it has come back -- here with one preview written,
     which is what a clean exit means."""
     assert FakeProc.last.started_with[1] == render.SCRIPT, FakeProc.last.started_with
-    folder = Path(render.destination(s.run_dir())) / "0 - final"
+    folder = Path(render.destination(s.run_dir()))
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "final-0.jpg").write_bytes(b"jpg")
     FakeProc.last.finished.emit(0, False)
@@ -628,7 +628,7 @@ def test_a_finished_lora_is_rendered_before_the_run_lands_as_done(tmp_path, monk
     assert script == render.SCRIPT
     assert args == ["--config-path", str(run / "config.json"),
                     "--lora", out,
-                    "--destination", str(run / "workspace" / "samples" / "final")]
+                    "--destination", str(run / "workspace" / "samples")]
     renderer.finished.emit(0, False)
     assert done == [out]
     assert states[-1] == TrainingSession.DONE
