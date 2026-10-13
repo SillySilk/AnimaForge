@@ -110,10 +110,14 @@ def explicit_tokens_for_image(data: DatasetCharacters, image_name: str) -> list:
 
 
 def describe_prompt(base_prompt: str, names) -> str:
-    """The describe-stage prompt with the image's people named in it, so the prose
-    calls them by name instead of "a woman". The phrasing follows JoyCaption Beta
-    One's trained name option; other describe models take it as plain instruction.
-    Combine still puts the token at the head of the caption as well."""
+    """The describe-stage prompt with a lone person named in it, so the prose calls
+    them by name instead of "a woman". The phrasing follows JoyCaption Beta One's
+    trained name option; other describe models take it as plain instruction.
+
+    With several people the prose names nobody: the describe model cannot tell
+    which face goes with which name and pinned names on the wrong people (a cast
+    set had a woman captioned with a man's name), teaching the LoRA the wrong face
+    for that name. Combine still puts every token at the head of the caption."""
     unique, seen = [], set()
     for n in (x.strip() for x in names):
         if n and n.lower() not in seen:
@@ -124,9 +128,8 @@ def describe_prompt(base_prompt: str, names) -> str:
     if len(unique) == 1:
         extra = f"If there is a person/character in the image you must refer to them as {unique[0]}."
     else:
-        joined = ", ".join(unique[:-1]) + " and " + unique[-1]
-        extra = (f"The people/characters in the image are {joined}; "
-                 f"you must refer to each of them by name.")
+        extra = ("Do not use any names; describe each person/character by their "
+                 "appearance and position in the image.")
     return f"{base_prompt.strip()} {extra}"
 
 

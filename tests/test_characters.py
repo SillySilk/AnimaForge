@@ -354,9 +354,13 @@ def test_describe_prompt_names_one_character():
     assert p.startswith("Write a caption. ") and "refer to them as Mira" in p
 
 
-def test_describe_prompt_names_several_characters_once_each():
+def test_describe_prompt_keeps_names_out_of_group_prose():
+    # The describe model can't tell which face is which name, so in a group it
+    # pins names on the wrong people. Combine still leads with the tokens.
     p = C.describe_prompt("Write a caption.", ["asuka", "rei", "Asuka"])
-    assert "asuka and rei" in p and p.count("asuka") == 1
+    assert p.startswith("Write a caption. ")
+    assert "asuka" not in p.lower() and "rei" not in p.lower()
+    assert "do not use any names" in p.lower()
 
 
 def test_describe_prompt_for_image_uses_explicit_assignments(tmp_path):
