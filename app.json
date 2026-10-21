@@ -1,5 +1,6 @@
 {
   "name": "Lora Forge",
+  "tagline": "Train Anima LoRAs",
   "launch": "launch.bat",
   "image": "tile.png"
 }
