@@ -2,5 +2,14 @@
   "name": "Lora Forge",
   "tagline": "Train Anima LoRAs",
   "launch": "launch.bat",
-  "image": "tile.png"
+  "image": "tile.png",
+  "repos": [
+    {
+      "path": ".",
+      "kind": "own",
+      "remotes": [
+        "origin"
+      ]
+    }
+  ]
 }
