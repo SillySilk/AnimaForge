@@ -317,7 +317,7 @@ class TrainingProcess(QObject):
         if self._process is not None and self._process.state() != QProcess.NotRunning:
             return
 
-        program, args = self.build_command(config_path, sdscripts_path)
+        program, args = self.build_command(config_path, sdscripts_path, model)
 
         self._process = QProcess(self)
         apply_no_window(self._process)  # no console window pop-up on Windows

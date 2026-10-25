@@ -110,3 +110,25 @@ def test_build_command_anima_unchanged(tmp_path):
         f"--config_file={config}",
     ]
     assert (program, args) == proc.build_command(str(config), str(tmp_path), model="anima")
+
+
+def test_start_threads_model_to_build_command(tmp_path, monkeypatch):
+    from PySide6.QtCore import QProcess
+    seen = []
+    proc = TrainingProcess()
+    real = proc.build_command
+
+    def spy(config_path, sdscripts_path, model="anima"):
+        seen.append(model)
+        return real(config_path, sdscripts_path, model)
+
+    monkeypatch.setattr(proc, "build_command", spy)
+    monkeypatch.setattr(QProcess, "start", lambda *a, **k: None)
+    logs = []
+    proc.log_line.connect(logs.append)
+    config = tmp_path / "x_config.toml"
+    config.write_text("", encoding="utf-8")
+    proc.start(str(config), str(tmp_path), model="moss")
+
+    assert seen == ["moss"]
+    assert any("moss_image_train_network.py" in l for l in logs)
