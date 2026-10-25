@@ -6,7 +6,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.bootstrap import (parse_version, python_ok, pip_commands,
                                is_ssl_cert_error, with_truststore, step_cwd,
                                needs_sd_scripts, sd_scripts_clone_commands,
-                               SD_SCRIPTS_COMMIT)
+                               SD_SCRIPTS_COMMIT, torch_step, sd_scripts_update_commands,
+                               sd_scripts_state, ensure_sd_scripts)
+import pytest
+import scripts.bootstrap as bootstrap
+
+PIN = "11d8cedd0c67b93a10f8b2d75f43554f6f12c794"
+CU126 = "https://download.pytorch.org/whl/cu126"
+CU128 = "https://download.pytorch.org/whl/cu128"
 
 
 def test_parse_version():
@@ -31,12 +38,12 @@ def test_python_ok_rejects_out_of_range():
 def test_pip_commands_torch_before_sdscripts():
     cmds = pip_commands("PY", "REPO")
     joined = [" ".join(c) for c in cmds]
-    assert any("download.pytorch.org/whl/cu121" in j for j in joined)
+    assert any("download.pytorch.org/whl/cu126" in j for j in joined)
     assert any("onnxruntime-gpu" in j for j in joined)
-    torch_i = next(i for i, j in enumerate(joined) if "cu121" in j)
+    torch_i = next(i for i, j in enumerate(joined) if "cu126" in j)
     sd_i = next(i for i, j in enumerate(joined)
                 if j.replace("\\", "/").endswith("sd-scripts/requirements.txt"))
-    assert torch_i < sd_i, "torch (cu121) must install before sd-scripts requirements"
+    assert torch_i < sd_i, "torch (cu126) must install before sd-scripts requirements"
 
 
 def test_pip_commands_first_is_pip_upgrade():
@@ -44,17 +51,30 @@ def test_pip_commands_first_is_pip_upgrade():
     assert cmds[0] == ["PY", "-m", "pip", "install", "--upgrade", "pip"]
 
 
-def test_pip_commands_rtx50_uses_cu128_and_torch27():
+def test_pip_commands_rtx50_uses_cu128_and_torch28():
     joined = [" ".join(c) for c in pip_commands("PY", "REPO", rtx50=True)]
     torch_j = next(j for j in joined if "download.pytorch.org" in j)
-    assert "whl/cu128" in torch_j and "torch>=2.7" in torch_j
-    assert not any("cu121" in j for j in joined)
+    assert "whl/cu128" in torch_j and "torch==2.8.*" in torch_j
+    assert not any("cu126" in j for j in joined)
 
 
-def test_pip_commands_default_stays_cu121():
+def test_pip_commands_default_is_cu126():
     joined = [" ".join(c) for c in pip_commands("PY", "REPO")]
     torch_j = next(j for j in joined if "download.pytorch.org" in j)
-    assert "whl/cu121" in torch_j and "torch>=2.5" in torch_j
+    assert "whl/cu126" in torch_j and "torch==2.8.*" in torch_j
+
+
+def test_pip_commands_final_step_is_triton():
+    cmds = pip_commands("PY", "REPO")
+    assert cmds[-1] == ["PY", "-m", "pip", "install", "triton-windows>=3.4,<3.5"]
+
+
+def test_torch_step_default_is_28_cu126():
+    assert torch_step(False) == ["torch==2.8.*", "torchvision", "--index-url", CU126]
+
+
+def test_torch_step_rtx50_is_28_cu128():
+    assert torch_step(True) == ["torch==2.8.*", "torchvision", "--index-url", CU128]
 
 
 def test_step_cwd_runs_sdscripts_reqs_from_submodule_dir():
@@ -66,7 +86,7 @@ def test_step_cwd_runs_sdscripts_reqs_from_submodule_dir():
                   if " ".join(c).replace("\\", "/").endswith("sd-scripts/requirements.txt"))
     assert step_cwd(sd_cmd, "REPO").replace("\\", "/").endswith("REPO/sd-scripts")
     assert step_cwd(["PY", "-m", "pip", "install", "--upgrade", "pip"], "REPO") is None
-    torch_cmd = next(c for c in cmds if "cu121" in " ".join(c))
+    torch_cmd = next(c for c in cmds if "cu126" in " ".join(c))
     assert step_cwd(torch_cmd, "REPO") is None
 
 
@@ -108,5 +128,73 @@ def test_sd_scripts_clone_commands_shape(tmp_path):
     assert cmds[1] == ["git", "-C", str(tmp_path / "sd-scripts"), "checkout", "abc123"]
 
 
-def test_pin_is_the_anima_commit():
-    assert SD_SCRIPTS_COMMIT == "1a3ec9ea745fe9883551dfca5c947ea3d6aa68c7"
+def test_pin_is_v0_12_2():
+    assert SD_SCRIPTS_COMMIT == PIN
+
+
+def test_sd_scripts_update_commands_shape():
+    dest = str(Path("R") / "sd-scripts")
+    assert sd_scripts_update_commands(dest, "abc") == [
+        ["git", "-C", dest, "fetch", "origin"],
+        ["git", "-C", dest, "checkout", "abc"],
+    ]
+
+
+def _fake_run(head="", porcelain=""):
+    class R:
+        def __init__(self, out):
+            self.returncode, self.stdout = 0, out
+
+    def run(cmd, **kw):
+        return R(head if "rev-parse" in cmd else porcelain)
+    return run
+
+
+def _repo_with_sd(tmp_path):
+    d = tmp_path / "sd-scripts"
+    d.mkdir()
+    return str(d)
+
+
+def test_sd_scripts_state_absent(tmp_path):
+    assert sd_scripts_state(str(tmp_path / "sd-scripts"), run=_fake_run()) == "absent"
+
+
+def test_sd_scripts_state_at_pin(tmp_path):
+    run = _fake_run(head=PIN + "\n", porcelain="")
+    assert sd_scripts_state(_repo_with_sd(tmp_path), run=run) == "at_pin"
+
+
+def test_sd_scripts_state_behind(tmp_path):
+    run = _fake_run(head="1a3ec9ea745fe9883551dfca5c947ea3d6aa68c7\n", porcelain="")
+    assert sd_scripts_state(_repo_with_sd(tmp_path), run=run) == "behind"
+
+
+def test_sd_scripts_state_dirty(tmp_path):
+    run = _fake_run(head=PIN + "\n", porcelain=" M train_network.py\n")
+    assert sd_scripts_state(_repo_with_sd(tmp_path), run=run) == "dirty"
+
+
+def test_ensure_sd_scripts_refuses_dirty(monkeypatch):
+    monkeypatch.setattr(bootstrap, "sd_scripts_state", lambda repo, run=None: "dirty")
+    with pytest.raises(SystemExit) as e:
+        ensure_sd_scripts()
+    assert "sd-scripts has local changes" in str(e.value)
+
+
+def test_ensure_sd_scripts_at_pin_is_noop(monkeypatch):
+    monkeypatch.setattr(bootstrap, "sd_scripts_state", lambda repo, run=None: "at_pin")
+    monkeypatch.setattr(bootstrap, "_run", lambda *a, **k: pytest.fail("ran a command"))
+    ensure_sd_scripts()
+
+
+def test_ensure_sd_scripts_behind_updates(monkeypatch):
+    calls = []
+
+    class R:
+        returncode = 0
+    monkeypatch.setattr(bootstrap, "sd_scripts_state", lambda repo, run=None: "behind")
+    monkeypatch.setattr(bootstrap, "_run", lambda cmd, **k: calls.append(cmd) or R())
+    ensure_sd_scripts()
+    assert [c[3] for c in calls] == ["fetch", "checkout"]
+    assert calls[1][-1] == PIN

@@ -4,15 +4,16 @@ Run by a base Python (system 3.10/3.11 or the downloaded standalone) from instal
 
     <base_python> scripts/bootstrap.py
 
-Creates `.venv` at the repo root, then installs — in order so torch (cu121) wins over
+Creates `.venv` at the repo root, then installs — in order so torch (cu126) wins over
 the CPU torch that sd-scripts' `diffusers[torch]` would otherwise pull:
   1. pip upgrade
-  2. torch>=2.5 + torchvision from the cu121 index
-     (RTX 50-series / Blackwell detected → torch>=2.7 from cu128 instead; cu121
+  2. torch 2.8 + torchvision from the cu126 index
+     (RTX 50-series / Blackwell detected → torch 2.8 from cu128 instead; cu126
      wheels lack sm_120 kernels and fail with "no kernel image is available")
   3. sd-scripts/requirements.txt  (its trailing `-e .` installs the kohya lib editable)
   4. requirements.txt             (GUI: PySide6, Pillow, toml)
   5. onnx + onnxruntime-gpu       (WD14 tagger: onnx loads the model, ort runs it)
+  6. triton-windows               (MOSS-Image kernels; last, so nothing re-pins around it)
 Then verifies the install. Windows-only. Pure helpers are unit-tested; see
 docs/superpowers/specs/2026-06-24-venv-install-design.md.
 """
@@ -22,15 +23,15 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-TORCH_INDEX = "https://download.pytorch.org/whl/cu121"
+TORCH_INDEX = "https://download.pytorch.org/whl/cu126"
 TORCH_INDEX_CU128 = "https://download.pytorch.org/whl/cu128"
 MIN_PY = (3, 10)
 MAX_PY = (3, 11)  # inclusive: 3.10 and 3.11 are both supported by the torch/sd-scripts pins
 
-# sd-scripts is fetched (not a submodule) at this exact upstream commit so that even
-# "Download ZIP" users get the Anima-capable code. Bump to adopt a newer kohya.
+# sd-scripts is fetched (not a submodule) at this exact upstream commit (v0.12.2: Anima +
+# MOSS-Image) so that even "Download ZIP" users get the capable code. Bump to adopt a newer kohya.
 SD_SCRIPTS_URL = "https://github.com/kohya-ss/sd-scripts.git"
-SD_SCRIPTS_COMMIT = "1a3ec9ea745fe9883551dfca5c947ea3d6aa68c7"
+SD_SCRIPTS_COMMIT = "11d8cedd0c67b93a10f8b2d75f43554f6f12c794"
 
 
 # ---- pure helpers (unit-tested) -------------------------------------------
@@ -52,8 +53,8 @@ def python_ok(version_str: str) -> bool:
 def torch_step(rtx50: bool):
     """pip args (requirement, index) for the torch install. Blackwell → cu128. Pure."""
     if rtx50:
-        return ["torch>=2.7", "torchvision", "--index-url", TORCH_INDEX_CU128]
-    return ["torch>=2.5", "torchvision", "--index-url", TORCH_INDEX]
+        return ["torch==2.8.*", "torchvision", "--index-url", TORCH_INDEX_CU128]
+    return ["torch==2.8.*", "torchvision", "--index-url", TORCH_INDEX]
 
 
 def pip_commands(venv_py: str, repo: str, rtx50: bool = False):
@@ -66,6 +67,7 @@ def pip_commands(venv_py: str, repo: str, rtx50: bool = False):
         base + ["-r", str(repo_p / "sd-scripts" / "requirements.txt")],
         base + ["-r", str(repo_p / "requirements.txt")],
         base + ["onnx", "onnxruntime-gpu"],
+        base + ["triton-windows>=3.4,<3.5"],
     ]
 
 
@@ -95,6 +97,29 @@ def sd_scripts_clone_commands(repo: str, commit: str):
         ["git", "clone", SD_SCRIPTS_URL, str(dest)],
         ["git", "-C", str(dest), "checkout", commit],
     ]
+
+
+def sd_scripts_update_commands(repo: str, commit: str):
+    """argv lists to move an existing sd-scripts checkout to `commit`. `repo` is the
+    sd-scripts directory itself. Pure."""
+    return [
+        ["git", "-C", repo, "fetch", "origin"],
+        ["git", "-C", repo, "checkout", commit],
+    ]
+
+
+def sd_scripts_state(repo: str, run=subprocess.run) -> str:
+    """State of the sd-scripts checkout at `repo`: "absent" (no checkout), "dirty"
+    (local changes), "at_pin" (HEAD is SD_SCRIPTS_COMMIT) or "behind" (anything else)."""
+    if not Path(repo).is_dir():
+        return "absent"
+    status = run(["git", "-C", repo, "status", "--porcelain"],
+                 capture_output=True, text=True)
+    if (status.stdout or "").strip():
+        return "dirty"
+    head = run(["git", "-C", repo, "rev-parse", "HEAD"],
+               capture_output=True, text=True)
+    return "at_pin" if (head.stdout or "").strip() == SD_SCRIPTS_COMMIT else "behind"
 
 
 SSL_MARKER = "CERTIFICATE_VERIFY_FAILED"
@@ -148,11 +173,20 @@ def create_venv(base_python: str, venv_dir: Path) -> Path:
 
 
 def ensure_sd_scripts():
-    """Fetch sd-scripts at the pinned commit if absent. No-op once present (dev machines
-    and re-runs). Submodule-free so GitHub 'Download ZIP' users get the code too."""
-    if not needs_sd_scripts(str(REPO)):
+    """Bring sd-scripts to the pinned commit: clone if absent, fetch + checkout if it
+    is on another commit, no-op if already there. A checkout with local changes is
+    refused rather than overwritten. Submodule-free so GitHub 'Download ZIP' users get
+    the code too."""
+    dest = str(REPO / "sd-scripts")
+    state = sd_scripts_state(dest)
+    if state == "at_pin":
         return
-    for cmd in sd_scripts_clone_commands(str(REPO), SD_SCRIPTS_COMMIT):
+    if state == "dirty":
+        raise SystemExit("sd-scripts has local changes; commit or discard them in "
+                         "sd-scripts/, then re-run install.bat.")
+    cmds = (sd_scripts_clone_commands(str(REPO), SD_SCRIPTS_COMMIT) if state == "absent"
+            else sd_scripts_update_commands(dest, SD_SCRIPTS_COMMIT))
+    for cmd in cmds:
         r = _run(cmd)
         if r.returncode != 0:
             raise SystemExit(
@@ -208,9 +242,16 @@ def verify(venv_py: Path):
     check = (
         "import PySide6, torch;"
         "print('PySide6', PySide6.__version__);"
-        "print('torch', torch.__version__, 'cuda', torch.cuda.is_available())"
+        "print('torch', torch.__version__, 'cuda', torch.cuda.is_available());"
+        "import transformers, triton;"
+        "print('transformers', transformers.__version__);"
+        "print('triton', triton.__version__)"
     )
     _run([str(venv_py), "-c", check])
+    moss_script = REPO / "sd-scripts" / "moss_image_train_network.py"
+    if not moss_script.is_file():
+        print("\nWARNING: sd-scripts/moss_image_train_network.py not found — sd-scripts "
+              "is not at the pinned commit. Re-run install.bat.")
     train_script = REPO / "sd-scripts" / "anima_train_network.py"
     if train_script.is_file():
         print(f"\nOK: found {train_script.relative_to(REPO)}")

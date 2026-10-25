@@ -24,6 +24,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 .venv/
+.venv-next/
+.venv-pre-moss/
+sd-scripts-next/
 venv/
 env/
 *.egg-info/
