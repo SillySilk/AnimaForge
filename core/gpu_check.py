@@ -32,6 +32,22 @@ def free_vram_mb():
     return parse_free_mb(out.stdout)
 
 
+def total_vram_mb():
+    """Total VRAM of the first GPU in MiB, or None if it can't be read."""
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.total",
+             "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=10,
+            creationflags=no_window_creationflags(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0:
+        return None
+    return parse_free_mb(out.stdout)
+
+
 def parse_gpu_name(stdout: str):
     for line in (stdout or "").splitlines():
         line = line.strip()
