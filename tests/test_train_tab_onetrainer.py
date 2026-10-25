@@ -188,3 +188,39 @@ def test_moss_step_spin_starts_from_its_own_default_not_animas_setting():
     assert t.get_target_steps() == 2500
     t.set_model("anima")
     assert t.get_target_steps() == 700
+
+
+def test_krea2_keeps_lowvram_control_and_gets_no_moss_tooltip():
+    from ui.train_tab import TrainTab, MOSS_LOWVRAM_TOOLTIP
+    t = TrainTab()
+    t.set_model("krea2")
+    assert t._lowvram_btn.isEnabled()
+    assert t._lowvram_btn.toolTip() != MOSS_LOWVRAM_TOOLTIP
+
+
+def test_moss_validation_leaves_nothing_for_an_anima_run(tmp_path, monkeypatch):
+    from core import gpu_check, moss_memory
+    from ui.train_tab import TrainTab
+    monkeypatch.setattr(gpu_check, "total_vram_mb", lambda: None)   # unknown GPU -> warning
+    monkeypatch.setattr(moss_memory, "has_triton", lambda: False)
+    files = []
+    for n in ("dit", "te", "vae"):
+        p = tmp_path / f"{n}.safetensors"
+        p.write_bytes(b"x")
+        files.append(str(p))
+    sd = tmp_path / "sd"
+    sd.mkdir()
+    ds = tmp_path / "ds"
+    ds.mkdir()
+    (ds / "a.png").write_bytes(b"x")
+    t = TrainTab()
+    t.set_environment(str(sd), "a", "b", "c", str(tmp_path / "out"),
+                      model_paths={"moss": tuple(files)})
+    t.set_dataset(str(ds), 1)
+    t.set_lora_name("x")
+    t.set_model("moss")
+    t._validate_for_config()
+    assert t._moss_warnings and t._memory_flags
+    t.set_model("anima")
+    t._validate_for_config()
+    assert t._moss_warnings == [] and t._memory_flags is None

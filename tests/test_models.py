@@ -51,3 +51,7 @@ def test_old_rundefinition_dict_loads_as_anima():
     d["target_steps"], d["caption_style"] = 1234, "prose"
     r = RunDefinition.from_dict(d)
     assert r.model == "anima" and r.target_steps == 1234 and r.caption_style == "prose"
+
+
+def test_only_moss_picks_its_own_memory():
+    assert [m.id for m in models.MODELS.values() if m.auto_memory] == ["moss"]

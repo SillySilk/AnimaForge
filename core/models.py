@@ -39,6 +39,7 @@ class ModelPreset:
     min_vram_gb: int = 0
     forge_test: bool = True              # can the Forge test-render client use this model
     cast_lora: bool = True               # can it train Cast (multi-character) LoRAs
+    auto_memory: bool = False            # picks its own memory settings from the GPU (no Low-VRAM mode)
 
 
 MODELS = {
@@ -46,7 +47,8 @@ MODELS = {
         ModelPreset("anima", "Anima", KOHYA, "prose+tags", 500, steps=ANIMA_STEPS),
         ModelPreset("krea2", "Krea 2", ONETRAINER, "prose+tags", 0),
         ModelPreset("moss", "MOSS-Image", KOHYA, "prose+tags", 2500,
-                    steps=MOSS_STEPS, min_vram_gb=12, forge_test=False, cast_lora=False),
+                    steps=MOSS_STEPS, min_vram_gb=12, forge_test=False, cast_lora=False,
+                    auto_memory=True),
     )
 }
 

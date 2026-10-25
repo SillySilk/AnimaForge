@@ -430,7 +430,8 @@ class BatchRunner(QObject):
             from core.kohya_recipes import recipe
             rec = recipe(run.model)
             memory_flags = None
-            if run.model != models.DEFAULT_MODEL:
+            auto_memory = models.get(run.model).auto_memory
+            if auto_memory:
                 # MOSS: files must exist (a queued run's files can be deleted later),
                 # and the memory tier comes from the real GPU, never from Low-VRAM mode.
                 from core import moss_memory, moss_run
@@ -452,8 +453,8 @@ class BatchRunner(QObject):
                 force=bool(run.compare_group),   # a comparison is its previews
                 sample_flags=rec.sample_flags))
             from core import lowvram
-            # Low-VRAM is an Anima-only mode; MOSS picks its own memory settings.
-            lv = (lowvram.get_current() or {}) if run.model == models.DEFAULT_MODEL else {}
+            # Models that pick their own memory settings ignore Low-VRAM mode.
+            lv = (lowvram.get_current() or {}) if not auto_memory else {}
             # Aspect-ratio bucketing divides by zero on images with a side under 64 px
             # (sd-scripts floors the bucket to a multiple of 64). Drop bucketing for this
             # run rather than let it die at exit code 1 mid-queue.

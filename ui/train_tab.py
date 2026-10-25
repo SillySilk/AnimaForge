@@ -311,10 +311,9 @@ class TrainTab(QWidget):
         """Per-model control state: MOSS picks its own memory settings and has no
         Forge test-render, so the Low-VRAM and Test in Forge controls step aside."""
         preset = models.get(self._model)
-        is_default = self._model == models.DEFAULT_MODEL
-        self._lowvram_btn.setEnabled(is_default)
+        self._lowvram_btn.setEnabled(not preset.auto_memory)
         self._lowvram_btn.setToolTip(
-            LOWVRAM_TOOLTIP if is_default else MOSS_LOWVRAM_TOOLTIP)
+            MOSS_LOWVRAM_TOOLTIP if preset.auto_memory else LOWVRAM_TOOLTIP)
         self._forge_test_btn.setVisible(preset.forge_test)
 
     def set_trigger_word(self, trigger: str):
@@ -1599,7 +1598,7 @@ class TrainTab(QWidget):
         if rd is None:
             QMessageBox.warning(self, "Cannot Add to Batch", msg)
             return
-        if rd.model != models.DEFAULT_MODEL and self.engine() == models.KOHYA:
+        if models.get(rd.model).auto_memory:
             # A GPU under the model's floor can never run it; say so now, not mid-queue.
             from core import moss_memory, moss_run
             try:
@@ -1795,11 +1794,11 @@ class TrainTab(QWidget):
                 sample_flags=recipe(self._model).sample_flags))
         # Low-VRAM overrides (only present when the user enabled+acknowledged it this session).
         from core import lowvram
-        is_default = self._model == models.DEFAULT_MODEL
-        lv = (lowvram.get_current() or {}) if is_default else {}   # MOSS ignores Low-VRAM
+        auto_memory = models.get(self._model).auto_memory
+        lv = (lowvram.get_current() or {}) if not auto_memory else {}   # auto-memory models ignore Low-VRAM
         return dict(
             model=self._model,
-            memory_flags=(None if is_default else self._memory_flags),
+            memory_flags=(self._memory_flags if auto_memory else None),
             output_dir=run_dir,
             micro_batch=lv.get("micro_batch"),
             grad_accum=lv.get("grad_accum"),
@@ -1935,7 +1934,7 @@ class TrainTab(QWidget):
         # Skipped when Low-VRAM mode is active — fitting on less VRAM is the whole point.
         from core import gpu_check, lowvram
         free = gpu_check.free_vram_mb()
-        lv_active = self._model == models.DEFAULT_MODEL and lowvram.get_current() is not None
+        lv_active = not models.get(self._model).auto_memory and lowvram.get_current() is not None
         if not lv_active and self._app_settings is not None and free is not None:
             need = self._app_settings.get("min_free_vram_mb")
             if need and free < need:
@@ -2622,7 +2621,9 @@ class TrainTab(QWidget):
         if not Path(self._setup_path).is_dir():
             return False, "sd-scripts path does not exist."
         from core import model_check
-        if self._model != models.DEFAULT_MODEL:
+        self._memory_flags, self._moss_warnings = None, []
+        auto_memory = models.get(self._model).auto_memory
+        if auto_memory:
             from core import moss_memory, moss_run
             problem = moss_run.files_problem(self._dit_path, self._qwen3_path, self._vae_path)
             if problem:
@@ -2631,7 +2632,7 @@ class TrainTab(QWidget):
                 self._memory_flags, self._moss_warnings = moss_run.launch_plan()
             except moss_memory.MossVramError as e:
                 return False, str(e)
-        for label, p, role in (() if self._model != models.DEFAULT_MODEL else (
+        for label, p, role in (() if auto_memory else (
             ("Anima DiT checkpoint", self._dit_path, model_check.ROLE_DIT),
             ("Qwen3 text encoder", self._qwen3_path, model_check.ROLE_TEXT_ENCODER),
             ("Qwen-Image VAE", self._vae_path, model_check.ROLE_VAE),
@@ -2824,6 +2825,11 @@ class TrainTab(QWidget):
         from core.kohya_recipes import recipe
         script = recipe(self._model).train_script
         if not (Path(self._setup_path) / script).is_file():
+            if script == "anima_train_network.py":
+                return False, (
+                    "anima_train_network.py not found in sd-scripts path.\n"
+                    "Update sd-scripts to a version with Anima support (Setup tab)."
+                )
             return False, (
                 f"{script} not found in sd-scripts path.\n"
                 "Update sd-scripts (re-run install.bat)."
