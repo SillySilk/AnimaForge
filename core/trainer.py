@@ -272,9 +272,9 @@ class TrainingProcess(QObject):
     def set_total_steps(self, total_steps: int):
         self._total_steps = max(1, total_steps)
 
-    def build_command(self, config_path: str, sdscripts_path: str) -> tuple:
+    def build_command(self, config_path: str, sdscripts_path: str, model: str = "anima") -> tuple:
         """
-        Build the accelerate launch command for anima_train_network.py.
+        Build the accelerate launch command for the model's sd-scripts entry point.
 
         Returns (program, args_list).
         Uses the unified .venv interpreter (which has accelerate + the ML stack);
@@ -283,7 +283,8 @@ class TrainingProcess(QObject):
         from core.env import subprocess_python
         python = subprocess_python(sdscripts_path)
 
-        train_script = str(Path(sdscripts_path) / "anima_train_network.py")
+        from core.kohya_recipes import recipe
+        train_script = str(Path(sdscripts_path) / recipe(model).train_script)
         # Ours, not the user's ~/.cache one. Must come before train_script or accelerate
         # would hand it to sd-scripts instead of reading it. Distinct from the
         # --config_file after train_script, which is the training config.
@@ -311,7 +312,7 @@ class TrainingProcess(QObject):
         from core.settings import AppSettings
         return libuv_status(force=AppSettings().get("force_use_libuv_off"))
 
-    def start(self, config_path: str, sdscripts_path: str):
+    def start(self, config_path: str, sdscripts_path: str, model: str = "anima"):
         """Start the training process."""
         if self._process is not None and self._process.state() != QProcess.NotRunning:
             return

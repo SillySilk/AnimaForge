@@ -80,3 +80,33 @@ def test_the_training_config_still_reaches_sd_scripts(tmp_path):
 
     script = next(i for i, a in enumerate(args) if a.endswith("anima_train_network.py"))
     assert f"--config_file={config}" in args[script + 1:]
+
+
+def test_build_command_moss_uses_moss_script(tmp_path):
+    config = tmp_path / "x_config.toml"
+    config.write_text("", encoding="utf-8")
+    _, args = TrainingProcess().build_command(str(config), str(tmp_path), model="moss")
+
+    assert sum(a.endswith("moss_image_train_network.py") for a in args) == 1
+    assert not any(a.endswith("anima_train_network.py") for a in args)
+    assert "--mixed_precision=bf16" in args
+
+
+def test_build_command_anima_unchanged(tmp_path):
+    config = tmp_path / "x_config.toml"
+    config.write_text("", encoding="utf-8")
+    proc = TrainingProcess()
+    program, args = proc.build_command(str(config), str(tmp_path))
+    accel = tmp_path / ACCELERATE_CONFIG_NAME
+    assert args == [
+        "-m", "accelerate.commands.launch",
+        f"--config_file={accel}",
+        "--num_cpu_threads_per_process=2",
+        "--num_processes=1",
+        "--num_machines=1",
+        "--mixed_precision=bf16",
+        "--dynamo_backend=no",
+        str(tmp_path / "anima_train_network.py"),
+        f"--config_file={config}",
+    ]
+    assert (program, args) == proc.build_command(str(config), str(tmp_path), model="anima")

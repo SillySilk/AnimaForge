@@ -131,7 +131,7 @@ class SetupTab(QWidget):
     def get_output_dir(self) -> str:
         return self._output_edit.text().strip()
 
-    def is_environment_valid(self) -> tuple:
+    def is_environment_valid(self, model: str = "anima") -> tuple:
         """Returns (is_valid: bool, message: str)."""
         sd = self.get_sdscripts_path()
         out = self.get_output_dir()
@@ -140,8 +140,10 @@ class SetupTab(QWidget):
             return False, "sd-scripts path is not set."
         if not Path(sd).is_dir():
             return False, "sd-scripts path does not exist."
-        if not (Path(sd) / "anima_train_network.py").is_file():
-            return False, "sd-scripts path does not contain anima_train_network.py (update sd-scripts)."
+        from core.kohya_recipes import recipe
+        script = recipe(model).train_script
+        if not (Path(sd) / script).is_file():
+            return False, f"sd-scripts path does not contain {script} (re-run install.bat)."
 
         for label, path in (
             ("Anima DiT checkpoint", self.get_dit_path()),
