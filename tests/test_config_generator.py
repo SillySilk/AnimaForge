@@ -342,3 +342,26 @@ def test_moss_memory_flags_written(tmp_path):
 def test_moss_rejects_fp8(tmp_path):
     with pytest.raises(ValueError, match="fp8"):
         _gen(tmp_path, model="moss", fp8_base=True)
+
+
+_APP_TIMESTEP = {"logit_mean": 0.5, "weighting_scheme": "mode"}
+
+
+def test_moss_recipe_timesteps_beat_global_advanced_args(tmp_path):
+    main, _ = _gen(tmp_path, model="moss", extra_args=dict(_APP_TIMESTEP))
+    t = main["training_arguments"]
+    assert t["weighting_scheme"] == "logit_normal"
+    assert t["logit_mean"] == -1.09
+
+
+def test_anima_still_gets_global_advanced_timestep_args(tmp_path):
+    main, _ = _gen(tmp_path, extra_args=dict(_APP_TIMESTEP))
+    t = main["training_arguments"]
+    assert t["weighting_scheme"] == "mode"
+    assert t["logit_mean"] == 0.5
+
+
+def test_moss_per_run_override_can_still_change_timesteps(tmp_path):
+    main, _ = _gen(tmp_path, model="moss", extra_args=dict(_APP_TIMESTEP),
+                   overrides={"training_arguments.logit_mean": -0.5})
+    assert main["training_arguments"]["logit_mean"] == -0.5

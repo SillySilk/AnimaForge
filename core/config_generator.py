@@ -281,8 +281,11 @@ def generate_configs(
     if memory_flags:
         training_block.update(memory_flags)
     # Advanced/sample knobs from Settings (only the enabled ones are present).
+    # The model recipe's timestep keys win over the app-wide Advanced values (a MOSS
+    # run must not silently lose its logit_normal/-1.09/0.95); per-run overrides still apply later.
     if extra_args:
-        training_block.update(extra_args)
+        training_block.update({k: v for k, v in extra_args.items()
+                               if k not in rec.timestep_args})
 
     # ---- Main training config ----
     main_config_path = configs_dir / f"{lora_name}_config.toml"
