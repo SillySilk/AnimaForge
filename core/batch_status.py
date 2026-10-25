@@ -92,7 +92,8 @@ class StatusWriter(QObject):
     def _entry(self, idx: int, run) -> dict:
         try:
             total = calculate_training_params(
-                run.image_count, target_steps=run.target_steps)["total_steps"]
+                run.image_count, target_steps=run.target_steps,
+                model=run.model)["total_steps"]
         except Exception:
             total = run.target_steps
         lora_path = None

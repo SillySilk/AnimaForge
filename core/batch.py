@@ -422,7 +422,8 @@ class BatchRunner(QObject):
         if engine == models.ONETRAINER:
             return self._start_onetrainer(run)
         try:
-            params = calculate_training_params(run.image_count, target_steps=run.target_steps)
+            params = calculate_training_params(run.image_count, target_steps=run.target_steps,
+                                              model=run.model)
             self._trainer.set_total_steps(params["total_steps"])
             app = AppSettings()
             run_dir = run_output_dir(run.output_dir, run.lora_name)  # per-run folder

@@ -354,8 +354,10 @@ class TrainTab(QWidget):
         else:
             spin.setSpecialValueText("")
             spin.setRange(500, 40000)
+            # The app setting is Anima's; any other Kohya model starts at its own default.
             default = (self._app_settings.get("default_target_steps")
-                       if self._app_settings else preset.default_target_steps)
+                       if self._app_settings and model_id == "anima"
+                       else preset.default_target_steps)
             spin.setValue(max(500, int(default or preset.default_target_steps)))
         spin.blockSignals(False)
         self._caption_style = preset.caption_style
@@ -1142,6 +1144,9 @@ class TrainTab(QWidget):
     # Slots
     # ------------------------------------------------------------------
 
+    def _soft_cap(self) -> int:
+        return models.get(self._model).steps.soft_cap_steps
+
     def _suggested_steps(self) -> int:
         """Recommended step count from subject type, image count, and roster size.
 
@@ -1150,7 +1155,7 @@ class TrainTab(QWidget):
         return suggest_target_steps(
             self._lora_type_for_subject(), self._image_count,
             n_characters=self._detected_character_count(),
-            uncapped=self._uncap_check.isChecked())
+            uncapped=self._uncap_check.isChecked(), model=self._model)
 
     def _detected_character_count(self) -> int:
         """Distinct named characters in the loaded dataset's roster (>=1)."""
@@ -1282,6 +1287,9 @@ class TrainTab(QWidget):
         self._style_readiness("ok" if (load["done"] and cap["done"]) else "warn")
 
     def _apply_suggestion(self):
+        if models.get(self._model).steps is None:   # engine sizes the run itself (Auto)
+            self._suggest_label.setText("")
+            return
         if self._image_count <= 0:
             self._suggest_label.setText("")
             return
@@ -1291,9 +1299,10 @@ class TrainTab(QWidget):
         self._target_steps_spin.setValue(suggested)
         self._target_steps_spin.blockSignals(False)
         if (not self._uncap_check.isChecked()
-                and is_capped(self._lora_type_for_subject(), self._image_count)):
+                and is_capped(self._lora_type_for_subject(), self._image_count,
+                          model=self._model)):
             self._suggest_label.setText(
-                f"(suggested · capped at {SOFT_CAP_STEPS:,} — uncap to train longer)")
+                f"(suggested · capped at {self._soft_cap():,} — uncap to train longer)")
         else:
             self._suggest_label.setText("(suggested)")
 
@@ -1704,10 +1713,11 @@ class TrainTab(QWidget):
             return
         if self._image_count > 0:
             target = self._target_steps_spin.value()
-            params = calculate_training_params(self._image_count, target_steps=target)
+            params = calculate_training_params(self._image_count, target_steps=target,
+                                              model=self._model)
             self._training_params = params
             text = format_calculation_string(params)
-            if self._uncap_check.isChecked() and target > SOFT_CAP_STEPS:
+            if self._uncap_check.isChecked() and target > self._soft_cap():
                 text += (f"\n⚠ Uncapped — {target:,} steps. Long run; watch for over-training.")
                 level = "warn"
             else:

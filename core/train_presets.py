@@ -148,7 +148,7 @@ _FORMULA_NOTES = {
 }
 
 
-def formula_line(p: TrainPreset) -> str:
+def formula_line(p: TrainPreset, model: str = "anima") -> str:
     """The step math behind a preset, for the picker's small print.
 
     The built-ins look identical at a glance (same optimizer/network) — the real
@@ -157,10 +157,13 @@ def formula_line(p: TrainPreset) -> str:
     """
     if p.target_steps:
         return f"steps fixed at {p.target_steps:,}" + (" · uncapped" if p.uncap_steps else "")
-    from core.step_calculator import BATCH_SIZE, target_exposures
-    exp = target_exposures(p.subject_type)
+    from core.step_calculator import target_exposures
+    profile = models.get(model).steps
+    if profile is None:
+        return "auto steps sized by the training engine"
+    exp = target_exposures(p.subject_type, model)
     note = _FORMULA_NOTES.get(p.subject_type, "")
-    line = f"auto steps = {exp} × images ÷ {BATCH_SIZE}"
+    line = f"auto steps = {exp} × images ÷ {profile.batch_size}"
     return f"{line}  ({note})" if note else line
 
 

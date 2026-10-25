@@ -29,3 +29,25 @@ def test_unknown_model_is_an_error_naming_it():
 
 def test_default_model_is_anima():
     assert models.DEFAULT_MODEL == "anima"
+
+
+def test_moss_preset_fields():
+    p = models.get("moss")
+    assert p.engine == models.KOHYA and p.caption_style == "prose+tags"
+    assert p.min_vram_gb == 12 and p.forge_test is False and p.cast_lora is False
+    assert p.default_target_steps == 2500 and p.steps is models.MOSS_STEPS
+
+
+def test_existing_presets_keep_their_meaning():
+    assert models.get("anima").steps is models.ANIMA_STEPS
+    assert models.get("anima").forge_test and models.get("anima").cast_lora
+    assert models.get("krea2").steps is None
+
+
+def test_old_rundefinition_dict_loads_as_anima():
+    from core.batch import RunDefinition
+    d = RunDefinition("n", "C:/ds", 12).to_dict()
+    del d["model"]
+    d["target_steps"], d["caption_style"] = 1234, "prose"
+    r = RunDefinition.from_dict(d)
+    assert r.model == "anima" and r.target_steps == 1234 and r.caption_style == "prose"

@@ -72,7 +72,8 @@ def run_from_template(template: RunDefinition, folder: str, name: str,
              trigger_word=trigger, sample_prompts=[], style_anchor="",
              network_weights="", compare_group="", shipped_epoch=0, status=QUEUED)
     if models.get(template.model).engine == models.KOHYA:
-        d["target_steps"] = suggest_target_steps(template.subject_type or "character", count)
+        d["target_steps"] = suggest_target_steps(template.subject_type or "character", count,
+                                              model=template.model)
     else:
         d["target_steps"] = 0        # Auto: the engine sizes the run from the dataset
     return RunDefinition.from_dict(d)

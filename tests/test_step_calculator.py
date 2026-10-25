@@ -112,3 +112,58 @@ def test_images_per_character_warning():
     assert images_per_character_warning(60, 3) == ""        # 20 each -> ok
     assert "below" in images_per_character_warning(20, 3)   # ~6 each -> warn
     assert images_per_character_warning(0, 3) == ""         # no images -> no warning
+
+
+# ── per-model profiles ───────────────────────────────────────────────────────
+# Expected values were computed on the pre-profile code (before this change).
+_ANIMA_SWEEP = {
+    "character": {1: 800, 10: 800, 20: 800, 30: 800, 60: 840, 100: 1400, 152: 2128,
+                  300: 3000, 500: 3000},
+    "concept": {1: 800, 10: 800, 20: 800, 30: 800, 60: 800, 100: 850, 152: 1292,
+                300: 2550, 500: 3000},
+    "style": {1: 800, 10: 800, 20: 800, 30: 800, 60: 800, 100: 800, 152: 988,
+              300: 1950, 500: 3000},
+}
+_ANIMA_UNCAPPED = {("character", 300): 4200, ("character", 500): 7000,
+                   ("concept", 500): 4250, ("style", 500): 3250, ("style", 300): 1950}
+
+
+def test_anima_suggestions_unchanged():
+    for t, rows in _ANIMA_SWEEP.items():
+        for n, want in rows.items():
+            assert suggest_target_steps(t, n) == want
+            assert suggest_target_steps(t, n, model="anima") == want
+    for (t, n), want in _ANIMA_UNCAPPED.items():
+        assert suggest_target_steps(t, n, uncapped=True) == want
+    assert is_capped("character", 500) and not is_capped("character", 152)
+    assert calculate_training_params(60, 840)["batch_size"] == 4
+
+
+def test_moss_character_60_images():
+    assert suggest_target_steps("character", 60, model="moss") == 2400
+
+
+def test_moss_character_small_set_floor():
+    assert suggest_target_steps("character", 20, model="moss") == 2000
+
+
+def test_moss_style_floor():
+    assert suggest_target_steps("style", 30, model="moss") == 600
+
+
+def test_moss_cap():
+    assert suggest_target_steps("character", 200, model="moss") == 5000
+    assert suggest_target_steps("character", 200, model="moss", uncapped=True) == 8000
+    assert is_capped("character", 200, model="moss")
+    assert not is_capped("character", 60, model="moss")
+
+
+def test_moss_params_batch_1():
+    p = calculate_training_params(60, 2400, model="moss")
+    assert p["batch_size"] == 1 and p["total_steps"] == 2400
+
+
+def test_engine_sized_model_has_no_step_profile():
+    import pytest
+    with pytest.raises(ValueError):
+        suggest_target_steps("character", 60, model="krea2")

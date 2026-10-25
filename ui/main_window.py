@@ -622,7 +622,7 @@ class MainWindow(QMainWindow):
             summ_lbl = QLabel(tp.summary_line(p))
             summ_lbl.setStyleSheet(
                 "background: transparent; color: #8a8a93; font-size: 11px;")
-            math_lbl = QLabel(tp.formula_line(p))
+            math_lbl = QLabel(tp.formula_line(p, self._train_tab.model()))
             math_lbl.setStyleSheet(
                 "background: transparent; color: #a8925a; font-size: 10px; font-style: italic;")
             for lbl in (name_lbl, summ_lbl, math_lbl):

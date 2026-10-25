@@ -1,5 +1,7 @@
 import math
 
+from core import models
+
 # ── Exposure-based step targeting ────────────────────────────────────────────
 # The quality knob is EXPOSURES PER IMAGE — how many times each image is shown to
 # the optimizer over the whole run — NOT the raw total step count:
@@ -54,9 +56,17 @@ def canonical_subject_type(subject_type: str) -> str:
     return _TYPE_ALIASES.get((subject_type or "").strip().lower(), "style")
 
 
-def target_exposures(subject_type: str) -> int:
+def target_exposures(subject_type: str, model: str = "anima") -> int:
     """The fine-tuned exposures-per-image target for a subject type."""
-    return EXPOSURE_TARGETS.get(canonical_subject_type(subject_type), DEFAULT_EXPOSURES)
+    return _profile(model).exposures[canonical_subject_type(subject_type)]
+
+
+def _profile(model: str) -> "models.StepProfile":
+    """The step profile of a Kohya-engine model; others have none (engine computes)."""
+    profile = models.get(model).steps
+    if profile is None:
+        raise ValueError(f"Model {model!r} has no step profile (its engine computes steps).")
+    return profile
 
 
 def exposures_for_steps(image_count: int, total_steps: int,
@@ -68,7 +78,7 @@ def exposures_for_steps(image_count: int, total_steps: int,
 
 
 def calculate_training_params(image_count: int, target_steps: int = TARGET_STEPS,
-                              batch_size: int = BATCH_SIZE) -> dict:
+                              batch_size: int | None = None, model: str = "anima") -> dict:
     """
     Calculate epochs and repeats to hit ~target_steps total steps.
     Total steps = (image_count * repeats * epochs) / batch_size
@@ -79,8 +89,10 @@ def calculate_training_params(image_count: int, target_steps: int = TARGET_STEPS
     - Round up to nearest whole number
 
     The returned dict also reports `exposures_per_image` (= repeats * epochs), the
-    quantity that actually governs LoRA quality.
+    quantity that actually governs LoRA quality. `batch_size=None` takes the model's own.
     """
+    if batch_size is None:
+        batch_size = _profile(model).batch_size
     if image_count <= 0:
         return {
             "epochs": 0,
@@ -126,14 +138,17 @@ def calculate_training_params(image_count: int, target_steps: int = TARGET_STEPS
 
 
 def _raw_target_steps(subject_type: str, image_count: int,
-                      batch_size: int = BATCH_SIZE) -> int:
+                      batch_size: int | None = None, model: str = "anima") -> int:
     """Unbounded exposures-per-image formula: exposures * image_count / batch."""
+    if batch_size is None:
+        batch_size = _profile(model).batch_size
     count = max(int(image_count or 0), 1)
-    return round(target_exposures(subject_type) * count / batch_size)
+    return round(target_exposures(subject_type, model) * count / batch_size)
 
 
 def suggest_target_steps(subject_type: str, image_count: int, n_characters: int = 1,
-                         batch_size: int = BATCH_SIZE, uncapped: bool = False) -> int:
+                         batch_size: int | None = None, uncapped: bool = False,
+                         model: str = "anima") -> int:
     """Recommend a total-step target that lands the dataset on its per-type
     exposures-per-image goal, bounded by the floor and (unless `uncapped`) the soft cap.
 
@@ -148,18 +163,20 @@ def suggest_target_steps(subject_type: str, image_count: int, n_characters: int 
     `uncapped=True` removes the soft cap (the floor still applies) — the power-user
     escape hatch behind the Train-tab toggle.
     """
-    raw = _raw_target_steps(subject_type, image_count, batch_size)
+    profile = _profile(model)
+    raw = _raw_target_steps(subject_type, image_count, batch_size, model)
     if not uncapped:
-        raw = min(raw, SOFT_CAP_STEPS)
-    return max(FLOOR_STEPS, raw)
+        raw = min(raw, profile.soft_cap_steps)
+    return max(profile.floor_steps[canonical_subject_type(subject_type)], raw)
 
 
 def is_capped(subject_type: str, image_count: int,
-              batch_size: int = BATCH_SIZE) -> bool:
+              batch_size: int | None = None, model: str = "anima") -> bool:
     """True when the raw formula exceeds the soft cap — i.e. the default suggestion is
     being clamped down and the uncap toggle would let it train longer. Drives the UI hint.
     """
-    return _raw_target_steps(subject_type, image_count, batch_size) > SOFT_CAP_STEPS
+    return (_raw_target_steps(subject_type, image_count, batch_size, model)
+            > _profile(model).soft_cap_steps)
 
 
 def images_per_character_warning(image_count: int, n_characters: int,

@@ -174,3 +174,17 @@ def test_anima_start_still_uses_kohya(tmp_path, monkeypatch):
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: shown.append(a[2]))
     t._start_training(confirm=False)
     assert shown == ["sd-scripts not set"]
+
+
+def test_moss_step_spin_starts_from_its_own_default_not_animas_setting():
+    from ui.train_tab import TrainTab
+
+    class Settings:
+        def get(self, key):
+            return {"default_target_steps": 700}.get(key)
+    t = TrainTab()
+    t._app_settings = Settings()
+    t.set_model("moss")
+    assert t.get_target_steps() == 2500
+    t.set_model("anima")
+    assert t.get_target_steps() == 700
