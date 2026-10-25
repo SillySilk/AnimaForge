@@ -305,7 +305,8 @@ def test_anima_configs_match_golden(tmp_path, key):
     main_cfg, ds_cfg = generate_configs(**kw)
     for path, suffix in ((main_cfg, "config"), (ds_cfg, "dataset")):
         got = Path(path).read_bytes().replace(b"\r\n", b"\n").replace(tmp_path.as_posix().encode(), b"<ROOT>")
-        assert got == (GOLDEN_DIR / f"{key}_{suffix}.toml").read_bytes()
+        want = (GOLDEN_DIR / f"{key}_{suffix}.toml").read_bytes().replace(b"\r\n", b"\n")
+        assert got == want
 
 
 def test_moss_config_core_keys(tmp_path):
