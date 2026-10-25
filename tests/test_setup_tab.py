@@ -444,3 +444,16 @@ def test_environment_check_refuses_a_wrong_file_in_a_moss_slot(tmp_path):
 def test_model_paths_for_anima_are_the_anima_fields():
     s = SetupTab()
     assert s.model_paths("anima") == (s.get_dit_path(), s.get_qwen3_path(), s.get_vae_path())
+
+
+def test_missing_script_wording_differs_for_anima_and_moss(tmp_path):
+    s = SetupTab()
+    sd = tmp_path / "sd"
+    sd.mkdir()
+    s._sdscripts_edit.setText(str(sd))
+    s._output_edit.setText(str(tmp_path / "out"))
+    ok, msg = s.is_environment_valid("anima")
+    assert not ok and msg == (
+        "sd-scripts path does not contain anima_train_network.py (update sd-scripts).")
+    ok, msg = s.is_environment_valid("moss")
+    assert not ok and "(re-run install.bat)." in msg

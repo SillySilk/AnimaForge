@@ -606,6 +606,14 @@ class BatchRunner(QObject):
             app = AppSettings()
             if not app.get("forge_auto_deliver"):
                 return
+            ran = models.get(run.model)
+            if not ran.forge_test:
+                # Same rule as the Train tab: the Forge LoRA folder is set up for Anima.
+                self.log_line.emit(
+                    f"[Batch] {ran.name} LoRA '{run.lora_name}' not sent to Forge automatically "
+                    "(auto-deliver is set up for Anima). Deliver it from Home when you want "
+                    "it in Forge.")
+                return
             lora_dir = app.get("forge_lora_dir")
             src = Path(shipped) if shipped else (
                 Path(run_output_dir(run.output_dir, run.lora_name)) / f"{run.lora_name}.safetensors")

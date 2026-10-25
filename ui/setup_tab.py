@@ -160,7 +160,8 @@ class SetupTab(QWidget):
         from core.kohya_recipes import recipe
         script = recipe(model).train_script
         if not (Path(sd) / script).is_file():
-            return False, f"sd-scripts path does not contain {script} (re-run install.bat)."
+            hint = "update sd-scripts" if model == "anima" else "re-run install.bat"
+            return False, f"sd-scripts path does not contain {script} ({hint})."
 
         if model == "moss":
             from core import model_check

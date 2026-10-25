@@ -85,3 +85,30 @@ def test_summary_steps_follow_the_model(tmp_path):
     assert t.summary_steps() == t.get_target_steps()
     t.set_model("krea2")
     assert t.summary_steps() == steps.plan(4, "character", 0)["total_steps"]
+
+
+def test_uncap_text_follows_the_selected_models_step_cap(tmp_path):
+    t = _tab(tmp_path)
+    assert "3,000" in t._uncap_check.toolTip() and "3,000" in t._uncap_warn.text()
+    t.set_model("moss")
+    assert "5,000" in t._uncap_check.toolTip() and "5,000" in t._uncap_warn.text()
+    assert "3,000" not in t._uncap_check.toolTip()
+    t.set_model("anima")
+    assert "3,000" in t._uncap_check.toolTip() and "3,000" in t._uncap_warn.text()
+    t.set_model("krea2")   # no step profile: unchanged from the default text
+    assert "3,000" in t._uncap_check.toolTip()
+
+
+def test_lowvram_indicator_hides_for_moss_and_returns_for_anima(tmp_path):
+    from core import lowvram
+    t = _tab(tmp_path)
+    lowvram.set_current({"micro_batch": 1, "grad_accum": 4, "blocks_to_swap": 8})
+    try:
+        t._refresh_lowvram_indicator()
+        assert t._lowvram_indicator.isHidden() is False
+        t.set_model("moss")
+        assert t._lowvram_indicator.isHidden()
+        t.set_model("anima")
+        assert t._lowvram_indicator.isHidden() is False
+    finally:
+        lowvram.clear()

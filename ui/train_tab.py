@@ -315,6 +315,24 @@ class TrainTab(QWidget):
         self._lowvram_btn.setToolTip(
             MOSS_LOWVRAM_TOOLTIP if preset.auto_memory else LOWVRAM_TOOLTIP)
         self._forge_test_btn.setVisible(preset.forge_test)
+        # The step cap is the selected model's own (MOSS 5000, Anima 3000); a model with
+        # no step profile keeps the Anima default text.
+        cap = preset.steps.soft_cap_steps if preset.steps else SOFT_CAP_STEPS
+        self._uncap_check.setToolTip(self._uncap_tooltip(cap))
+        self._uncap_warn.setText(self._uncap_warning(cap))
+        self._refresh_lowvram_indicator()
+
+    @staticmethod
+    def _uncap_tooltip(cap: int) -> str:
+        return (f"By default the auto-suggested steps are capped at {cap:,} so a "
+                "large dataset won't run for many hours. Check this to let the suggestion "
+                "scale with dataset size past the cap.")
+
+    @staticmethod
+    def _uncap_warning(cap: int) -> str:
+        return ("⚠ Uncapped runs scale with dataset size and can take many hours — and "
+                "over-training can degrade the LoRA. Only push past "
+                f"{cap:,} if you know you need it.")
 
     def set_trigger_word(self, trigger: str):
         self._trigger_word = trigger
@@ -928,21 +946,13 @@ class TrainTab(QWidget):
         # lets the suggestion scale past the cap (the floor still applies).
         uncap_row = QHBoxLayout()
         self._uncap_check = QCheckBox("Remove step cap (advanced)")
-        self._uncap_check.setToolTip(
-            f"By default the auto-suggested steps are capped at {SOFT_CAP_STEPS:,} so a "
-            "large dataset won't run for many hours. Check this to let the suggestion "
-            "scale with dataset size past the cap."
-        )
+        self._uncap_check.setToolTip(self._uncap_tooltip(SOFT_CAP_STEPS))
         self._uncap_check.toggled.connect(self._on_uncap_toggled)
         uncap_row.addWidget(self._uncap_check)
         uncap_row.addStretch()
         calc_layout.addLayout(uncap_row)
 
-        self._uncap_warn = QLabel(
-            "⚠ Uncapped runs scale with dataset size and can take many hours — and "
-            "over-training can degrade the LoRA. Only push past "
-            f"{SOFT_CAP_STEPS:,} if you know you need it."
-        )
+        self._uncap_warn = QLabel(self._uncap_warning(SOFT_CAP_STEPS))
         self._uncap_warn.setWordWrap(True)
         self._uncap_warn.setStyleSheet("color: #e0a93c; font-size: 11px;")
         self._uncap_warn.setVisible(False)
@@ -2298,7 +2308,10 @@ class TrainTab(QWidget):
     def _refresh_lowvram_indicator(self):
         from core import lowvram
         cur = lowvram.get_current()
-        if cur:
+        if cur and models.get(self._model).auto_memory:
+            # MOSS picks its own memory settings; Low-VRAM mode doesn't apply to it.
+            self._lowvram_indicator.setVisible(False)
+        elif cur:
             fp8 = " + fp8" if cur.get("fp8_base") else ""
             self._lowvram_indicator.setText(
                 f"⚠ Low-VRAM active — micro-batch {cur.get('micro_batch')} × "
