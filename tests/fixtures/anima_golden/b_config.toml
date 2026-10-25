@@ -1,0 +1,54 @@
+[model_arguments]
+pretrained_model_name_or_path = "C:/models/anima.safetensors"
+qwen3 = "C:/models/qwen3.safetensors"
+vae = "C:/models/vae.safetensors"
+
+[training_arguments]
+output_dir = "<ROOT>"
+output_name = "golden"
+save_model_as = "safetensors"
+save_precision = "bf16"
+resolution = "768,768"
+train_batch_size = 1
+mixed_precision = "bf16"
+gradient_checkpointing = true
+timestep_sampling = "sigmoid"
+max_train_epochs = 10
+cache_latents = true
+cache_latents_to_disk = true
+vae_chunk_size = 64
+persistent_data_loader_workers = true
+max_data_loader_n_workers = 2
+log_with = "tensorboard"
+logging_dir = "<ROOT>/logs"
+cache_text_encoder_outputs = true
+cache_text_encoder_outputs_to_disk = true
+save_state = true
+save_last_n_epochs_state = 2
+save_every_n_steps = 250
+save_last_n_steps_state = 2
+resume = "D:/state/epoch-3-state"
+training_comment = "trigger: xyz"
+gradient_accumulation_steps = 4
+blocks_to_swap = 8
+sample_every_n_epochs = 1
+sample_prompts = "D:/p.txt"
+seed = 42
+
+[optimizer_arguments]
+optimizer_type = "AdamW8bit"
+lr_scheduler = "constant"
+learning_rate = 0.0002
+
+[network_arguments]
+network_module = "networks.lora_anima"
+network_dim = 32
+network_alpha = 16
+network_train_unet_only = true
+network_weights = "D:/loras/prev.safetensors"
+
+[dataset_arguments]
+dataset_config = "<ROOT>/configs/golden_dataset.toml"
+
+[saving_arguments]
+save_every_n_epochs = 1

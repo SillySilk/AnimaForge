@@ -1,0 +1,17 @@
+[[datasets]]
+resolution = 1024
+batch_size = 4
+[[datasets.subsets]]
+image_dir = "<ROOT>/imgs"
+num_repeats = 5
+
+
+[general]
+shuffle_caption = false
+caption_extension = ".txt"
+keep_tokens = 1
+enable_bucket = true
+min_bucket_reso = 512
+max_bucket_reso = 1536
+bucket_reso_steps = 64
+bucket_no_upscale = true

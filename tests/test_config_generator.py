@@ -274,3 +274,70 @@ def test_auto_epoch_saves_land_every_tenth(tmp_path, epochs, every):
 def test_keep_last_is_not_handed_to_sd_scripts(tmp_path):
     main, _ = _gen(tmp_path, save_last_n_epochs=3)
     assert "save_last_n_epochs" not in main["saving_arguments"]
+
+
+# ---- Anima golden lock + MOSS recipe ----
+
+GOLDEN_DIR = Path(__file__).parent / "fixtures" / "anima_golden"
+# Golden files were captured from the pre-refactor generator with a temp output
+# root; every occurrence of that root is stored as "<ROOT>". The tests swap the
+# run's tmp_path (posix form) for "<ROOT>" and compare byte-for-byte otherwise.
+GOLDEN_ARGS = {
+    "a": {},
+    "b": dict(micro_batch=1, grad_accum=4, blocks_to_swap=8,
+              resume_state_path="D:/state/epoch-3-state",
+              network_weights="D:/loras/prev.safetensors", save_every_n_steps=250,
+              training_comment="trigger: xyz", optimizer="adamw8bit", learning_rate=2e-4,
+              network_dim=32, network_alpha=16, resolution=768,
+              extra_args={"sample_every_n_epochs": 1, "sample_prompts": "D:/p.txt", "seed": 42}),
+}
+
+
+@pytest.mark.parametrize("key", ["a", "b"])
+def test_anima_configs_match_golden(tmp_path, key):
+    kw = dict(output_dir=str(tmp_path), lora_name="golden",
+              dit_path="C:/models/anima.safetensors",
+              qwen3_path="C:/models/qwen3.safetensors",
+              vae_path="C:/models/vae.safetensors",
+              dataset_folder=str(tmp_path / "imgs"), epochs=10, repeats=5,
+              model="anima")
+    kw.update(GOLDEN_ARGS[key])
+    main_cfg, ds_cfg = generate_configs(**kw)
+    for path, suffix in ((main_cfg, "config"), (ds_cfg, "dataset")):
+        got = Path(path).read_bytes().replace(b"\r\n", b"\n").replace(tmp_path.as_posix().encode(), b"<ROOT>")
+        assert got == (GOLDEN_DIR / f"{key}_{suffix}.toml").read_bytes()
+
+
+def test_moss_config_core_keys(tmp_path):
+    main, _ = _gen(tmp_path, model="moss")
+    assert main["network_arguments"]["network_module"] == "networks.lora_generic"
+    mdl = main["model_arguments"]
+    assert "text_encoder" in mdl and "qwen3" not in mdl
+    t = main["training_arguments"]
+    assert t["train_batch_size"] == 1
+    assert t["timestep_sampling"] == "sigma"
+    assert t["weighting_scheme"] == "logit_normal"
+    assert t["logit_mean"] == -1.09
+    assert t["logit_std"] == 0.95
+    assert t["discrete_flow_shift"] == 1.0
+    assert "vae_chunk_size" not in t
+    assert main["network_arguments"]["network_train_unet_only"] is True
+    assert t["cache_text_encoder_outputs"] is True
+
+
+def test_moss_forces_frozen_te(tmp_path):
+    main, _ = _gen(tmp_path, model="moss", train_text_encoder=True)
+    assert main["network_arguments"]["network_train_unet_only"] is True
+    assert main["training_arguments"]["cache_text_encoder_outputs"] is True
+
+
+def test_moss_memory_flags_written(tmp_path):
+    flags = {"convrot_int8": True, "blocks_to_swap": 28, "block_swap_h2d_only": True}
+    main, _ = _gen(tmp_path, model="moss", memory_flags=flags)
+    for k, v in flags.items():
+        assert main["training_arguments"][k] == v
+
+
+def test_moss_rejects_fp8(tmp_path):
+    with pytest.raises(ValueError, match="fp8"):
+        _gen(tmp_path, model="moss", fp8_base=True)

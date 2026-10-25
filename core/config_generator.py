@@ -2,6 +2,7 @@ import os
 import toml
 
 from core import config_overrides
+from core.kohya_recipes import recipe as kohya_recipe
 from pathlib import Path
 
 # Default training settings for the Anima architecture.
@@ -31,14 +32,11 @@ HARDCODED_CONFIG = {
     # Output
     "save_model_as": "safetensors",
     "save_precision": "bf16",
-    # Training
-    "batch_size": 4,
+    # Training (model-specific values — batch size, timestep sampling, VAE chunking,
+    # network module — live in core/kohya_recipes.py)
     "mixed_precision": "bf16",
     "gradient_checkpointing": True,
-    "timestep_sampling": "sigmoid",
-    "vae_chunk_size": 64,
-    # Network (LoRA) — Anima module
-    "network_module": "networks.lora_anima",
+    # Network (LoRA)
     "network_dim": 16,
     "network_alpha": 8,
     # Caching
@@ -114,6 +112,8 @@ def generate_configs(
     blocks_to_swap: int = None,
     fp8_base: bool = False,
     overrides: dict = None,
+    model: str = "anima",
+    memory_flags: dict = None,
 ) -> tuple:
     """
     Generate the main Anima training TOML config and the dataset TOML config.
@@ -132,8 +132,18 @@ def generate_configs(
         save_last_n_epochs:  how many epoch saves to keep. None → 3 (legacy default);
                     0 → keep all (key omitted).
 
+        model:      Kohya model id; its recipe (core/kohya_recipes.py) supplies the
+                    batch size, network module, text-encoder key and timestep args.
+        memory_flags: extra training-block keys (e.g. convrot_int8, block-swap flags),
+                    written after the low-VRAM knobs.
+
     Returns (main_config_path, dataset_config_path). Raises on error.
     """
+    rec = kohya_recipe(model)
+    if fp8_base and not rec.allow_text_encoder_training:
+        raise ValueError(f"fp8_base is not supported for model {model!r}")
+    if not rec.allow_text_encoder_training:
+        train_text_encoder = False  # frozen text encoder, always
     # Advanced-settings overrides: "dataset_toml.*" paths address the dataset TOML,
     # every other path the main config.
     main_overrides, dataset_overrides = {}, {}
@@ -149,7 +159,7 @@ def generate_configs(
     alpha = network_alpha if network_alpha is not None else HARDCODED_CONFIG["network_alpha"]
     # Low-VRAM: micro-batch shrinks GPU activation memory; gradient accumulation keeps the
     # effective batch (and thus training dynamics / quality / step count) unchanged.
-    batch = micro_batch if micro_batch else HARDCODED_CONFIG["batch_size"]
+    batch = micro_batch if micro_batch else rec.batch_size
     res = int(resolution) if resolution else 1024
 
     # ---- Dataset config ----
@@ -180,7 +190,7 @@ def generate_configs(
         dataset_config["general"].update({
             "enable_bucket": True,
             "min_bucket_reso": 512,
-            "max_bucket_reso": 1536,  # Anima's supported range is 512–1536
+            "max_bucket_reso": rec.max_bucket_reso,  # Anima: 512–1536
             "bucket_reso_steps": 64,
             "bucket_no_upscale": True,
         })
@@ -210,7 +220,7 @@ def generate_configs(
 
     # ---- Network block ----
     network_block = {
-        "network_module": HARDCODED_CONFIG["network_module"],
+        "network_module": rec.network_module,
         "network_dim": dim,
         "network_alpha": alpha,
     }
@@ -229,11 +239,11 @@ def generate_configs(
         "train_batch_size": batch,
         "mixed_precision": HARDCODED_CONFIG["mixed_precision"],
         "gradient_checkpointing": HARDCODED_CONFIG["gradient_checkpointing"],
-        "timestep_sampling": HARDCODED_CONFIG["timestep_sampling"],
+        **rec.timestep_args,
         "max_train_epochs": epochs,
         "cache_latents": HARDCODED_CONFIG["cache_latents"],
         "cache_latents_to_disk": HARDCODED_CONFIG["cache_latents_to_disk"],
-        "vae_chunk_size": HARDCODED_CONFIG["vae_chunk_size"],
+        **({"vae_chunk_size": rec.vae_chunk_size} if rec.vae_chunk_size is not None else {}),
         "persistent_data_loader_workers": HARDCODED_CONFIG["persistent_data_loader_workers"],
         "max_data_loader_n_workers": HARDCODED_CONFIG["max_data_loader_n_workers"],
         "log_with": HARDCODED_CONFIG["log_with"],
@@ -267,6 +277,9 @@ def generate_configs(
         training_block["blocks_to_swap"] = int(blocks_to_swap)
     if fp8_base:
         training_block["fp8_base"] = True
+    # Model memory flags (INT8 / block-swap tuning) sit after the low-VRAM knobs.
+    if memory_flags:
+        training_block.update(memory_flags)
     # Advanced/sample knobs from Settings (only the enabled ones are present).
     if extra_args:
         training_block.update(extra_args)
@@ -276,7 +289,7 @@ def generate_configs(
     config = {
         "model_arguments": {
             "pretrained_model_name_or_path": str(Path(dit_path).as_posix()),
-            "qwen3": str(Path(qwen3_path).as_posix()),
+            rec.text_encoder_arg: str(Path(qwen3_path).as_posix()),
             "vae": str(Path(vae_path).as_posix()),
         },
         "training_arguments": training_block,
@@ -298,27 +311,31 @@ def generate_configs(
 
 def get_config_summary(optimizer: str = "prodigy", network_dim: int = None,
                        network_alpha: int = None, train_text_encoder: bool = False,
-                       resolution: int = None) -> str:
-    """Return a human-readable summary of the Anima training settings."""
+                       resolution: int = None, model: str = "anima") -> str:
+    """Return a human-readable summary of the training settings for `model`."""
+    rec = kohya_recipe(model)
+    name = "Anima" if model == "anima" else "MOSS-Image"
+    arch = ("Anima (DiT + Qwen3 + Qwen VAE)" if model == "anima"
+            else "MOSS-Image (DiT + Qwen3.5 + FLUX.2 VAE)")
     dim = network_dim if network_dim is not None else HARDCODED_CONFIG["network_dim"]
     alpha = network_alpha if network_alpha is not None else HARDCODED_CONFIG["network_alpha"]
     res = int(resolution) if resolution else 1024
     opt_label = "Prodigy+ ScheduleFree (auto LR)" if optimizer.lower() == "prodigy" else "AdamW8bit"
     te_label = "DiT + Text Encoder" if train_text_encoder else "DiT only"
     lines = [
-        "── Anima Training Settings ──",
-        f"  Architecture : Anima (DiT + Qwen3 + Qwen VAE)",
+        f"── {name} Training Settings ──",
+        f"  Architecture : {arch}",
         f"  Resolution   : {res},{res}",
-        f"  Batch Size   : {HARDCODED_CONFIG['batch_size']}",
+        f"  Batch Size   : {rec.batch_size}",
         f"  Precision    : {HARDCODED_CONFIG['mixed_precision']}",
         f"  Optimizer    : {opt_label}",
         f"  Trains       : {te_label}",
-        f"  Timestep     : {HARDCODED_CONFIG['timestep_sampling']}",
+        f"  Timestep     : {rec.timestep_args['timestep_sampling']}",
         f"  Network Dim  : {dim}",
         f"  Network Alpha: {alpha}",
         f"  Grad Ckpt    : {HARDCODED_CONFIG['gradient_checkpointing']}",
         f"  Cache Latents: {HARDCODED_CONFIG['cache_latents']}",
-        f"  VAE Chunk    : {HARDCODED_CONFIG['vae_chunk_size']}",
+        f"  VAE Chunk    : {rec.vae_chunk_size if rec.vae_chunk_size is not None else 'n/a'}",
         f"  Save As      : {HARDCODED_CONFIG['save_model_as']}",
         "─────────────────────────────",
     ]
