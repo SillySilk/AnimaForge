@@ -783,7 +783,16 @@ class HomeTab(QWidget):
         self._character_steps.valueChanged.connect(
             lambda v: AppSettings().set("character_lora_steps", int(v)))
         row.addWidget(self._character_steps)
+        self._model_combo.currentIndexChanged.connect(lambda _i: self._sync_character_steps())
+        self._sync_character_steps()
         return row
+
+    def _sync_character_steps(self):
+        """A model without a cast LoRA picks each character's steps itself."""
+        manual = models.get(self._model_combo.currentData()).cast_lora
+        self._character_steps.setEnabled(manual)
+        self._character_steps.setToolTip(
+            "" if manual else "MOSS sets each character's steps automatically")
 
     def character_steps(self) -> int:
         return self._character_steps.value()

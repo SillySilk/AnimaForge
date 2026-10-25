@@ -134,3 +134,12 @@ def test_home_emits_add_to_batch_requested():
     assert seen == [True]
 
 
+
+
+def test_character_steps_disabled_without_cast_lora():
+    t = HomeTab()
+    t.set_model("moss")
+    assert not t._character_steps.isEnabled()
+    assert t._character_steps.toolTip() == "MOSS sets each character's steps automatically"
+    t.set_model("anima")
+    assert t._character_steps.isEnabled() and t._character_steps.toolTip() == ""

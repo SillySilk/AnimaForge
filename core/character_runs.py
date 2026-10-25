@@ -23,6 +23,8 @@ from core.paths import run_output_dir, sanitize_name
 DEFAULT_STEPS = 500
 # Fewer solo images than this teaches a likeness poorly; the character is skipped.
 MIN_IMAGES = 5
+# A character under this many solo images still trains, but the likeness is weak.
+THIN_SET_IMAGES = 20
 
 
 def solo_images(data: characters.DatasetCharacters, image_names) -> dict:
@@ -58,11 +60,13 @@ def own_set(main_folder: str, token: str) -> Path:
     return main.with_name(main.name + "_characters") / token
 
 
-def plan(main_run, data, names, steps: int = DEFAULT_STEPS):
+def plan(main_run, data, names, steps: int | None = DEFAULT_STEPS):
     """The character runs to queue after `main_run`, and who was skipped.
 
     Returns (runs, skipped) where skipped is [(token, image count)] for characters
-    under MIN_IMAGES."""
+    under MIN_IMAGES. `steps=None` gives each run the suggested steps for its own
+    image count on the main run's model."""
+    from core.step_calculator import suggest_target_steps
     runs, skipped = [], []
     for token, solo in solo_images(data, names).items():
         name = run_name(main_run.lora_name, token)
@@ -81,7 +85,8 @@ def plan(main_run, data, names, steps: int = DEFAULT_STEPS):
             dataset_folder=dataset,
             image_count=count,
             trigger_word=token,
-            target_steps=int(steps),
+            target_steps=(suggest_target_steps("character", count, model=main_run.model)
+                          if steps is None else int(steps)),
             # Previews draw from this character's own captions, not the main set's.
             sample_prompts=[],
             network_weights="",
@@ -92,6 +97,25 @@ def plan(main_run, data, names, steps: int = DEFAULT_STEPS):
             status="queued",
         ))
     return runs, skipped
+
+
+MOSS_UNCAPTIONED_MSG = (
+    "MOSS trains only per-character LoRAs, so the main set is never captioned by a run. "
+    "Use Run Captioning on this set first, then Train Characters.")
+
+
+def queue_for(main_run, runs, main_captioned: bool) -> tuple:
+    """(runs to queue, refusal message or "") for a Train Characters click.
+
+    A model with a cast LoRA queues the main run first. One without (MOSS) queues
+    only the character runs, so nothing captions the main set: runs drawing from it
+    need it captioned already, or the click is refused before anything is queued."""
+    from core import models
+    if models.get(main_run.model).cast_lora:
+        return [main_run, *runs], ""
+    if not main_captioned and any(r.character_source for r in runs):
+        return [], MOSS_UNCAPTIONED_MSG
+    return list(runs), ""
 
 
 def build_folder(run) -> int:

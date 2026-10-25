@@ -212,3 +212,37 @@ def test_train_only_refuses_an_uncaptioned_own_set(tmp_path, monkeypatch):
     w, queued, started, warned = _window(monkeypatch, tmp_path / "set", tmp_path / "out")
     w._on_home_cast_run(False)
     assert queued == [] and "Jay" in warned[0]
+
+
+def test_plan_auto_steps_per_character(tmp_path):
+    data = _set(tmp_path / "set", {"Jay": 20, "Gloria": 60})
+    runs, _ = CR.plan(_main(tmp_path / "set", tmp_path / "out", model="moss"), data,
+                      CR.image_names(str(tmp_path / "set")), steps=None)
+    assert {r.character_token: r.target_steps for r in runs} == {"Jay": 2000, "Gloria": 2400}
+
+
+def test_plan_fixed_steps_unchanged(tmp_path):
+    data = _set(tmp_path / "set", {"Jay": 20, "Gloria": 60})
+    runs, _ = CR.plan(_main(tmp_path / "set", tmp_path / "out"), data,
+                      CR.image_names(str(tmp_path / "set")), steps=500)
+    assert [r.target_steps for r in runs] == [500, 500]
+
+
+def test_cast_queue_skips_main_for_moss(tmp_path):
+    data = _set(tmp_path / "set", {"Jay": 6})
+    main = _main(tmp_path / "set", tmp_path / "out", model="moss")
+    runs, _ = CR.plan(main, data, CR.image_names(str(tmp_path / "set")), steps=None)
+    assert CR.queue_for(main, runs, True) == (runs, "")
+    anima = _main(tmp_path / "set", tmp_path / "out")
+    aruns, _ = CR.plan(anima, data, CR.image_names(str(tmp_path / "set")))
+    assert CR.queue_for(anima, aruns, False) == ([anima, *aruns], "")
+
+
+def test_refuses_uncaptioned_main_source_for_moss(tmp_path):
+    data = _set(tmp_path / "set", {"Jay": 6}, captioned=False)
+    main = _main(tmp_path / "set", tmp_path / "out", model="moss")
+    runs, _ = CR.plan(main, data, CR.image_names(str(tmp_path / "set")), steps=None)
+    assert runs[0].character_source
+    queue, msg = CR.queue_for(main, runs, False)
+    assert queue == [] and msg == CR.MOSS_UNCAPTIONED_MSG
+    assert msg.startswith("MOSS trains only per-character LoRAs")
