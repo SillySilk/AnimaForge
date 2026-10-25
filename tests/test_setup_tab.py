@@ -358,3 +358,89 @@ def test_reset_training_environment_does_not_emit_status_change_before_the_repro
     finally:
         s._settings.setValue("torch_version", prev)
         s._settings.sync()
+
+
+# --- MOSS-Image model slots ---------------------------------------------------
+
+def _moss_files(tmp_path):
+    from test_model_check import (FLUX2_VAE_KEYS, MOSS_DIT_KEYS, MOSS_TE_KEYS,
+                                  write_safetensors)
+    return (
+        write_safetensors(tmp_path / "moss_image_base_bf16.safetensors", MOSS_DIT_KEYS),
+        write_safetensors(tmp_path / "qwen3.5_9b_int8_convrot.safetensors", MOSS_TE_KEYS),
+        write_safetensors(tmp_path / "flux2-vae.safetensors", FLUX2_VAE_KEYS),
+    )
+
+
+def _restore(s, keys, saved):
+    for k, v in zip(keys, saved):
+        if v is None:
+            s._settings.remove(k)
+        else:
+            s._settings.setValue(k, v)
+    s._settings.sync()
+
+
+def test_moss_paths_round_trip_through_settings(tmp_path):
+    keys = ("moss_dit_path", "moss_te_path", "moss_vae_path")
+    s = SetupTab()
+    saved = [s._settings.value(k, None) for k in keys]
+    try:
+        dit, te, vae = _moss_files(tmp_path)
+        s._moss_dit_edit.setText(str(dit))
+        s._moss_te_edit.setText(str(te))
+        s._moss_vae_edit.setText(str(vae))
+        s._save_settings()
+        again = SetupTab()
+        assert again.model_paths("moss") == (str(dit), str(te), str(vae))
+        assert again.get_moss_dit_path() == str(dit)
+        assert again.get_moss_te_path() == str(te)
+        assert again.get_moss_vae_path() == str(vae)
+    finally:
+        _restore(s, keys, saved)
+
+
+def test_environment_check_names_the_missing_moss_file(tmp_path):
+    s = SetupTab()
+    sd = tmp_path / "sd"
+    sd.mkdir()
+    s._sdscripts_edit.setText(str(sd))
+    s._output_edit.setText(str(tmp_path / "out"))
+    for edit in (s._moss_dit_edit, s._moss_te_edit, s._moss_vae_edit):
+        edit.setText("")
+    from core.kohya_recipes import recipe
+    (sd / recipe("moss").train_script).write_text("")
+    ok, msg = s.is_environment_valid("moss")
+    assert not ok and "MOSS-Image DiT" in msg and "not set" in msg
+    dit, te, vae = _moss_files(tmp_path)
+    s._moss_dit_edit.setText(str(dit))
+    ok, msg = s.is_environment_valid("moss")
+    assert not ok and "MOSS text encoder (Qwen3.5-9B)" in msg
+    s._moss_te_edit.setText(str(te))
+    ok, msg = s.is_environment_valid("moss")
+    assert not ok and "MOSS VAE (FLUX.2)" in msg
+    s._moss_vae_edit.setText(str(vae))
+    ok, msg = s.is_environment_valid("moss")
+    assert ok, msg
+
+
+def test_environment_check_refuses_a_wrong_file_in_a_moss_slot(tmp_path):
+    from test_model_check import MOSS_TE_W4A8_KEYS, write_safetensors
+    s = SetupTab()
+    sd = tmp_path / "sd"
+    sd.mkdir()
+    from core.kohya_recipes import recipe
+    (sd / recipe("moss").train_script).write_text("")
+    s._sdscripts_edit.setText(str(sd))
+    s._output_edit.setText(str(tmp_path / "out"))
+    dit, te, vae = _moss_files(tmp_path)
+    s._moss_dit_edit.setText(str(dit))
+    s._moss_vae_edit.setText(str(vae))
+    s._moss_te_edit.setText(str(write_safetensors(tmp_path / "te.safetensors", MOSS_TE_W4A8_KEYS)))
+    ok, msg = s.is_environment_valid("moss")
+    assert not ok and "W4A8" in msg and "not supported" in msg
+
+
+def test_model_paths_for_anima_are_the_anima_fields():
+    s = SetupTab()
+    assert s.model_paths("anima") == (s.get_dit_path(), s.get_qwen3_path(), s.get_vae_path())

@@ -7,7 +7,10 @@ path baked to one machine. Returns "" when nothing is found — never guesses wr
 """
 from pathlib import Path
 
-from core.model_check import ROLE_DIT, ROLE_TEXT_ENCODER, ROLE_VAE, identify
+from core.model_check import (
+    ROLE_DIT, ROLE_FLUX2_VAE, ROLE_MOSS_DIT, ROLE_MOSS_TE, ROLE_TEXT_ENCODER,
+    ROLE_VAE, identify,
+)
 
 # Folder-name fragments that commonly hold a 'models' tree.
 _APP_HINTS = ("forge", "comfyui", "stable-diffusion", "sd", "automatic", "webui", "a1111")
@@ -103,6 +106,29 @@ _DIR_HINTS = {
     ROLE_TEXT_ENCODER: ("text_encoder", "clip"),
     ROLE_VAE: ("vae",),
 }
+
+# MOSS-Image. Forge Neo names its folders diffusion_models / text_encoder / VAE, ComfyUI
+# uses diffusion_models / text_encoders / vae; both are covered by these fragments.
+# `_MOSS_PREFER` breaks ties among files that all identify correctly: Base DiT over SFT,
+# the int8 text encoder over any other Qwen3.5 file, the exact flux2-vae name over a
+# renamed copy. Earlier entry wins.
+_MOSS_DIR_HINTS = {
+    ROLE_DIT: ("diffusion_model", "unet", "checkpoint", "stable-diffusion"),
+    ROLE_TEXT_ENCODER: ("text_encoder", "clip"),
+    ROLE_VAE: ("vae",),
+}
+_MOSS_NAME_HINTS = {
+    ROLE_DIT: ("moss",),
+    ROLE_TEXT_ENCODER: ("qwen3.5", "qwen_3.5", "qwen35", "convrot", "int8"),
+    ROLE_VAE: ("flux2", "vae"),
+}
+_MOSS_PREFER = {
+    ROLE_DIT: ("moss_image_base_bf16", "base", "moss_image"),
+    ROLE_TEXT_ENCODER: ("qwen3.5_9b_int8_convrot", "int8", "qwen3.5"),
+    ROLE_VAE: ("flux2-vae", "flux2", "vae"),
+}
+_MOSS_ROLES = {ROLE_DIT: ROLE_MOSS_DIT, ROLE_TEXT_ENCODER: ROLE_MOSS_TE, ROLE_VAE: ROLE_FLUX2_VAE}
+
 _NAME_HINTS = {
     ROLE_DIT: ("anima",),
     ROLE_TEXT_ENCODER: ("qwen_3", "qwen3", "06b", "0.6b", "text_encoder"),
@@ -141,35 +167,53 @@ def _walk_safetensors(root: Path, limit: int = MAX_FILES):
     return found
 
 
-def _rank_for(role: str, files):
+def _rank_for(role: str, files, dir_hints=None, name_hints=None, prefer=()):
     """`files` ordered by how likely each is to be `role` — best guess first."""
+    dir_hints = dir_hints or _DIR_HINTS
+    name_hints = name_hints or _NAME_HINTS
+
+    def pref(path: Path) -> int:
+        name = path.name.lower()
+        for i, frag in enumerate(prefer):
+            if frag in name:
+                return i
+        return len(prefer)
+
     def score(path: Path) -> int:
         parent = path.parent.name.lower()
         name = path.name.lower()
         s = 0
-        if any(h in parent for h in _DIR_HINTS[role]):
+        if any(h in parent for h in dir_hints[role]):
             s -= 2
-        if any(h in name for h in _NAME_HINTS[role]):
+        if any(h in name for h in name_hints[role]):
             s -= 1
         # 'vae' as a name hint is weak enough to drag the VAE's own folder-mates
         # along; a DiT sitting in a vae/ folder is not a thing worth ranking high.
         return s
     ranked = [f for f in files if score(f) < 0]
-    ranked.sort(key=lambda p: (score(p), str(p).lower()))
+    ranked.sort(key=lambda p: (score(p), pref(p), str(p).lower()))
     # Files with no hint at all still get a look, after every hinted candidate --
     # that is what finds a wholly renamed file.
-    rest = sorted((f for f in files if score(f) >= 0), key=lambda p: str(p).lower())
+    rest = sorted((f for f in files if score(f) >= 0), key=lambda p: (pref(p), str(p).lower()))
     return ranked + rest
 
 
-def detect_model_files(scan_root, max_header_reads: int = MAX_HEADER_READS) -> dict:
+def detect_model_files(scan_root, model: str = "anima",
+                       max_header_reads: int = MAX_HEADER_READS) -> dict:
     """{'dit':…, 'text_encoder':…, 'vae':…} of paths found under `scan_root`.
 
     A role maps to "" when nothing under `scan_root` actually contains it. Never
     returns a file whose header says it is something else -- in particular a
     ComfyUI-wrapped Anima merge is never offered as the DiT, because the trainer
     cannot load one.
+
+    `model="moss"` looks for the MOSS-Image trio instead (same dict keys): the Base DiT,
+    the Qwen3.5-9B text encoder and the FLUX.2 VAE. The W4A8 text encoder is never
+    returned, because sd-scripts cannot load it.
     """
+    moss = model == "moss"
+    if model not in ("anima", "moss"):
+        raise ValueError(f"unknown model {model!r}")
     empty = {role: "" for role in _ROLES}
     root = Path(scan_root) if scan_root else None
     if root is None or not root.is_dir():
@@ -183,9 +227,14 @@ def detect_model_files(scan_root, max_header_reads: int = MAX_HEADER_READS) -> d
     identified = {}  # path -> role, so a header is never read twice
     for role in _ROLES:
         reads = 0
-        for path in _rank_for(role, files):
+        want = _MOSS_ROLES[role] if moss else role
+        if moss:
+            ranked = _rank_for(role, files, _MOSS_DIR_HINTS, _MOSS_NAME_HINTS, _MOSS_PREFER[role])
+        else:
+            ranked = _rank_for(role, files)
+        for path in ranked:
             if path in identified:
-                if identified[path] == role and not out[role]:
+                if identified[path] == want and not out[role]:
                     out[role] = str(path)
                     break
                 continue
@@ -193,7 +242,7 @@ def detect_model_files(scan_root, max_header_reads: int = MAX_HEADER_READS) -> d
                 break
             reads += 1
             identified[path] = identify(path)
-            if identified[path] == role:
+            if identified[path] == want:
                 out[role] = str(path)
                 break
     return out

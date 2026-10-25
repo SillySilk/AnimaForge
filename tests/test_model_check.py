@@ -7,6 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from core.model_check import (
     ROLE_DIT, ROLE_TEXT_ENCODER, ROLE_VAE,
+    ROLE_MOSS_DIT, ROLE_MOSS_TE, ROLE_MOSS_TE_W4A8, ROLE_FLUX2_VAE,
     check_model_file, identify, read_safetensors_keys,
 )
 
@@ -105,3 +106,57 @@ def test_absurd_header_length_is_rejected(tmp_path):
     p = tmp_path / "bad.safetensors"
     p.write_bytes(struct.pack("<Q", 1 << 40) + b"{}")
     assert read_safetensors_keys(p) is None
+
+# --- MOSS-Image (key shapes read off the real files; see the Task 1 findings) ---
+MOSS_DIT_KEYS = ["rope.bands", "final_linear_video.weight", "layers.0.k_norm.weight",
+                 "layers.0.proj.ffn_up_gate.weight", "layers.0.proj.qkv.weight"]
+MOSS_TE_KEYS = ["lm_head.weight", "lm_head.weight_scale",
+                "model.language_model.embed_tokens.weight",
+                "model.language_model.layers.0.linear_attn.A_log",
+                "model.language_model.layers.0.mlp.down_proj.weight_scale"]
+MOSS_TE_W4A8_KEYS = MOSS_TE_KEYS + [
+    "model.language_model.layers.0.linear_attn.in_proj_qkv.weight_codebook",
+    "model.language_model.layers.0.linear_attn.in_proj_qkv.weight_s_channel"]
+FLUX2_VAE_KEYS = ["bn.running_mean", "bn.running_var", "bn.num_batches_tracked",
+                  "encoder.conv_in.weight", "decoder.conv_in.weight", "decoder.conv_out.weight"]
+
+
+def test_identify_moss_files(tmp_path):
+    assert identify(write_safetensors(tmp_path / "d.safetensors", MOSS_DIT_KEYS)) == ROLE_MOSS_DIT
+    assert identify(write_safetensors(tmp_path / "t.safetensors", MOSS_TE_KEYS)) == ROLE_MOSS_TE
+    assert identify(write_safetensors(tmp_path / "q.safetensors", MOSS_TE_W4A8_KEYS)) == ROLE_MOSS_TE_W4A8
+    assert identify(write_safetensors(tmp_path / "v.safetensors", FLUX2_VAE_KEYS)) == ROLE_FLUX2_VAE
+
+
+def test_anima_identification_is_unchanged(tmp_path):
+    assert identify(write_safetensors(tmp_path / "a.safetensors", DIT_KEYS)) == ROLE_DIT
+    assert identify(write_safetensors(tmp_path / "b.safetensors", TE_KEYS)) == ROLE_TEXT_ENCODER
+    assert identify(write_safetensors(tmp_path / "c.safetensors", VAE_KEYS)) == ROLE_VAE
+
+
+def test_moss_files_pass_their_own_role(tmp_path):
+    assert check_model_file(write_safetensors(tmp_path / "d.safetensors", MOSS_DIT_KEYS), ROLE_MOSS_DIT) == ""
+    assert check_model_file(write_safetensors(tmp_path / "t.safetensors", MOSS_TE_KEYS), ROLE_MOSS_TE) == ""
+    assert check_model_file(write_safetensors(tmp_path / "v.safetensors", FLUX2_VAE_KEYS), ROLE_FLUX2_VAE) == ""
+
+
+def test_anima_dit_in_the_moss_slot_is_refused(tmp_path):
+    p = write_safetensors(tmp_path / "anima.safetensors", DIT_KEYS)
+    assert "MOSS-Image" in check_model_file(p, ROLE_MOSS_DIT)
+
+
+def test_anima_vae_in_the_moss_slot_is_refused(tmp_path):
+    p = write_safetensors(tmp_path / "qwen_image_vae.safetensors", VAE_KEYS)
+    assert "FLUX.2" in check_model_file(p, ROLE_FLUX2_VAE)
+
+
+def test_w4a8_text_encoder_is_refused_by_its_tensors(tmp_path):
+    p = write_safetensors(tmp_path / "TE (MOSS-Image).safetensors", MOSS_TE_W4A8_KEYS)
+    msg = check_model_file(p, ROLE_MOSS_TE)
+    assert "W4A8" in msg and "not supported" in msg
+
+
+def test_w4a8_text_encoder_is_refused_by_its_name(tmp_path):
+    p = write_safetensors(tmp_path / "qwen3.5_9b_w4a8_gptq.safetensors", MOSS_TE_KEYS)
+    msg = check_model_file(p, ROLE_MOSS_TE)
+    assert "W4A8" in msg and "not supported" in msg

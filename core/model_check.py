@@ -40,12 +40,30 @@ ROLE_DIT_WRAPPED = "dit_wrapped"
 # An autoencoder, but not Anima's — a Flux/SDXL/SD VAE.
 ROLE_VAE_OTHER = "vae_other"
 
+# MOSS-Image files. Key shapes read off the real files (see the Task 1 findings):
+#   moss_image_base_bf16.safetensors   379 tensors: `rope.bands`, `final_linear_video.*`,
+#                                      `layers.N.proj.{qkv,o,ffn_up_gate,ffn_down}.weight`
+#   qwen3.5_9b_int8_convrot            1409 tensors, everything under `model.language_model.*`
+#                                      (hybrid linear-attention: `...linear_attn.A_log`) + `lm_head.*`
+#   "TE (MOSS-Image)" W4A8 GPTQ        same layout, plus `*.weight_codebook` / `weight_s_channel` /
+#                                      `weight_s_rel` quantisation tensors; sd-scripts cannot load it
+#   flux2-vae.safetensors              251 tensors: encoder./decoder. plus a `bn.running_mean`
+#                                      batch-norm that no Flux1/SDXL/Qwen-Image VAE carries
+ROLE_MOSS_DIT = "moss_dit"
+ROLE_MOSS_TE = "moss_text_encoder"
+ROLE_MOSS_TE_W4A8 = "moss_text_encoder_w4a8"
+ROLE_FLUX2_VAE = "flux2_vae"
+
 LABELS = {
     ROLE_DIT: "Anima DiT checkpoint",
     ROLE_TEXT_ENCODER: "Qwen3 text encoder",
     ROLE_VAE: "Qwen-Image VAE",
     ROLE_DIT_WRAPPED: "ComfyUI-wrapped Anima checkpoint",
     ROLE_VAE_OTHER: "VAE from a different model family (Flux/SDXL/SD)",
+    ROLE_MOSS_DIT: "MOSS-Image DiT",
+    ROLE_MOSS_TE: "MOSS text encoder (Qwen3.5-9B)",
+    ROLE_MOSS_TE_W4A8: "W4A8 (GPTQ) Qwen3.5 text encoder",
+    ROLE_FLUX2_VAE: "FLUX.2 VAE",
 }
 
 # A safetensors header is JSON metadata only. Real ones run to a few hundred KB;
@@ -80,6 +98,14 @@ def identify(path) -> str:
     keys = read_safetensors_keys(path)
     if not keys:
         return ""
+    if any(k == "rope.bands" or k.startswith("final_linear_video.") for k in keys):
+        return ROLE_MOSS_DIT
+    if any(k.startswith("model.language_model.") for k in keys):
+        # Qwen3.5: every weight sits under model.language_model.*. The W4A8 GPTQ build
+        # adds codebook tensors; sd-scripts only reads the int8 / bf16 files.
+        if any(k.endswith(".weight_codebook") for k in keys):
+            return ROLE_MOSS_TE_W4A8
+        return ROLE_MOSS_TE
     if any(k.startswith("net.") for k in keys):
         return ROLE_DIT
     if any(k.startswith("model.diffusion_model.") for k in keys):
@@ -91,12 +117,20 @@ def identify(path) -> str:
         # `encoder.downsamples.*` blocks and conv1/conv2 at the top level. A Flux
         # or SDXL VAE has the same encoder./decoder. split but conv_in/conv_out
         # blocks, so it must not pass as Anima's.
+        if "bn.running_mean" in keys:
+            return ROLE_FLUX2_VAE
         if any(k.startswith("encoder.downsamples.") for k in keys) or (
             any(k.startswith("conv1.") for k in keys) and any(k.startswith("conv2.") for k in keys)
         ):
             return ROLE_VAE
         return ROLE_VAE_OTHER
     return ""
+
+
+_W4A8_MESSAGE = (
+    "“{name}” is the W4A8 (GPTQ) build of the text encoder, and W4A8 is not supported "
+    "for training. Use the int8 file instead, e.g. qwen3.5_9b_int8_convrot.safetensors."
+)
 
 
 def check_model_file(path, expected_role: str) -> str:
@@ -111,9 +145,31 @@ def check_model_file(path, expected_role: str) -> str:
     if not p.is_file():
         return ""
     actual = identify(p)
+    if expected_role == ROLE_MOSS_TE:
+        low = p.name.lower()
+        if actual == ROLE_MOSS_TE_W4A8 or "w4a8" in low or "gptq" in low:
+            return _W4A8_MESSAGE.format(name=p.name)
     if not actual or actual == expected_role:
         return ""
     want = LABELS.get(expected_role, expected_role)
+    if expected_role == ROLE_MOSS_DIT:
+        return (
+            f"“{p.name}” is set as the MOSS-Image DiT, but its contents are a "
+            f"{LABELS.get(actual, actual)}. Pick moss_image_base_bf16.safetensors "
+            f"(from huggingface.co/OpenMOSS-Team/MOSS-Image-Base) in Setup."
+        )
+    if expected_role == ROLE_MOSS_TE:
+        return (
+            f"“{p.name}” is set as the MOSS text encoder, but its contents are a "
+            f"{LABELS.get(actual, actual)}. MOSS-Image needs the Qwen3.5-9B text "
+            f"encoder, e.g. qwen3.5_9b_int8_convrot.safetensors."
+        )
+    if expected_role == ROLE_FLUX2_VAE:
+        return (
+            f"“{p.name}” is set as the MOSS VAE, but its contents are a "
+            f"{LABELS.get(actual, actual)}. MOSS-Image needs the FLUX.2 VAE, "
+            f"e.g. flux2-vae.safetensors."
+        )
     if actual == ROLE_DIT_WRAPPED and expected_role == ROLE_DIT:
         return (
             f"“{p.name}” is an Anima checkpoint saved in ComfyUI's wrapped layout "

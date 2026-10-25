@@ -128,6 +128,23 @@ class SetupTab(QWidget):
     def get_vae_path(self) -> str:
         return self._vae_edit.text().strip()
 
+    def get_moss_dit_path(self) -> str:
+        return self._moss_dit_edit.text().strip()
+
+    def get_moss_te_path(self) -> str:
+        return self._moss_te_edit.text().strip()
+
+    def get_moss_vae_path(self) -> str:
+        return self._moss_vae_edit.text().strip()
+
+    def model_paths(self, model: str) -> tuple:
+        """(dit, text encoder, vae) paths for `model`."""
+        if model == "moss":
+            return (self.get_moss_dit_path(), self.get_moss_te_path(), self.get_moss_vae_path())
+        if model == "anima":
+            return (self.get_dit_path(), self.get_qwen3_path(), self.get_vae_path())
+        raise ValueError(f"unknown model {model!r}")
+
     def get_output_dir(self) -> str:
         return self._output_edit.text().strip()
 
@@ -145,17 +162,31 @@ class SetupTab(QWidget):
         if not (Path(sd) / script).is_file():
             return False, f"sd-scripts path does not contain {script} (re-run install.bat)."
 
-        for label, path in (
-            ("Anima DiT checkpoint", self.get_dit_path()),
-            ("Qwen3 text encoder", self.get_qwen3_path()),
-            ("Qwen-Image VAE", self.get_vae_path()),
-        ):
+        if model == "moss":
+            from core import model_check
+            dit, te, vae = self.model_paths("moss")
+            checks = (
+                ("MOSS-Image DiT", dit, model_check.ROLE_MOSS_DIT),
+                ("MOSS text encoder (Qwen3.5-9B)", te, model_check.ROLE_MOSS_TE),
+                ("MOSS VAE (FLUX.2)", vae, model_check.ROLE_FLUX2_VAE),
+            )
+        else:
+            checks = (
+                ("Anima DiT checkpoint", self.get_dit_path(), None),
+                ("Qwen3 text encoder", self.get_qwen3_path(), None),
+                ("Qwen-Image VAE", self.get_vae_path(), None),
+            )
+        for label, path, role in checks:
             if not path:
                 return False, f"{label} is not set."
             if not Path(path).is_file():
                 return False, f"{label} file does not exist."
             if not path.lower().endswith((".safetensors", ".pth", ".ckpt")):
                 return False, f"{label} must be a .safetensors/.pth file."
+            if role:
+                problem = model_check.check_model_file(path, role)
+                if problem:
+                    return False, f"{label}: {problem}"
 
         if not out:
             return False, "Output directory is not set."
@@ -266,6 +297,50 @@ class SetupTab(QWidget):
         self._autodetect_label.setStyleSheet("font-size: 11px; color: #8a8a93;")
         model_layout.addWidget(self._autodetect_label)
         layout.addWidget(model_group)
+
+        # MOSS-Image model files group (three files)
+        moss_group = QGroupBox("MOSS-Image Model Files")
+        moss_layout = QVBoxLayout(moss_group)
+        moss_layout.setSpacing(8)
+
+        moss_hint = QLabel(
+            "MOSS-Image needs the Base DiT, the Qwen3.5-9B text encoder (int8 build; the "
+            "W4A8 build is not supported) and the FLUX.2 VAE. Auto-detect scans the model "
+            "scan folder above."
+        )
+        moss_hint.setObjectName("label_field")
+        moss_hint.setWordWrap(True)
+        moss_layout.addWidget(moss_hint)
+
+        self._moss_dit_edit, moss_dit_row = self._make_file_row(
+            "e.g. .../diffusion_models/moss_image_base_bf16.safetensors", self._browse_moss_dit
+        )
+        self._moss_dit_status = moss_dit_row.itemAt(1).widget()
+        moss_layout.addWidget(QLabel("MOSS-Image DiT:"))
+        moss_layout.addLayout(moss_dit_row)
+
+        self._moss_te_edit, moss_te_row = self._make_file_row(
+            "e.g. .../text_encoder/qwen3.5_9b_int8_convrot.safetensors", self._browse_moss_te
+        )
+        self._moss_te_status = moss_te_row.itemAt(1).widget()
+        moss_layout.addWidget(QLabel("MOSS text encoder (Qwen3.5-9B):"))
+        moss_layout.addLayout(moss_te_row)
+
+        self._moss_vae_edit, moss_vae_row = self._make_file_row(
+            "e.g. .../VAE/flux2-vae.safetensors", self._browse_moss_vae
+        )
+        self._moss_vae_status = moss_vae_row.itemAt(1).widget()
+        moss_layout.addWidget(QLabel("MOSS VAE (FLUX.2):"))
+        moss_layout.addLayout(moss_vae_row)
+
+        moss_detect_btn = QPushButton("🔍 Auto-detect MOSS files")
+        moss_detect_btn.clicked.connect(self._auto_detect_moss)
+        moss_layout.addWidget(moss_detect_btn)
+        self._moss_detect_label = QLabel("")
+        self._moss_detect_label.setWordWrap(True)
+        self._moss_detect_label.setStyleSheet("font-size: 11px; color: #8a8a93;")
+        moss_layout.addWidget(self._moss_detect_label)
+        layout.addWidget(moss_group)
 
         # PyTorch group
         torch_group = QGroupBox("PyTorch Runtime (Anima requires 2.5+)")
@@ -412,7 +487,8 @@ class SetupTab(QWidget):
 
         # Auto-save wiring
         for edit in (self._sdscripts_edit, self._dit_edit, self._qwen3_edit,
-                     self._vae_edit, self._output_edit):
+                     self._vae_edit, self._moss_dit_edit, self._moss_te_edit,
+                     self._moss_vae_edit, self._output_edit):
             edit.textChanged.connect(self._on_text_changed)
 
     # ------------------------------------------------------------------
@@ -541,6 +617,15 @@ class SetupTab(QWidget):
     def _browse_vae(self):
         self._browse_model_file(self._vae_edit, "Select Qwen-Image VAE")
 
+    def _browse_moss_dit(self):
+        self._browse_model_file(self._moss_dit_edit, "Select MOSS-Image DiT")
+
+    def _browse_moss_te(self):
+        self._browse_model_file(self._moss_te_edit, "Select MOSS Text Encoder (Qwen3.5-9B)")
+
+    def _browse_moss_vae(self):
+        self._browse_model_file(self._moss_vae_edit, "Select MOSS VAE (FLUX.2)")
+
     def _browse_output(self):
         folder = QFileDialog.getExistingDirectory(
             self, "Select Output Directory", self._output_edit.text()
@@ -592,6 +677,41 @@ class SetupTab(QWidget):
                 "folder, or set each one manually."
             )
         self._autodetect_label.setText(" ".join(parts))
+        self._verify_environment()
+
+    def _auto_detect_moss(self):
+        """Fill the three MOSS-Image paths from the scan folder (header-based, like Anima's)."""
+        from core.model_locations import detect_model_files
+
+        scan_root = Path(self._scan_edit.text().strip() or self._app.first_run_scan_default())
+        if not scan_root.is_dir():
+            self._moss_detect_label.setText("Model scan folder not found — set it above.")
+            self._verify_environment()
+            return
+
+        got = detect_model_files(scan_root, model="moss")
+        found, missing = [], []
+        for key, label, edit in (
+            ("dit", "MOSS-Image DiT", self._moss_dit_edit),
+            ("text_encoder", "MOSS text encoder (Qwen3.5-9B, int8)", self._moss_te_edit),
+            ("vae", "MOSS VAE (FLUX.2)", self._moss_vae_edit),
+        ):
+            if got.get(key):
+                edit.setText(got[key])
+                found.append(f"{label} ({Path(got[key]).name})")
+            else:
+                missing.append(label)
+
+        parts = []
+        if found:
+            parts.append("Found: " + ", ".join(found) + ".")
+        if missing:
+            parts.append(
+                "Not found: " + ", ".join(missing) + ". Download them from "
+                "huggingface.co/OpenMOSS-Team/MOSS-Image-Base into the scan folder, "
+                "or set each one manually."
+            )
+        self._moss_detect_label.setText(" ".join(parts))
         self._verify_environment()
 
     # ------------------------------------------------------------------
@@ -781,6 +901,9 @@ class SetupTab(QWidget):
             (self._dit_edit, self._dit_status),
             (self._qwen3_edit, self._qwen3_status),
             (self._vae_edit, self._vae_status),
+            (self._moss_dit_edit, self._moss_dit_status),
+            (self._moss_te_edit, self._moss_te_status),
+            (self._moss_vae_edit, self._moss_vae_status),
         ):
             val = edit.text().strip()
             ok = bool(val) and Path(val).is_file()
@@ -1469,6 +1592,9 @@ class SetupTab(QWidget):
         self._settings.setValue("dit_path", to_portable(self._dit_edit.text()))
         self._settings.setValue("qwen3_path", to_portable(self._qwen3_edit.text()))
         self._settings.setValue("vae_path", to_portable(self._vae_edit.text()))
+        self._settings.setValue("moss_dit_path", to_portable(self._moss_dit_edit.text()))
+        self._settings.setValue("moss_te_path", to_portable(self._moss_te_edit.text()))
+        self._settings.setValue("moss_vae_path", to_portable(self._moss_vae_edit.text()))
         self._settings.setValue("output_dir", to_portable(self._output_edit.text()))
         self._settings.sync()
 
@@ -1490,6 +1616,9 @@ class SetupTab(QWidget):
         self._dit_edit.setText(from_portable(self._settings.value("dit_path", "", type=str)))
         self._qwen3_edit.setText(from_portable(self._settings.value("qwen3_path", "", type=str)))
         self._vae_edit.setText(from_portable(self._settings.value("vae_path", "", type=str)))
+        self._moss_dit_edit.setText(from_portable(self._settings.value("moss_dit_path", "", type=str)))
+        self._moss_te_edit.setText(from_portable(self._settings.value("moss_te_path", "", type=str)))
+        self._moss_vae_edit.setText(from_portable(self._settings.value("moss_vae_path", "", type=str)))
 
         from core.paths import DEFAULT_OUTPUT_DIR
         default_out = DEFAULT_OUTPUT_DIR
