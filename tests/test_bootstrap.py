@@ -140,19 +140,28 @@ def test_sd_scripts_update_commands_shape():
     ]
 
 
-def _fake_run(head="", porcelain=""):
+def _fake_run(head="", porcelain="", toplevel=None, rc=0):
     class R:
         def __init__(self, out):
-            self.returncode, self.stdout = 0, out
+            self.returncode, self.stdout, self.stderr = rc, out, "boom"
 
     def run(cmd, **kw):
+        if "--show-toplevel" in cmd:
+            return R(toplevel if toplevel is not None else cmd[2])
+        assert "--untracked-files=no" in cmd or "status" not in cmd
         return R(head if "rev-parse" in cmd else porcelain)
     return run
 
 
 def _repo_with_sd(tmp_path):
     d = tmp_path / "sd-scripts"
-    d.mkdir()
+    d.mkdir(exist_ok=True)
+    return str(d)
+
+
+def _repo_with_sd_named(tmp_path, name):
+    d = tmp_path / name
+    d.mkdir(exist_ok=True)
     return str(d)
 
 
@@ -173,6 +182,33 @@ def test_sd_scripts_state_behind(tmp_path):
 def test_sd_scripts_state_dirty(tmp_path):
     run = _fake_run(head=PIN + "\n", porcelain=" M train_network.py\n")
     assert sd_scripts_state(_repo_with_sd(tmp_path), run=run) == "dirty"
+
+
+def test_sd_scripts_state_untracked_wd14_models_not_dirty(tmp_path):
+    run = _fake_run(head=PIN + "\n", porcelain="")  # --untracked-files=no hides ?? entries
+    assert sd_scripts_state(_repo_with_sd(tmp_path), run=run) == "at_pin"
+    seen = []
+
+    def spy(cmd, **kw):
+        seen.append(cmd)
+        return run(cmd, **kw)
+    sd_scripts_state(_repo_with_sd_named(tmp_path, "x"), run=spy)
+    status = [c for c in seen if "status" in c][0]
+    assert "--untracked-files=no" in status
+
+
+def test_sd_scripts_state_git_failure_is_clear_error(tmp_path):
+    with pytest.raises(SystemExit) as e:
+        sd_scripts_state(_repo_with_sd(tmp_path), run=_fake_run(rc=128))
+    assert "failed" in str(e.value) and "re-run install.bat" in str(e.value)
+
+
+def test_sd_scripts_state_toplevel_mismatch_is_clear_error(tmp_path):
+    run = _fake_run(head=PIN + "\n", toplevel=str(tmp_path))
+    with pytest.raises(SystemExit) as e:
+        sd_scripts_state(_repo_with_sd(tmp_path), run=run)
+    assert "not its own git checkout" in str(e.value)
+    assert "Delete or rename" in str(e.value)
 
 
 def test_ensure_sd_scripts_refuses_dirty(monkeypatch):

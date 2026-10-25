@@ -17,6 +17,7 @@ the CPU torch that sd-scripts' `diffusers[torch]` would otherwise pull:
 Then verifies the install. Windows-only. Pure helpers are unit-tested; see
 docs/superpowers/specs/2026-06-24-venv-install-design.md.
 """
+import os
 import re
 import subprocess
 import sys
@@ -110,16 +111,31 @@ def sd_scripts_update_commands(repo: str, commit: str):
 
 def sd_scripts_state(repo: str, run=subprocess.run) -> str:
     """State of the sd-scripts checkout at `repo`: "absent" (no checkout), "dirty"
-    (local changes), "at_pin" (HEAD is SD_SCRIPTS_COMMIT) or "behind" (anything else)."""
+    (local edits to tracked files), "at_pin" (HEAD is SD_SCRIPTS_COMMIT) or "behind"
+    (anything else). Untracked files (e.g. the WD14 tagger models downloaded into
+    sd-scripts/wd14_models/) do not count as local changes. Any git failure, or an
+    sd-scripts folder that is not its own git checkout, stops with a plain message."""
     if not Path(repo).is_dir():
         return "absent"
-    status = run(["git", "-C", repo, "status", "--porcelain"],
-                 capture_output=True, text=True)
-    if (status.stdout or "").strip():
+
+    def git(*args):
+        r = run(["git", "-C", repo, *args], capture_output=True, text=True)
+        if r.returncode != 0:
+            raise SystemExit(
+                f"git {' '.join(args)} failed in sd-scripts (exit {r.returncode}): "
+                f"{(getattr(r, 'stderr', '') or '').strip()}\n"
+                "Check that `git` is installed and sd-scripts/ is a healthy checkout, "
+                "then re-run install.bat.")
+        return (r.stdout or "").strip()
+
+    top = git("rev-parse", "--show-toplevel")
+    if os.path.normcase(os.path.realpath(top)) != os.path.normcase(os.path.realpath(repo)):
+        raise SystemExit("sd-scripts/ is not its own git checkout (git resolves it to "
+                         f"{top}). Delete or rename the sd-scripts folder, then re-run "
+                         "install.bat.")
+    if git("status", "--porcelain", "--untracked-files=no"):
         return "dirty"
-    head = run(["git", "-C", repo, "rev-parse", "HEAD"],
-               capture_output=True, text=True)
-    return "at_pin" if (head.stdout or "").strip() == SD_SCRIPTS_COMMIT else "behind"
+    return "at_pin" if git("rev-parse", "HEAD") == SD_SCRIPTS_COMMIT else "behind"
 
 
 SSL_MARKER = "CERTIFICATE_VERIFY_FAILED"
