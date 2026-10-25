@@ -26,6 +26,9 @@ from PySide6.QtWidgets import (
 )
 
 from core import models
+
+LOWVRAM_TOOLTIP = "For small GPUs only — fit training on less VRAM (same quality, slower)"
+MOSS_LOWVRAM_TOOLTIP = "MOSS picks its memory settings automatically."
 from core.caption_rules import parse_rules
 from core.config_generator import generate_configs, get_config_summary
 from core.describe_models import read_describe_defaults
@@ -223,6 +226,9 @@ class TrainTab(QWidget):
         self._dit_path = ""
         self._qwen3_path = ""
         self._vae_path = ""
+        self._model_paths = {}          # {model id: (dit, text encoder, vae)} from Setup
+        self._memory_flags = None       # MOSS VRAM-tier flags picked by the last validation
+        self._moss_warnings = []        # non-blocking MOSS preflight lines for the run log
         self._output_dir = ""
         self._trigger_word = ""
         self._resume_state_path = None
@@ -262,6 +268,7 @@ class TrainTab(QWidget):
         self._ot_samples_dir = ""
         self._build_ui()
         self._connect_trainer()
+        self._apply_model_controls()
 
     def set_gpu_busy_check(self, fn):
         """Injected by MainWindow: returns a human-readable reason the GPU is busy
@@ -286,12 +293,29 @@ class TrainTab(QWidget):
         self._refresh_readiness_summary()
 
     def set_environment(self, sdscripts_path: str, dit_path: str, qwen3_path: str,
-                        vae_path: str, output_dir: str):
+                        vae_path: str, output_dir: str, model_paths: dict = None):
+        """`model_paths` maps a model id to its (dit, text encoder, vae) files; the
+        selected model's triple wins over the legacy Anima arguments."""
         self._setup_path = sdscripts_path
-        self._dit_path = dit_path
-        self._qwen3_path = qwen3_path
-        self._vae_path = vae_path
+        self._legacy_paths = (dit_path, qwen3_path, vae_path)
+        self._model_paths = dict(model_paths or {})
+        self._apply_model_paths()
         self._output_dir = output_dir
+
+    def _apply_model_paths(self):
+        legacy = getattr(self, "_legacy_paths", ("", "", ""))
+        self._dit_path, self._qwen3_path, self._vae_path = self._model_paths.get(
+            self._model, legacy)
+
+    def _apply_model_controls(self):
+        """Per-model control state: MOSS picks its own memory settings and has no
+        Forge test-render, so the Low-VRAM and Test in Forge controls step aside."""
+        preset = models.get(self._model)
+        is_default = self._model == models.DEFAULT_MODEL
+        self._lowvram_btn.setEnabled(is_default)
+        self._lowvram_btn.setToolTip(
+            LOWVRAM_TOOLTIP if is_default else MOSS_LOWVRAM_TOOLTIP)
+        self._forge_test_btn.setVisible(preset.forge_test)
 
     def set_trigger_word(self, trigger: str):
         self._trigger_word = trigger
@@ -343,6 +367,8 @@ class TrainTab(QWidget):
         if model_id == self._model:
             return                             # re-selecting keeps the user's step target
         self._model = model_id
+        self._apply_model_paths()
+        self._apply_model_controls()
         if self._config_overrides:
             self.set_config_overrides({})
         spin = self._target_steps_spin
@@ -947,9 +973,10 @@ class TrainTab(QWidget):
         gen_btn.clicked.connect(self._preview_config)
 
         lowvram_btn = QPushButton("🧰 Low VRAM…")
-        lowvram_btn.setToolTip("For small GPUs only — fit training on less VRAM (same quality, slower)")
+        lowvram_btn.setToolTip(LOWVRAM_TOOLTIP)
         lowvram_btn.clicked.connect(self._open_lowvram)
         btn_layout.addWidget(lowvram_btn)
+        self._lowvram_btn = lowvram_btn
 
         forge_row = QHBoxLayout()
         deliver_btn = QPushButton("📤 Deliver to Forge")
@@ -960,6 +987,7 @@ class TrainTab(QWidget):
         test_btn.clicked.connect(self._test_in_forge)
         forge_row.addWidget(deliver_btn)
         forge_row.addWidget(test_btn)
+        self._forge_test_btn = test_btn
         btn_layout.addLayout(forge_row)
 
         comfy_btn = QPushButton("📤 Deliver to ComfyUI")
@@ -1571,6 +1599,14 @@ class TrainTab(QWidget):
         if rd is None:
             QMessageBox.warning(self, "Cannot Add to Batch", msg)
             return
+        if rd.model != models.DEFAULT_MODEL and self.engine() == models.KOHYA:
+            # A GPU under the model's floor can never run it; say so now, not mid-queue.
+            from core import moss_memory, moss_run
+            try:
+                moss_run.launch_plan()
+            except moss_memory.MossVramError as e:
+                QMessageBox.warning(self, "Cannot Add to Batch", str(e))
+                return
         self.add_to_batch_requested.emit(rd)
         self.status_message.emit(f"Added '{rd.lora_name}' to batch queue.")
 
@@ -1751,14 +1787,19 @@ class TrainTab(QWidget):
         params = self._training_params
         lora_name = self._lora_name_edit.text().strip()
         extra = {}
+        from core.kohya_recipes import recipe
         if self._app_settings:
             extra.update(self._app_settings.build_extra_training_args())
             extra.update(self._app_settings.prepare_sample_args(
-                run_dir, lora_name, self._trigger_word, self._dataset_style_anchor()))
+                run_dir, lora_name, self._trigger_word, self._dataset_style_anchor(),
+                sample_flags=recipe(self._model).sample_flags))
         # Low-VRAM overrides (only present when the user enabled+acknowledged it this session).
         from core import lowvram
-        lv = lowvram.get_current() or {}
+        is_default = self._model == models.DEFAULT_MODEL
+        lv = (lowvram.get_current() or {}) if is_default else {}   # MOSS ignores Low-VRAM
         return dict(
+            model=self._model,
+            memory_flags=(None if is_default else self._memory_flags),
             output_dir=run_dir,
             micro_batch=lv.get("micro_batch"),
             grad_accum=lv.get("grad_accum"),
@@ -1883,6 +1924,8 @@ class TrainTab(QWidget):
             return
 
         self._log_edit.clear()
+        for w in self._moss_warnings:
+            self._on_log_line(f"[Lora Forge] {w}")
         params = self._training_params
         total = params.get("total_steps", 3000)
         self._rp(kind="progress", step=0, total=total)
@@ -1892,7 +1935,8 @@ class TrainTab(QWidget):
         # Skipped when Low-VRAM mode is active — fitting on less VRAM is the whole point.
         from core import gpu_check, lowvram
         free = gpu_check.free_vram_mb()
-        if lowvram.get_current() is None and self._app_settings is not None and free is not None:
+        lv_active = self._model == models.DEFAULT_MODEL and lowvram.get_current() is not None
+        if not lv_active and self._app_settings is not None and free is not None:
             need = self._app_settings.get("min_free_vram_mb")
             if need and free < need:
                 apps = gpu_check.resident_gpu_apps()
@@ -1928,7 +1972,7 @@ class TrainTab(QWidget):
                                  self._keep_epochs_spin.value(),
                                  resume=bool(self._resume_check.isChecked()
                                              and self._resume_state_path))
-        self._trainer.start(self._config_path, self._setup_path)
+        self._trainer.start(self._config_path, self._setup_path, model=self._model)
 
     def _check_empty_captions(self, interactive: bool = True) -> bool:
         """Guard against empty/missing .txt captions (training fails on them).
@@ -2456,12 +2500,13 @@ class TrainTab(QWidget):
             else:
                 self._rp(kind="done", label="Complete!")
                 self.status_message.emit("Training finished successfully.")
-            if not kohya and self._app_settings and (
+            ran = models.get(self._model)
+            if (not kohya or not ran.forge_test) and self._app_settings and (
                     self._app_settings.get("forge_auto_deliver")
                     or self._app_settings.get("forge_auto_test")):
                 # The Forge LoRA folder and test checkpoint are set up for Anima; a Krea 2
-                # LoRA dropped there, or rendered on an Anima checkpoint, is wrong.
-                self._on_log_line("[Lora Forge] Krea 2 LoRA not sent to Forge automatically "
+                # or MOSS LoRA dropped there, or rendered on an Anima checkpoint, is wrong.
+                self._on_log_line(f"[Lora Forge] {ran.name} LoRA not sent to Forge automatically "
                                   "(auto-deliver and auto-test are set up for Anima). "
                                   "Deliver it from Home when you want it in Forge.")
             elif self._app_settings:
@@ -2577,11 +2622,20 @@ class TrainTab(QWidget):
         if not Path(self._setup_path).is_dir():
             return False, "sd-scripts path does not exist."
         from core import model_check
-        for label, p, role in (
+        if self._model != models.DEFAULT_MODEL:
+            from core import moss_memory, moss_run
+            problem = moss_run.files_problem(self._dit_path, self._qwen3_path, self._vae_path)
+            if problem:
+                return False, problem
+            try:
+                self._memory_flags, self._moss_warnings = moss_run.launch_plan()
+            except moss_memory.MossVramError as e:
+                return False, str(e)
+        for label, p, role in (() if self._model != models.DEFAULT_MODEL else (
             ("Anima DiT checkpoint", self._dit_path, model_check.ROLE_DIT),
             ("Qwen3 text encoder", self._qwen3_path, model_check.ROLE_TEXT_ENCODER),
             ("Qwen-Image VAE", self._vae_path, model_check.ROLE_VAE),
-        ):
+        )):
             if not p or not Path(p).exists():
                 return False, f"{label} is not set or does not exist. Go to Setup tab."
             # Existence alone used to be the whole check, so a wrong file reached the
@@ -2767,9 +2821,11 @@ class TrainTab(QWidget):
         valid, msg = self._validate_for_config()
         if not valid:
             return False, msg
-        if not (Path(self._setup_path) / "anima_train_network.py").is_file():
+        from core.kohya_recipes import recipe
+        script = recipe(self._model).train_script
+        if not (Path(self._setup_path) / script).is_file():
             return False, (
-                "anima_train_network.py not found in sd-scripts path.\n"
-                "Update sd-scripts to a version with Anima support (Setup tab)."
+                f"{script} not found in sd-scripts path.\n"
+                "Update sd-scripts (re-run install.bat)."
             )
         return True, ""

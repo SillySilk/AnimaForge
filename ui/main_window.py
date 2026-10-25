@@ -1488,6 +1488,8 @@ class MainWindow(QMainWindow):
             qwen3_path=self._setup_tab.get_qwen3_path(),
             vae_path=self._setup_tab.get_vae_path(),
             output_dir=self._setup_tab.get_output_dir(),
+            model_paths={"anima": self._setup_tab.model_paths("anima"),
+                         "moss": self._setup_tab.model_paths("moss")},
         )
         self._dataset_tab.set_sdscripts_path(sd_path)
         self._train_tab.set_onetrainer_root(self._setup_tab.get_onetrainer_root())

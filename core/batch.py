@@ -88,7 +88,7 @@ class RunDefinition:
     # Environment
     sdscripts_path: str = ""
     dit_path: str = ""
-    qwen3_path: str = ""
+    qwen3_path: str = ""              # text encoder path (Anima Qwen3-0.6B / MOSS Qwen3.5-9B)
     vae_path: str = ""
     output_dir: str = ""
     onetrainer_root: str = ""
@@ -427,13 +427,33 @@ class BatchRunner(QObject):
             self._trainer.set_total_steps(params["total_steps"])
             app = AppSettings()
             run_dir = run_output_dir(run.output_dir, run.lora_name)  # per-run folder
+            from core.kohya_recipes import recipe
+            rec = recipe(run.model)
+            memory_flags = None
+            if run.model != models.DEFAULT_MODEL:
+                # MOSS: files must exist (a queued run's files can be deleted later),
+                # and the memory tier comes from the real GPU, never from Low-VRAM mode.
+                from core import moss_memory, moss_run
+                problem = moss_run.files_problem(run.dit_path, run.qwen3_path, run.vae_path)
+                if problem:
+                    self._mark_failed(f"'{run.lora_name}': {problem}")
+                    return False
+                try:
+                    memory_flags, warns = moss_run.launch_plan()
+                except moss_memory.MossVramError as e:
+                    self._mark_failed(f"'{run.lora_name}': {e}")
+                    return False
+                for w in warns:
+                    self.log_line.emit(f"[Batch] {w}")
             extra = app.build_extra_training_args()
             extra.update(app.prepare_sample_args(
                 run_dir, run.lora_name, run.trigger_word,
                 prompts=resolve_sample_prompts(run),
-                force=bool(run.compare_group)))   # a comparison is its previews
+                force=bool(run.compare_group),   # a comparison is its previews
+                sample_flags=rec.sample_flags))
             from core import lowvram
-            lv = lowvram.get_current() or {}  # active only if acknowledged this session
+            # Low-VRAM is an Anima-only mode; MOSS picks its own memory settings.
+            lv = (lowvram.get_current() or {}) if run.model == models.DEFAULT_MODEL else {}
             # Aspect-ratio bucketing divides by zero on images with a side under 64 px
             # (sd-scripts floors the bucket to a multiple of 64). Drop bucketing for this
             # run rather than let it die at exit code 1 mid-queue.
@@ -475,6 +495,8 @@ class BatchRunner(QObject):
                 training_comment=(run.trigger_word if run.embed_metadata and run.trigger_word else None),
                 extra_args=extra,
                 overrides=run.config_overrides,
+                model=run.model,
+                memory_flags=memory_flags,
             )
         except Exception as e:
             self._mark_failed(f"config generation failed for '{run.lora_name}': {e}")
@@ -495,7 +517,7 @@ class BatchRunner(QObject):
             pass
 
         self._trainer.set_safety(run_dir, run.lora_name, run.save_last_n_epochs)
-        self._trainer.start(cfg, run.sdscripts_path)
+        self._trainer.start(cfg, run.sdscripts_path, model=run.model)
         return True
 
     def _start_onetrainer(self, run) -> bool:

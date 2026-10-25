@@ -59,7 +59,7 @@ def test_krea2_run_trains_through_onetrainer_not_kohya(tmp_path, monkeypatch):
     s = FakeSession()
     r = runner_with([s])
     kohya = []
-    monkeypatch.setattr(r._trainer, "start", lambda cfg, sd: kohya.append(sd))
+    monkeypatch.setattr(r._trainer, "start", lambda cfg, sd, model="anima": kohya.append(sd))
     phases = []
     r.run_phase.connect(lambda i, ph: phases.append(ph))
     r.start(make(tmp_path))
@@ -143,7 +143,7 @@ def test_anima_runs_still_use_kohya(tmp_path, monkeypatch):
     r = BatchRunner(onetrainer_factory=no_onetrainer)
     kohya = []
     monkeypatch.setattr(batch_mod, "generate_configs", lambda **kw: ("cfg.toml", None))
-    monkeypatch.setattr(r._trainer, "start", lambda cfg, sd: kohya.append(sd))
+    monkeypatch.setattr(r._trainer, "start", lambda cfg, sd, model="anima": kohya.append(sd))
     run = make(tmp_path)[0]
     run.model, run.sdscripts_path = "anima", "C:/sd"
     run.output_dir = str(tmp_path / "out")  # sample prompts are written under it
@@ -274,7 +274,7 @@ def test_a_v2_saved_queue_trains_through_kohya_exactly_as_before(tmp_path, monke
                         lambda **kw: seen.update(kw) or ("cfg.toml", None))
     r = BatchRunner(onetrainer_factory=lambda p: (_ for _ in ()).throw(AssertionError("OT")))
     kohya = []
-    monkeypatch.setattr(r._trainer, "start", lambda cfg, sd: kohya.append((cfg, sd)))
+    monkeypatch.setattr(r._trainer, "start", lambda cfg, sd, model="anima": kohya.append((cfg, sd)))
     r.start(runs)
     assert runs[0].model == "anima"
     assert kohya == [("cfg.toml", "C:/sd")]

@@ -228,7 +228,7 @@ def test_start_training_passes_resolution_and_epoch_cadence(tmp_path, monkeypatc
     monkeypatch.setattr(batch_mod, "generate_configs", _capture)
 
     runner = BatchRunner()
-    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd: None)
+    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd, model="anima": None)
     run = _caption_run(tmp_path, "ds0", captioned=True, resolution=1536,
                        save_every_n_epochs=1, save_last_n_epochs=0)
     runner.start([run])
@@ -246,7 +246,7 @@ def test_uncaptioned_run_emits_captioning_then_training(tmp_path, monkeypatch):
     _neuter_caption_processes(runner, monkeypatch)
     monkeypatch.setattr(cr_mod, "combine_all", lambda *a, **kw: (1, 0))
     trained = []
-    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd: trained.append(sd))
+    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd, model="anima": trained.append(sd))
 
     phases = []
     runner.run_phase.connect(lambda i, p: phases.append((i, p)))
@@ -270,7 +270,7 @@ def test_fully_captioned_keep_skips_straight_to_training(tmp_path, monkeypatch):
 
     runner = BatchRunner()
     trained = []
-    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd: trained.append(sd))
+    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd, model="anima": trained.append(sd))
     phases = []
     runner.run_phase.connect(lambda i, p: phases.append((i, p)))
 
@@ -287,7 +287,7 @@ def test_caption_failure_fails_run_and_continues(tmp_path, monkeypatch):
     runner = BatchRunner()
     _neuter_caption_processes(runner, monkeypatch)
     trained = []
-    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd: trained.append(sd))
+    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd, model="anima": trained.append(sd))
     finished_events = []
     runner.run_finished.connect(lambda i, ok: finished_events.append((i, ok)))
 
@@ -308,7 +308,7 @@ def test_caption_failure_stops_queue_when_not_continuing(tmp_path, monkeypatch):
     runner = BatchRunner()
     _neuter_caption_processes(runner, monkeypatch)
     trained = []
-    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd: trained.append(sd))
+    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd, model="anima": trained.append(sd))
 
     run0 = _caption_run(tmp_path, "ds0")
     run1 = _caption_run(tmp_path, "ds1", captioned=True)
@@ -327,7 +327,7 @@ def test_stop_during_captioning_does_not_advance(tmp_path, monkeypatch):
     runner = BatchRunner()
     _neuter_caption_processes(runner, monkeypatch)
     trained = []
-    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd: trained.append(sd))
+    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd, model="anima": trained.append(sd))
     run_starts = []
     runner.run_started.connect(run_starts.append)
 
@@ -349,7 +349,7 @@ def test_start_skips_done_runs_by_default(tmp_path, monkeypatch):
     from core.batch import BatchRunner, DONE, RUNNING
 
     runner = BatchRunner()
-    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd: None)
+    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd, model="anima": None)
     started = []
     runner.run_started.connect(started.append)
 
@@ -365,7 +365,7 @@ def test_restart_reruns_finished_queue_from_the_top(tmp_path, monkeypatch):
     from core.batch import BatchRunner, DONE, RUNNING, QUEUED
 
     runner = BatchRunner()
-    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd: None)
+    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd, model="anima": None)
     started = []
     runner.run_started.connect(started.append)
 
@@ -431,7 +431,7 @@ def test_config_generation_failure_continues_when_continue_on_error_true(tmp_pat
 
     runner = BatchRunner()
     trained = []
-    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd: trained.append(sd))
+    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd, model="anima": trained.append(sd))
     run0 = _caption_run(tmp_path, "ds0", captioned=True)
     run1 = _caption_run(tmp_path, "ds1", captioned=True)
     runner.start([run0, run1], continue_on_error=True)
@@ -450,7 +450,7 @@ def test_scan_oserror_fails_only_that_run_and_queue_continues(tmp_path, monkeypa
 
     runner = BatchRunner()
     trained = []
-    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd: trained.append(sd))
+    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd, model="anima": trained.append(sd))
 
     run0 = _caption_run(tmp_path, "ds0")                    # needs captioning
     run1 = _caption_run(tmp_path, "ds1", captioned=True)    # trains straight away
@@ -478,7 +478,7 @@ def test_unknown_caption_stage_fails_only_that_run_and_queue_continues(tmp_path,
 
     runner = BatchRunner()
     trained = []
-    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd: trained.append(sd))
+    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd, model="anima": trained.append(sd))
 
     run0 = _caption_run(tmp_path, "ds0")
     run1 = _caption_run(tmp_path, "ds1", captioned=True)
@@ -502,7 +502,7 @@ def test_caption_refusal_fails_only_that_run_and_queue_continues(tmp_path, monke
 
     runner = BatchRunner()
     trained = []
-    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd: trained.append(sd))
+    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd, model="anima": trained.append(sd))
 
     run0 = _caption_run(tmp_path, "ds0", sdscripts_path="")   # blank -> CaptionRunner.start() refuses
     run1 = _caption_run(tmp_path, "ds1", captioned=True)
@@ -527,7 +527,7 @@ def test_on_caption_finished_guard_blocks_stray_true_after_stop(tmp_path, monkey
     runner = BatchRunner()
     _neuter_caption_processes(runner, monkeypatch)
     trained = []
-    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd: trained.append(sd))
+    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd, model="anima": trained.append(sd))
 
     run0 = _caption_run(tmp_path, "ds0")
     runner.start([run0])
@@ -602,7 +602,7 @@ def test_start_training_passes_the_runs_overrides(tmp_path, monkeypatch):
         return ("cfg", None)
     monkeypatch.setattr(batch_mod, "generate_configs", _capture)
     runner = BatchRunner()
-    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd: None)
+    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd, model="anima": None)
     run = _caption_run(tmp_path, "ds0", captioned=True,
                        config_overrides={"training_arguments.noise_offset": 0.05})
     runner.start([run])
@@ -617,7 +617,7 @@ def test_batch_reports_a_safety_stop_as_done(tmp_path, monkeypatch):
     runner = BatchRunner()
     armed = []
     monkeypatch.setattr(runner._trainer, "set_safety", lambda *a: armed.append(a))
-    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd: None)
+    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd, model="anima": None)
     log = []
     runner.log_line.connect(log.append)
     run = _caption_run(tmp_path, "ds0", captioned=True, save_last_n_epochs=2)
@@ -654,7 +654,7 @@ def test_second_run_rebuilds_its_own_style_from_shared_sidecars(tmp_path, monkey
     cm.mark_stage(str(folder), "combine", [str(folder / "a.png")])
     monkeypatch.setattr(batch_mod, "generate_configs", lambda **kw: ("cfg", None))
     runner = BatchRunner()
-    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd: None)
+    monkeypatch.setattr(runner._trainer, "start", lambda cfg, sd, model="anima": None)
     run = RunDefinition(lora_name="mrx-tags", dataset_folder=str(folder), image_count=1,
                         trigger_word="mrx", caption_style="tags", caption_policy="keep",
                         compare_group="g", sdscripts_path="C:/sd", enable_bucket=False,

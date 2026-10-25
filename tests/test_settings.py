@@ -276,3 +276,25 @@ def test_startup_update_check_roundtrip(tmp_path):
     a.set("skipped_update_commit", "a" * 40)
     assert a.get("startup_update_check") is False
     assert a.get("skipped_update_commit") == "a" * 40
+
+
+def test_sample_flags_appended(tmp_path):
+    a = _appsettings(tmp_path)
+    a.set("sample_quality_prefix", "")
+    a.set("sample_prompts", "a girl on a bench\nmychar, a closeup")
+    a.prepare_sample_args(str(tmp_path), "lr", trigger_word="mychar",
+                          sample_flags="--s 24 --l 3.0 --fs 5.0")
+    lines = (tmp_path / "configs" / "lr_sample.txt").read_text(encoding="utf-8").splitlines()
+    assert lines[0].startswith("mychar, a girl on a bench --s 24 --l 3.0 --fs 5.0 --d ")
+    assert all(" --s 24 --l 3.0 --fs 5.0 --d " in ln for ln in lines)
+
+
+def test_sample_flags_empty_matches_today(tmp_path):
+    a = _appsettings(tmp_path)
+    a.set("sample_quality_prefix", "")
+    a.set("sample_prompts", "a girl on a bench")
+    a.prepare_sample_args(str(tmp_path), "lr")
+    plain = (tmp_path / "configs" / "lr_sample.txt").read_text(encoding="utf-8")
+    a.prepare_sample_args(str(tmp_path), "lr", sample_flags="")
+    assert (tmp_path / "configs" / "lr_sample.txt").read_text(encoding="utf-8") == plain
+    assert "--s" not in plain
