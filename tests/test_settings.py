@@ -298,3 +298,11 @@ def test_sample_flags_empty_matches_today(tmp_path):
     a.prepare_sample_args(str(tmp_path), "lr", sample_flags="")
     assert (tmp_path / "configs" / "lr_sample.txt").read_text(encoding="utf-8") == plain
     assert "--s" not in plain
+
+
+def test_prepare_sample_args_flattens_multiline_prompt(tmp_path):
+    a = _appsettings(tmp_path)
+    a.set("sample_quality_prefix", "")
+    a.prepare_sample_args(str(tmp_path), "lr", prompts=["line one.\nline two."], force=True)
+    lines = (tmp_path / "configs" / "lr_sample.txt").read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1 and lines[0].startswith("line one. line two. --d ")

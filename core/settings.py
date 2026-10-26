@@ -233,7 +233,7 @@ class AppSettings:
         if prompts is None:
             prompts = [p.strip() for p in self.get("sample_prompts").splitlines() if p.strip()]
         else:
-            prompts = [p.strip() for p in prompts if p and p.strip()]
+            prompts = [" ".join(p.split()) for p in prompts if p and p.strip()]
         if not prompts:
             # Enabled but no prompts authored yet: fall back to a minimal preview so
             # progress images still render (activation words alone exercise likeness/style).

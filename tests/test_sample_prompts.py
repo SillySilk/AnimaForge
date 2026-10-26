@@ -83,3 +83,10 @@ def test_no_roster_means_no_character_prompts(tmp_path):
     from core.sample_prompts import character_caption_blocks
     _make_captioned_dataset(tmp_path, {"a": "a cat on a mat"})
     assert character_caption_blocks(str(tmp_path)) == []
+
+
+def test_multi_paragraph_caption_is_one_prompt(tmp_path):
+    # The prompts file is one prompt per line: a caption's paragraph breaks must not
+    # split it into several previews.
+    _make_captioned_dataset(tmp_path, {"a": "First paragraph.\nSecond one.\n\nThird."})
+    assert grab_caption_blocks(str(tmp_path), 3) == ["First paragraph. Second one. Third."]

@@ -7,6 +7,12 @@ word is NOT stripped here; config_generator/prepare_sample_args handles it at wr
 import random
 
 
+def _one_line(caption: str) -> str:
+    """The prompts file holds one prompt per line, so a caption's paragraph breaks
+    would split it into several previews."""
+    return " ".join(caption.split())
+
+
 def grab_caption_blocks(folder, n: int, rng=None):
     """Return up to `n` random, verbatim caption blocks from a captioned dataset.
 
@@ -20,7 +26,7 @@ def grab_caption_blocks(folder, n: int, rng=None):
     if n <= 0:
         return []
     items = scan_folder(folder) if folder else []
-    blocks = [cap for cap in (d.get("caption", "").strip() for d in items) if cap]
+    blocks = [_one_line(cap) for cap in (d.get("caption", "").strip() for d in items) if cap]
     if not blocks:
         return []
     rng = rng or random
@@ -66,5 +72,5 @@ def character_caption_blocks(folder, rng=None):
         fewest = min(n for n, _ in pool)
         name = rng.choice(sorted(name for n, name in pool if n == fewest))
         used.add(name)
-        out.append(captions[name])
+        out.append(_one_line(captions[name]))
     return out
