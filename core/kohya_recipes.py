@@ -18,6 +18,7 @@ class KohyaRecipe:
     vae_chunk_size: int | None  # 64 | None (omitted for MOSS)
     max_bucket_reso: int        # 1536 | 1536
     sample_flags: str           # "" | "--s 24 --l 3.0 --fs 5.0"
+    sample_every_n_epochs: int  # 1 | 3 (MOSS previews take ~90 s each)
     allow_text_encoder_training: bool  # True | False
 
 
@@ -32,6 +33,7 @@ _RECIPES = {
         vae_chunk_size=64,
         max_bucket_reso=1536,
         sample_flags="",
+        sample_every_n_epochs=1,
         allow_text_encoder_training=True,
     ),
     "moss": KohyaRecipe(
@@ -50,6 +52,7 @@ _RECIPES = {
         vae_chunk_size=None,
         max_bucket_reso=1536,
         sample_flags="--s 24 --l 3.0 --fs 5.0",
+        sample_every_n_epochs=3,
         allow_text_encoder_training=False,
     ),
 }

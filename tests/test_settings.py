@@ -300,6 +300,14 @@ def test_sample_flags_empty_matches_today(tmp_path):
     assert "--s" not in plain
 
 
+def test_prepare_sample_args_cadence_override(tmp_path):
+    a = _appsettings(tmp_path)
+    a.set("sample_enable", True)
+    a.set("sample_prompts", "a portrait")
+    assert a.prepare_sample_args(str(tmp_path), "lr", sample_every_n_epochs=3)[
+        "sample_every_n_epochs"] == 3
+
+
 def test_prepare_sample_args_flattens_multiline_prompt(tmp_path):
     a = _appsettings(tmp_path)
     a.set("sample_quality_prefix", "")

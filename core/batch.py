@@ -451,7 +451,8 @@ class BatchRunner(QObject):
                 run_dir, run.lora_name, run.trigger_word,
                 prompts=resolve_sample_prompts(run),
                 force=bool(run.compare_group),   # a comparison is its previews
-                sample_flags=rec.sample_flags))
+                sample_flags=rec.sample_flags,
+                sample_every_n_epochs=rec.sample_every_n_epochs))
             from core import lowvram
             # Models that pick their own memory settings ignore Low-VRAM mode.
             lv = (lowvram.get_current() or {}) if not auto_memory else {}

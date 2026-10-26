@@ -217,7 +217,8 @@ class AppSettings:
 
     def prepare_sample_args(self, output_dir: str, lora_name: str, trigger_word: str = "",
                             style_anchor: str = "", prompts=None, force: bool = False,
-                            sample_flags: str = "") -> dict:
+                            sample_flags: str = "",
+                            sample_every_n_epochs: int = SAMPLE_EVERY_N_EPOCHS) -> dict:
         """If sample images are enabled, write the prompts file and return sample-* training args.
 
         Activation words (the trigger and the style anchor, if any) are prepended to every prompt
@@ -225,6 +226,7 @@ class AppSettings:
         present as a comma-separated token. `prompts` (a list) overrides the settings box —
         batch runs pass their own snapshot so the queue never depends on live UI state.
         `sample_flags` (the model recipe's preview flags, "" for Anima) go before the seed.
+        `sample_every_n_epochs` is the model recipe's preview cadence.
         """
         if not self.get("sample_enable") and not force:
             return {}
@@ -264,7 +266,7 @@ class AppSettings:
         f.write_text("\n".join(lines) + "\n", encoding="utf-8")
         args = {
             "sample_prompts": str(f.as_posix()),
-            "sample_every_n_epochs": SAMPLE_EVERY_N_EPOCHS,
+            "sample_every_n_epochs": sample_every_n_epochs,
             "sample_sampler": self.get("sample_sampler"),
         }
         if self.get("sample_at_first"):

@@ -404,6 +404,10 @@ class TrainTab(QWidget):
             spin.setValue(max(500, int(default or preset.default_target_steps)))
         spin.blockSignals(False)
         self._caption_style = preset.caption_style
+        every = self._sample_every()
+        self._sample_count_lbl.setText(
+            f"{SAMPLE_COUNT} preview images per epoch." if every == 1
+            else f"{SAMPLE_COUNT} preview images every {every} epochs.")
         self._recalculate()
         self.model_changed.emit(model_id)
 
@@ -889,9 +893,9 @@ class TrainTab(QWidget):
         sample_layout.addWidget(self._sample_prompts_edit)
 
         sample_btn_row = QHBoxLayout()
-        count_lbl = QLabel(f"{SAMPLE_COUNT} preview images per epoch.")
-        count_lbl.setStyleSheet("color: #8a8a93; font-size: 11px;")
-        sample_btn_row.addWidget(count_lbl)
+        self._sample_count_lbl = QLabel(f"{SAMPLE_COUNT} preview images per epoch.")
+        self._sample_count_lbl.setStyleSheet("color: #8a8a93; font-size: 11px;")
+        sample_btn_row.addWidget(self._sample_count_lbl)
         self._gen_prompts_btn = QPushButton(f"🎲 Grab {SAMPLE_COUNT} random captions")
         self._gen_prompts_btn.setToolTip(
             "Fill the box with that many of the dataset's actual captions, chosen at random, "
@@ -1704,6 +1708,13 @@ class TrainTab(QWidget):
         except Exception:
             return ""
 
+    def _sample_every(self) -> int:
+        """Epochs between preview rounds for the selected model."""
+        if self.engine() == models.KOHYA:
+            from core.kohya_recipes import recipe
+            return recipe(self._model).sample_every_n_epochs
+        return SAMPLE_EVERY_N_EPOCHS
+
     def _sample_positions(self):
         """Return (fraction, epoch) pairs at which preview images will render, for the
         tick bar. Fractions of the run (not absolute step numbers) so the tick bar can
@@ -1712,7 +1723,7 @@ class TrainTab(QWidget):
         epochs = params.get("epochs", 0)
         if not epochs or not self._sample_enable_check.isChecked():
             return []
-        every = SAMPLE_EVERY_N_EPOCHS
+        every = self._sample_every()
         fractions = []
         if self._app_settings and self._app_settings.get("sample_at_first"):
             fractions.append((0.0, 0))
@@ -1801,7 +1812,8 @@ class TrainTab(QWidget):
             extra.update(self._app_settings.build_extra_training_args())
             extra.update(self._app_settings.prepare_sample_args(
                 run_dir, lora_name, self._trigger_word, self._dataset_style_anchor(),
-                sample_flags=recipe(self._model).sample_flags))
+                sample_flags=recipe(self._model).sample_flags,
+                sample_every_n_epochs=recipe(self._model).sample_every_n_epochs))
         # Low-VRAM overrides (only present when the user enabled+acknowledged it this session).
         from core import lowvram
         auto_memory = models.get(self._model).auto_memory

@@ -32,3 +32,9 @@ def test_moss_recipe_values():
         "timestep_sampling", "weighting_scheme", "logit_mean", "logit_std", "discrete_flow_shift"]
     assert r.sample_flags == "--s 24 --l 3.0 --fs 5.0"
     assert r.allow_text_encoder_training is False
+
+
+def test_preview_cadence_per_model():
+    # MOSS previews are slow (~90 s each), so they render every third epoch.
+    assert recipe("anima").sample_every_n_epochs == 1
+    assert recipe("moss").sample_every_n_epochs == 3
