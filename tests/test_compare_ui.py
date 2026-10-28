@@ -14,10 +14,10 @@ def test_home_button_asks_and_locks_while_training():
     h = HomeTab()
     seen = []
     h.compare_requested.connect(lambda: seen.append(1))
-    h._compare_btn.click()
+    h._compare_action.trigger()
     assert seen == [1]
     h.set_training_active(True)
-    assert not h._compare_btn.isEnabled()
+    assert not h._compare_action.isEnabled()
 
 
 def test_view_renders_a_row_per_prompt_and_labels_missing_sides(tmp_path):

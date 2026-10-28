@@ -34,10 +34,10 @@ def test_home_button_asks_and_locks_while_training():
     h = HomeTab()
     seen = []
     h.free_memory_requested.connect(lambda: seen.append(1))
-    h._free_memory_btn.click()
+    h._free_memory_action.trigger()
     assert seen == [1]
     h.set_training_active(True)
-    assert not h._free_memory_btn.isEnabled()
+    assert not h._free_memory_action.isEnabled()
 
 
 @pytest.fixture

@@ -3,10 +3,10 @@ import json
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QAction, QPixmap
 from PySide6.QtWidgets import (
-    QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QInputDialog,
-    QLabel, QLineEdit, QPushButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QInputDialog,
+    QLabel, QLineEdit, QMenu, QPushButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget,
 )
 
 from core import models
@@ -82,7 +82,6 @@ class HomeTab(QWidget):
         super().__init__(parent)
         self._ready_labels = {}
         self._recent_label = None
-        self._recover_btn = None
         self._last_ctx = {}
         self._build_ui()
 
@@ -351,7 +350,8 @@ class HomeTab(QWidget):
         # Training preset — ONE labeled control instead of a knob row (radios were too
         # restrictive once presets became user-extensible; a bare combo flipped values
         # on stray scrolls in an earlier iteration). The picker modal lists presets and
-        # applies nothing until its explicit Select button. Gear = Step Calculator.
+        # applies nothing until its explicit Select button. Target steps are set from the
+        # Train pillar's TARGET STEPS tile; Advanced settings live inside Train Options.
         c.addSpacing(6)
         sub_row = QHBoxLayout()
         sub_row.setSpacing(10)
@@ -367,26 +367,19 @@ class HomeTab(QWidget):
             "Add your own in Setup → Training Presets.")
         self._preset_btn.clicked.connect(self.preset_pick_requested.emit)
         sub_row.addWidget(self._preset_btn)
-        self._advanced_btn = QPushButton("Advanced…")
+        self._advanced_btn = QPushButton("Advanced settings…")
         self._advanced_btn.setObjectName("af_btn_ghost")
         self._advanced_btn.setMinimumHeight(36)
         self._advanced_btn.setCursor(Qt.PointingHandCursor)
         self._advanced_btn.setToolTip(
             "Every setting the trainer will receive for this run — change any of them.")
-        self._advanced_btn.clicked.connect(self.advanced_settings_requested.emit)
-        sub_row.addWidget(self._advanced_btn)
+        self._advanced_btn.clicked.connect(self._on_advanced_clicked)
+        self._restash(self._advanced_btn)  # shown inside the Train Options modal
         self._advanced_label = QLabel("")
         self._advanced_label.setObjectName("af_eyebrow_mute")
         self._advanced_label.setVisible(False)
         sub_row.addWidget(self._advanced_label)
         sub_row.addStretch()
-        gear = QPushButton("⚙")
-        gear.setObjectName("af_icon_btn")
-        gear.setFixedSize(34, 34)
-        gear.setCursor(Qt.PointingHandCursor)
-        gear.setToolTip("Target steps & advanced step settings")
-        gear.clicked.connect(self._open_stepcalc_modal)
-        sub_row.addWidget(gear)
         c.addLayout(sub_row)
 
         # Style @anchor (only meaningful for Style runs)
@@ -498,7 +491,7 @@ class HomeTab(QWidget):
         self._start_train_btn.setObjectName("btn_start")
         self._start_train_btn.setMinimumHeight(48)
         self._start_train_btn.setCursor(Qt.PointingHandCursor)
-        self._start_train_btn.clicked.connect(self.start_train_requested.emit)
+        self._start_train_btn.clicked.connect(self._on_start_clicked)
         start_stop.addWidget(self._start_train_btn, 1)
         self._stop_train_btn = QPushButton("■  Stop")
         self._stop_train_btn.setObjectName("btn_stop")
@@ -508,24 +501,6 @@ class HomeTab(QWidget):
         self._stop_train_btn.setToolTip("Stop the current training run (asks to confirm)")
         self._stop_train_btn.clicked.connect(self.stop_train_requested.emit)
         start_stop.addWidget(self._stop_train_btn)
-        self._free_memory_btn = QPushButton("Free memory…")
-        self._free_memory_btn.setObjectName("af_btn_ghost")
-        self._free_memory_btn.setMinimumHeight(48)
-        self._free_memory_btn.setCursor(Qt.PointingHandCursor)
-        self._free_memory_btn.setToolTip(
-            "Close the biggest other programs so the run has system memory. "
-            "Lists them and asks first.")
-        self._free_memory_btn.clicked.connect(self.free_memory_requested.emit)
-        start_stop.addWidget(self._free_memory_btn)
-        # Config check right where the launch happens (user feedback: it was only
-        # discoverable inside Options). Inspection aid, not a run control.
-        config_btn = QPushButton("📜")
-        config_btn.setObjectName("af_icon_btn")
-        config_btn.setFixedSize(48, 48)
-        config_btn.setCursor(Qt.PointingHandCursor)
-        config_btn.setToolTip("Preview the exact config files this run will use")
-        config_btn.clicked.connect(self.preview_config_requested.emit)
-        start_stop.addWidget(config_btn)
         tl.addLayout(start_stop)
         tl.addSpacing(8)
         tl.addLayout(self._cast_train_row())
@@ -729,51 +704,68 @@ class HomeTab(QWidget):
             "Queue this set — caption and train — to run later on the Batch screen")
         self._add_batch_btn.clicked.connect(self.add_to_batch_requested.emit)
         h.addWidget(self._add_batch_btn)
-        self._compare_btn = QPushButton("Compare caption styles…")
-        self._compare_btn.setObjectName("af_btn_ghost")
-        self._compare_btn.setMinimumHeight(52)
-        self._compare_btn.setCursor(Qt.PointingHandCursor)
-        self._compare_btn.setToolTip(
-            "Queue two runs of this set that differ only in caption style, then see "
-            "their previews side by side")
-        self._compare_btn.clicked.connect(self.compare_requested.emit)
-        h.addWidget(self._compare_btn)
-
-        cast = QPushButton("⚒  Caption + Train\nStyle + Characters")
-        cast.setObjectName("af_btn_ghost")
-        cast.setMinimumHeight(52)
-        cast.setCursor(Qt.PointingHandCursor)
-        cast.setToolTip(
-            "Caption the set, train the main LoRA, then a short LoRA for each named "
-            "character from their solo images — runs one after another on the Batch screen")
-        cast.clicked.connect(lambda: self.cast_run_requested.emit(True))
-        h.addWidget(cast)
+        h.addWidget(self._build_more_button())
 
         forge = QPushButton("⚒  Caption + Train")
         forge.setObjectName("af_btn_forge")
         forge.setMinimumHeight(52)
         forge.setMinimumWidth(200)
         forge.setCursor(Qt.PointingHandCursor)
-        forge.setToolTip("Caption the set (if it isn't yet), then train it")
-        forge.clicked.connect(self.run_requested.emit)
+        forge.setToolTip("Caption the set (if it isn't yet), then train it — each "
+                         "character too when \"Also train each character\" is ticked")
+        forge.clicked.connect(self._on_forge_clicked)
         h.addWidget(forge)
         return band
 
+    def _build_more_button(self) -> QPushButton:
+        """The occasional tools, in one menu instead of a row of buttons."""
+        more = QPushButton("More")  # Qt draws the menu arrow
+        more.setObjectName("af_btn_ghost")
+        more.setMinimumHeight(52)
+        more.setCursor(Qt.PointingHandCursor)
+        menu = QMenu(more)
+        menu.setToolTipsVisible(True)
+
+        def action(text, tip, slot):
+            a = QAction(text, menu)
+            a.setToolTip(tip)
+            a.triggered.connect(slot)
+            menu.addAction(a)
+            return a
+
+        self._recover_action = action(
+            "♻  Recover last run", "Resume the run that was interrupted",
+            self.recover_requested.emit)
+        self._recover_action.setVisible(False)
+        self._compare_action = action(
+            "Compare caption styles…",
+            "Queue two runs of this set that differ only in caption style, then see "
+            "their previews side by side", self.compare_requested.emit)
+        self._config_action = action(
+            "📜  Preview config files", "Preview the exact config files this run will use",
+            self.preview_config_requested.emit)
+        self._free_memory_action = action(
+            "Free memory…", "Close the biggest other programs so the run has system "
+            "memory. Lists them and asks first.", self.free_memory_requested.emit)
+        menu.addSeparator()
+        action("⟳  Check for updates", "Check GitHub for a newer Lora Forge and update in place",
+               self.update_check_requested.emit)
+        action("Auto-detect models", "Find the model files in your Forge models folder",
+               self.autodetect_requested.emit)
+        more.setMenu(menu)
+        return more
+
     def _cast_train_row(self) -> QHBoxLayout:
-        """Train the captioned set plus one short LoRA per named character, with the
-        character runs' step count beside it (remembered between sessions)."""
+        """The "also train each character" switch for Start Training and Caption + Train,
+        with the character runs' step count beside it (remembered between sessions)."""
         from core.settings import AppSettings
         row = QHBoxLayout()
         row.setSpacing(8)
-        btn = QPushButton("🚀  Train Style + Characters")
-        btn.setObjectName("af_btn_ghost")
-        btn.setMinimumHeight(40)
-        btn.setCursor(Qt.PointingHandCursor)
-        btn.setToolTip(
-            "Train the main LoRA, then a short LoRA for each named character from "
+        self._cast_check = QCheckBox("Also train each character")
+        self._cast_check.setToolTip(
+            "After the main LoRA, train a short LoRA for each named character from "
             "their solo images, to load beside it and lock the character in")
-        btn.clicked.connect(lambda: self.cast_run_requested.emit(False))
-        row.addWidget(btn, 1)
+        row.addWidget(self._cast_check, 1)
         row.addWidget(self._field_label("Steps per character"))
         self._character_steps = QSpinBox()
         self._character_steps.setRange(50, 10000)
@@ -797,37 +789,31 @@ class HomeTab(QWidget):
     def character_steps(self) -> int:
         return self._character_steps.value()
 
-    # ---- footer (recover / auto-detect / recent) ----
+    def _on_start_clicked(self):
+        if self._cast_check.isChecked():
+            self.cast_run_requested.emit(False)
+        else:
+            self.start_train_requested.emit()
+
+    def _on_forge_clicked(self):
+        if self._cast_check.isChecked():
+            self.cast_run_requested.emit(True)
+        else:
+            self.run_requested.emit()
+
+    def _on_advanced_clicked(self):
+        # The editor opens its own modal; close Train Options first so they don't stack.
+        modal = getattr(self, "_train_modal", None)
+        if modal is not None:
+            modal.close_modal()
+        self.advanced_settings_requested.emit()
+
+    # ---- footer (recent outputs) ----
     def _build_footer(self) -> QWidget:
         foot = QWidget()
         v = QVBoxLayout(foot)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(10)
-
-        row = QHBoxLayout()
-        row.setSpacing(12)
-        self._recover_btn = QPushButton("♻  Recover last run")
-        self._recover_btn.setObjectName("btn_primary")
-        self._recover_btn.setCursor(Qt.PointingHandCursor)
-        self._recover_btn.clicked.connect(self.recover_requested.emit)
-        self._recover_btn.setVisible(False)
-        row.addWidget(self._recover_btn)
-        row.addStretch()
-        # Small on purpose — occasional maintenance, not a run control.
-        updates = QPushButton("⟳ Updates")
-        updates.setObjectName("af_btn_ghost")
-        updates.setMinimumHeight(34)
-        updates.setCursor(Qt.PointingHandCursor)
-        updates.setToolTip("Check GitHub for a newer Lora Forge and update in place")
-        updates.clicked.connect(self.update_check_requested.emit)
-        row.addWidget(updates)
-        detect = QPushButton("Auto-detect models")
-        detect.setObjectName("af_btn_ghost")
-        detect.setMinimumHeight(34)
-        detect.setCursor(Qt.PointingHandCursor)
-        detect.clicked.connect(self.autodetect_requested.emit)
-        row.addWidget(detect)
-        v.addLayout(row)
 
         self._recent_label = QLabel("No runs yet.")
         self._recent_label.setObjectName("af_eyebrow_mute")
@@ -1016,9 +1002,14 @@ class HomeTab(QWidget):
             self.window(), title="Train Options", eyebrow="Step 02 · Options",
             subtitle="Sample previews, optimizer & network, run options — all here.",
             max_width=960)
+        self._advanced_btn.setVisible(True)
+        modal.body.addWidget(self._advanced_btn, 0, Qt.AlignLeft)
         panel.setVisible(True)
         modal.body.addWidget(panel)
         modal.closed.connect(lambda p=panel: self._restash(p))
+        modal.closed.connect(lambda: self._restash(self._advanced_btn))
+        self._train_modal = modal
+        modal.closed.connect(lambda: setattr(self, "_train_modal", None))
         # Home's steps/optimizer/dim·alpha readouts otherwise refresh only on tab
         # switch — closing the editor is the moment they must be current.
         modal.closed.connect(self.presets_closed.emit)
@@ -1026,7 +1017,7 @@ class HomeTab(QWidget):
         modal.open()
 
     def mount_step_calculator(self, widget):
-        """Stash the Train tab's Step Calculator — shown in the gear modal (numeric settings)."""
+        """Stash the Train tab's Step Calculator — shown when the TARGET STEPS tile is clicked."""
         self._stepcalc_panel = widget
         widget.setParent(self)
         widget.setVisible(False)
@@ -1087,8 +1078,9 @@ class HomeTab(QWidget):
         self._model_combo.setEnabled(not active)
         self._style_combo.setEnabled(not active)
         self._advanced_btn.setEnabled(not active)
-        self._free_memory_btn.setEnabled(not active)
-        self._compare_btn.setEnabled(not active)
+        self._free_memory_action.setEnabled(not active)
+        self._compare_action.setEnabled(not active)
+        self._cast_check.setEnabled(not active)
 
     def set_advanced_count(self, n: int):
         """Show how many advanced settings this run changes (hidden when none)."""
@@ -1160,6 +1152,6 @@ class HomeTab(QWidget):
             rd = run_manifest.find_resumable(context.get("output", ""))
             if rd is None:
                 rd = sets.interrupted_run()
-            self._recover_btn.setVisible(rd is not None)
+            self._recover_action.setVisible(rd is not None)
         except Exception:
-            self._recover_btn.setVisible(False)
+            self._recover_action.setVisible(False)

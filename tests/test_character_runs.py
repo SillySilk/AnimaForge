@@ -138,13 +138,19 @@ def _window(monkeypatch, folder, out):
 def test_home_buttons_emit_train_only_and_caption_variants():
     from ui.home_tab import HomeTab
     t = HomeTab()
-    got = []
+    got, plain = [], []
     t.cast_run_requested.connect(got.append)
+    t.start_train_requested.connect(lambda: plain.append("train"))
+    t.run_requested.connect(lambda: plain.append("forge"))
     texts = {b.text(): b for b in t.findChildren(type(t._add_batch_btn))}
-    texts["🚀  Train Style + Characters"].click()
-    texts["⚒  Caption + Train\nStyle + Characters"].click()
-    assert got == [False, True]
-    assert "⚒  Caption + Train" in texts and "⚒  Forge It" not in texts
+    t._start_train_btn.click()
+    texts["⚒  Caption + Train"].click()
+    assert got == [] and plain == ["train", "forge"]
+    t._cast_check.setChecked(True)
+    t._start_train_btn.click()
+    texts["⚒  Caption + Train"].click()
+    assert got == [False, True] and plain == ["train", "forge"]
+    assert "⚒  Forge It" not in texts
 
 
 def test_train_style_and_characters_queues_main_then_each_character(tmp_path, monkeypatch):
