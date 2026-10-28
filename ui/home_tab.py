@@ -780,8 +780,8 @@ class HomeTab(QWidget):
         return row
 
     def _sync_character_steps(self):
-        """A model without a cast LoRA picks each character's steps itself."""
-        manual = models.get(self._model_combo.currentData()).cast_lora
+        """Some models (MOSS) pick each character's steps themselves."""
+        manual = not models.get(self._model_combo.currentData()).auto_character_steps
         self._character_steps.setEnabled(manual)
         self._character_steps.setToolTip(
             "" if manual else "MOSS sets each character's steps automatically")

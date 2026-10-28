@@ -1131,7 +1131,7 @@ class MainWindow(QMainWindow):
         if not caption:
             main.caption_policy = cp.KEEP
         from core import models
-        cast_lora = models.get(main.model).cast_lora
+        auto_steps = models.get(main.model).auto_character_steps
         if models.get(main.model).auto_memory:
             # A GPU under the model's floor can never run it; say so now, not mid-queue.
             from core import moss_memory, moss_run
@@ -1140,7 +1140,7 @@ class MainWindow(QMainWindow):
             except moss_memory.MossVramError as e:
                 QMessageBox.warning(self, "Cannot start", str(e))
                 return
-        steps = self._home_tab.character_steps() if cast_lora else None
+        steps = None if auto_steps else self._home_tab.character_steps()
         runs, skipped = character_runs.plan(
             main, data, character_runs.image_names(folder), steps)
         uncaptioned = [r.character_token for r in runs if not caption and not r.character_source
@@ -1157,15 +1157,10 @@ class MainWindow(QMainWindow):
                 f"No named character has {character_runs.MIN_IMAGES} or more solo images "
                 "in this set, so there is nothing to train per character.")
             return
-        queue, refusal = character_runs.queue_for(
-            main, runs, bool(workflow.caption_state(folder).get("done")))
-        if refusal:
-            QMessageBox.warning(self, "Not captioned", refusal)
-            return
-        lines = [f"Main LoRA '{main.lora_name}' ({main.target_steps} steps)", ""] if cast_lora else []
+        lines = [f"Main LoRA '{main.lora_name}' ({main.target_steps} steps)", ""]
         for r in runs:
             line = f"  {r.character_token}: {r.image_count} solo images, {r.target_steps} steps"
-            if not cast_lora and r.image_count < character_runs.THIN_SET_IMAGES:
+            if auto_steps and r.image_count < character_runs.THIN_SET_IMAGES:
                 line += "  (thin set, likeness may be weak)"
             lines.append(line)
         if skipped:
@@ -1177,10 +1172,10 @@ class MainWindow(QMainWindow):
         if others:
             lines += ["", f"{others} run(s) already waiting in the Batch line run too."]
         if QMessageBox.question(
-                self, "Train Style + Characters" if cast_lora else "Train Characters",
+                self, "Train Style + Characters",
                 "\n".join(lines) + "\n\nStart now?") != QMessageBox.Yes:
             return
-        for rd in queue:
+        for rd in [main, *runs]:
             self._batch_tab.add_run(rd)
         self._switch_tab(5)
         self._batch_tab.start_queue(ask_about_captions=caption)

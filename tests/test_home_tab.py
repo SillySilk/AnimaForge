@@ -136,7 +136,7 @@ def test_home_emits_add_to_batch_requested():
 
 
 
-def test_character_steps_disabled_without_cast_lora():
+def test_character_steps_disabled_for_auto_step_models():
     t = HomeTab()
     t.set_model("moss")
     assert not t._character_steps.isEnabled()

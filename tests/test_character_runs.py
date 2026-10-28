@@ -234,21 +234,14 @@ def test_plan_fixed_steps_unchanged(tmp_path):
     assert [r.target_steps for r in runs] == [500, 500]
 
 
-def test_cast_queue_skips_main_for_moss(tmp_path):
-    data = _set(tmp_path / "set", {"Jay": 6})
-    main = _main(tmp_path / "set", tmp_path / "out", model="moss")
-    runs, _ = CR.plan(main, data, CR.image_names(str(tmp_path / "set")), steps=None)
-    assert CR.queue_for(main, runs, True) == (runs, "")
-    anima = _main(tmp_path / "set", tmp_path / "out")
-    aruns, _ = CR.plan(anima, data, CR.image_names(str(tmp_path / "set")))
-    assert CR.queue_for(anima, aruns, False) == ([anima, *aruns], "")
-
-
-def test_refuses_uncaptioned_main_source_for_moss(tmp_path):
-    data = _set(tmp_path / "set", {"Jay": 6}, captioned=False)
-    main = _main(tmp_path / "set", tmp_path / "out", model="moss")
-    runs, _ = CR.plan(main, data, CR.image_names(str(tmp_path / "set")), steps=None)
-    assert runs[0].character_source
-    queue, msg = CR.queue_for(main, runs, False)
-    assert queue == [] and msg == CR.MOSS_UNCAPTIONED_MSG
-    assert msg.startswith("MOSS trains only per-character LoRAs")
+def test_moss_queues_main_then_each_character_with_auto_steps(tmp_path, monkeypatch):
+    _set(tmp_path / "set", {"Jay": 6, "Gloria": 25})
+    w, queued, started, warned = _window(monkeypatch, tmp_path / "set", tmp_path / "out")
+    monkeypatch.setattr(w._train_tab, "build_run_definition",
+                        lambda: (_main(tmp_path / "set", tmp_path / "out", model="moss"), ""))
+    monkeypatch.setattr("core.moss_run.launch_plan", lambda: ([], []))
+    monkeypatch.setattr(w._home_tab, "character_steps", lambda: 750)
+    w._on_home_cast_run(False)
+    assert warned == []
+    assert [r.lora_name for r in queued] == ["Fam", "Fam_Jay", "Fam_Gloria"]
+    assert all(r.target_steps != 750 for r in queued[1:])
