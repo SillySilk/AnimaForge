@@ -20,7 +20,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-REPO = "SillySilk/AnimaForge"
+REPO = "SillySilk/LoraForge"
 BRANCH = "main"
 RAW_VERSION_URL = f"https://raw.githubusercontent.com/{REPO}/{BRANCH}/core/version.py"
 ZIPBALL_URL = f"https://github.com/{REPO}/archive/refs/heads/{BRANCH}.zip"
@@ -144,7 +144,7 @@ def fetch_remote_head(*, opener=urllib.request.urlopen):
 
 def download_and_extract(tmpdir: str) -> Path:
     """Download the repo zipball into tmpdir and extract it. Returns the inner
-    repo root (e.g. tmpdir/AnimaForge-main). Raises on any failure — nothing in
+    repo root (e.g. tmpdir/LoraForge-main). Raises on any failure — nothing in
     the install is touched until this has fully succeeded."""
     tmp = Path(tmpdir)
     zip_path = tmp / "update.zip"

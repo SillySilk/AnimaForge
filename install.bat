@@ -3,7 +3,7 @@ setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
 REM ============================================================================
-REM  AnimaForge installer — creates one unified .venv with the whole stack.
+REM  Lora Forge installer — creates one unified .venv with the whole stack.
 REM  It finds a compatible Python (3.10/3.11); if none, it downloads a pinned
 REM  standalone CPython, then hands off to scripts\bootstrap.py.
 REM
@@ -18,7 +18,7 @@ set "RUNTIME_DIR=%~dp0python-runtime"
 set "BASE_PY="
 
 echo.
-echo === AnimaForge installer ===
+echo === Lora Forge installer ===
 echo Looking for a compatible Python (3.10 or 3.11)...
 
 call :try_python "py -3.10"

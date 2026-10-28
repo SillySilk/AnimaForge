@@ -1,10 +1,10 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/SillySilk/AnimaForge/civitai-assets/hero.png" alt="AnimaForge" width="100%">
+<img src="https://raw.githubusercontent.com/SillySilk/LoraForge/civitai-assets/hero.png" alt="Lora Forge" width="100%">
 
-# AnimaForge
+# Lora Forge
 
-### A free, local, one-click LoRA trainer — hand-tuned for **Anima**
+### A free, local, one-click LoRA trainer — hand-tuned for **Anima**, **Krea 2** and **MOSS-Image**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-d4af37.svg)](LICENSE)
 ![Platform](https://img.shields.io/badge/platform-Windows-blue)
@@ -20,14 +20,16 @@ No subscriptions, no queues, no uploading your dataset to someone else's server.
 
 ---
 
-## ✨ Why AnimaForge
+## ✨ Why Lora Forge
 
-It's **not** a general-purpose SDXL tool with Anima bolted on. It's built for **one** model, and that focus is the whole point. The training config is **hand-tuned from a deep analysis of the Anima model itself**, so you get strong results without becoming a hyperparameter expert.
+It's **not** a general-purpose tool with every model bolted on. It supports a short list of models and tunes each one properly: pick **Anima**, **Krea 2** or **MOSS-Image** and the training config is **hand-tuned for that model**, so you get strong results without becoming a hyperparameter expert.
+
+_Formerly AnimaForge — the project started as an Anima-only trainer._
 
 A true **one-click pipeline** — **Auto-Tag → Describe → Combine → Train** — with everything dialed in.
 
 <div align="center">
-<img src="https://raw.githubusercontent.com/SillySilk/AnimaForge/civitai-assets/home.png" alt="Home cockpit" width="80%">
+<img src="https://raw.githubusercontent.com/SillySilk/LoraForge/civitai-assets/home.png" alt="Home cockpit" width="80%">
 </div>
 
 ## 🚀 What it does
@@ -37,21 +39,21 @@ A true **one-click pipeline** — **Auto-Tag → Describe → Combine → Train*
 | **🏷 Auto-Tag (WD14)** | Fast, accurate booru-style tags for every image. |
 | **📝 Describe** | Natural-language captions that capture what tags miss. JoyCaption by default; pick a lighter model in Setup if your GPU is smaller. |
 | **🧩 Combine** | Merges both into clean, training-ready captions. |
-| **🔥 Train** | Kicks off training with the Anima-tuned settings already set. |
+| **🔥 Train** | Kicks off training with that model's tuned settings already set. |
 | **🎭 Name Cast** | Name the people in your set once; trigger words stay consistent across the whole dataset. |
 | **📦 Batch** | Queue multiple LoRAs and walk away — unattended, survives a restart. |
 | **🧰 Low-VRAM mode** | Reaches smaller cards (down to ~8 GB) at the same quality, just slower. |
 
 <div align="center">
-<img src="https://raw.githubusercontent.com/SillySilk/AnimaForge/civitai-assets/dataset.png" alt="Dataset gallery" width="49%">
-<img src="https://raw.githubusercontent.com/SillySilk/AnimaForge/civitai-assets/characters.png" alt="Name Cast" width="49%">
-<img src="https://raw.githubusercontent.com/SillySilk/AnimaForge/civitai-assets/train.png" alt="Train tab" width="49%">
-<img src="https://raw.githubusercontent.com/SillySilk/AnimaForge/civitai-assets/batch.png" alt="Batch queue" width="49%">
+<img src="https://raw.githubusercontent.com/SillySilk/LoraForge/civitai-assets/dataset.png" alt="Dataset gallery" width="49%">
+<img src="https://raw.githubusercontent.com/SillySilk/LoraForge/civitai-assets/characters.png" alt="Name Cast" width="49%">
+<img src="https://raw.githubusercontent.com/SillySilk/LoraForge/civitai-assets/train.png" alt="Train tab" width="49%">
+<img src="https://raw.githubusercontent.com/SillySilk/LoraForge/civitai-assets/batch.png" alt="Batch queue" width="49%">
 </div>
 
 ## 🧩 Pairs with Animus Sorter
 
-Start clean: **[Animus Sorter](https://github.com/SillySilk/AnimusSorter)** sorts a pile of scraped images into subject bins and renames them `NAME_SERIAL_CATEGORY` — the exact convention AnimaForge reads to pre-fill **Name Cast** automatically. Sort and name once; AnimaForge carries it the rest of the way.
+Start clean: **[Animus Sorter](https://github.com/SillySilk/AnimusSorter)** sorts a pile of scraped images into subject bins and renames them `NAME_SERIAL_CATEGORY` — the exact convention Lora Forge reads to pre-fill **Name Cast** automatically. Sort and name once; Lora Forge carries it the rest of the way.
 
 ## ⚡ Quick start
 
@@ -69,22 +71,25 @@ launch.bat    :: start training
 > All other generations (GTX 900 through RTX 40-series) are covered by the default CUDA 12.1 build — don't switch older cards to cu128; pre-Turing GPUs aren't included in those wheels.
 
 <div align="center">
-<img src="https://raw.githubusercontent.com/SillySilk/AnimaForge/civitai-assets/setup.png" alt="Setup tab" width="80%">
+<img src="https://raw.githubusercontent.com/SillySilk/LoraForge/civitai-assets/setup.png" alt="Setup tab" width="80%">
 </div>
 
 ## 📋 Requirements
 
-- **Windows** + an **NVIDIA GPU with a recent driver** (CUDA). There's no CPU/AMD path — Anima training needs CUDA.
-- **~16 GB VRAM** comfortable; a low-VRAM mode reaches smaller cards, **8 GB is the practical floor**.
-- **The three Anima model files** (the Setup tab can auto-detect them from a models folder):
+- **Windows** + an **NVIDIA GPU with a recent driver** (CUDA). There's no CPU/AMD path — training needs CUDA.
+- **~16 GB VRAM** comfortable. For Anima, a low-VRAM mode reaches smaller cards (**8 GB is the practical floor**); MOSS-Image needs **12 GB** and picks its own memory settings.
+- **The model files for the model you train** — the Setup tab can auto-detect them from a models folder.
+- **Anima** — three files:
   - DiT checkpoint — `anima-base-v1.0.safetensors`
   - Qwen3 text encoder — `qwen_3_06b_base.safetensors`
   - Qwen-Image VAE — `qwen_image_vae.safetensors`
 
   From Hugging Face: [`circlestone-labs/Anima`](https://huggingface.co/circlestone-labs/Anima).
+- **MOSS-Image** — the MOSS-Image Base checkpoint, its text encoder and VAE, from [`OpenMOSS-Team/MOSS-Image-Base`](https://huggingface.co/OpenMOSS-Team/MOSS-Image-Base).
+- **Krea 2** — trains through a stock [OneTrainer](https://github.com/Nerogar/OneTrainer) install; the Setup tab points Lora Forge at it and fetches the Krea 2 Raw weights.
 - First install downloads ~2.5 GB (a self-contained Python + PyTorch stack).
 
-> **Why NVIDIA-only? (no AMD on Windows)** — AnimaForge trains through PyTorch + Kohya's `sd-scripts`, and that stack only has a working GPU path on **NVIDIA/CUDA on Windows**. AMD's equivalent (ROCm) is **Linux-only** — there are no Windows ROCm builds of PyTorch — so there's no supported way to run the training backend on an AMD card under Windows. The only experimental option is **ZLUDA** (a CUDA-translation layer), but it's unproven for training workloads like this and would be fragile; **DirectML** exists but is too slow and incomplete for this kind of training. But I'll keep looking at it, and if I find a way to wire it in, I will.
+> **Why NVIDIA-only? (no AMD on Windows)** — Lora Forge trains through PyTorch + Kohya's `sd-scripts`, and that stack only has a working GPU path on **NVIDIA/CUDA on Windows**. AMD's equivalent (ROCm) is **Linux-only** — there are no Windows ROCm builds of PyTorch — so there's no supported way to run the training backend on an AMD card under Windows. The only experimental option is **ZLUDA** (a CUDA-translation layer), but it's unproven for training workloads like this and would be fragile; **DirectML** exists but is too slow and incomplete for this kind of training. But I'll keep looking at it, and if I find a way to wire it in, I will.
 
 ## 💛 Free & open source
 
@@ -94,6 +99,6 @@ launch.bat    :: start training
 
 <div align="center">
 
-**Built for the Anima community. Forge something great.** 🔥
+**Built for the LoRA community. Forge something great.** 🔥
 
 </div>

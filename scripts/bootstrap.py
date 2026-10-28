@@ -278,7 +278,7 @@ def verify(venv_py: Path):
 
 def main():
     print("=" * 64)
-    print("  AnimaForge — environment bootstrap (unified .venv)")
+    print("  Lora Forge — environment bootstrap (unified .venv)")
     print("=" * 64)
     venv_dir = REPO / ".venv"
     venv_py = create_venv(sys.executable, venv_dir)
