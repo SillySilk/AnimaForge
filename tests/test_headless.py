@@ -33,7 +33,7 @@ class FakeTrainer(QObject):
     def is_running(self):
         return self._running
 
-    def start(self, cfg, sdscripts):
+    def start(self, cfg, sdscripts, model="anima"):
         self._running = True
         self.training_started.emit()
         # Finish asynchronously, as QProcess would.
