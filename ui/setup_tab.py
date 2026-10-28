@@ -225,7 +225,7 @@ class SetupTab(QWidget):
         layout.addWidget(title)
 
         # sd-scripts group
-        sd_group = QGroupBox("Kohya sd-scripts (Anima)")
+        sd_group = QGroupBox("Kohya sd-scripts")
         sd_layout = QVBoxLayout(sd_group)
         sd_layout.setSpacing(8)
         sd_hint = QLabel("Path to your local Kohya sd-scripts folder (must include anima_train_network.py).")
@@ -1647,7 +1647,7 @@ class SetupTab(QWidget):
         instructions.setPlainText(
             "Step 1 — Prerequisites\n"
             "  • Python 3.10 or 3.11, Git, and an NVIDIA GPU with CUDA 12.1 drivers\n\n"
-            "Step 2 — sd-scripts (must support Anima)\n"
+            "Step 2 — sd-scripts (must support Anima and MOSS-Image)\n"
             "    git clone https://github.com/kohya-ss/sd-scripts.git\n"
             "    cd sd-scripts && git pull   (ensure anima_train_network.py exists)\n\n"
             "Step 3 — Virtual environment\n"

@@ -71,10 +71,10 @@ def libuv_status(existing=None, windows=None, force=False) -> str:
         return (f"USE_LIBUV=0 (forced — your Setup override replaces your "
                  f"environment's USE_LIBUV={inherited})")
     if inherited:
-        return (f"USE_LIBUV={inherited} (from your environment — AnimaForge left it "
-                f"alone; unset it to let AnimaForge choose)")
+        return (f"USE_LIBUV={inherited} (from your environment — Lora Forge left it "
+                f"alone; unset it to let Lora Forge choose)")
     if windows:
-        return "USE_LIBUV=0 (set by AnimaForge for this run)"
+        return "USE_LIBUV=0 (set by Lora Forge for this run)"
     return "USE_LIBUV=1 (torch default; not Windows)"
 
 
@@ -136,7 +136,7 @@ def failure_hint(line: str):
     if "libuv" in low and "without libuv" in low:
         return ("[Lora Forge] That means this PyTorch build has no libuv support, and "
                 "the run reached torch's multi-process launcher, which needs it. "
-                "AnimaForge pins accelerate to a single-process config to stay off that "
+                "Lora Forge pins accelerate to a single-process config to stay off that "
                 "path, so seeing this means the pin did not take — please report it "
                 "with this log. Rebuilding PyTorch is not necessary.")
     return None

@@ -71,7 +71,7 @@ def build_app(argv=None):
 
 def main():
     if "--run-batch" in sys.argv[1:]:
-        parser = argparse.ArgumentParser(prog="AnimaForge headless")
+        parser = argparse.ArgumentParser(prog="Lora Forge headless")
         parser.add_argument("--run-batch", action="store_true")
         parser.add_argument("--queue", default=None,
                             help="queue file (default: batch_queue.json)")

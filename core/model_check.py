@@ -174,7 +174,7 @@ def check_model_file(path, expected_role: str) -> str:
         return (
             f"“{p.name}” is an Anima checkpoint saved in ComfyUI's wrapped layout "
             f"(its weights are named “model.diffusion_model.…” instead of “net.…”). "
-            f"AnimaForge's trainer only reads the “net.…” layout, so this would stop "
+            f"Lora Forge's trainer only reads the “net.…” layout, so this would stop "
             f"with “Missing keys in checkpoint” before the first step.\n\n"
             f"Use the split_files/diffusion_models copy from "
             f"huggingface.co/circlestone-labs/Anima — e.g. anima-base-v1.0.safetensors."

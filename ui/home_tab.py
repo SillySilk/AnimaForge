@@ -471,7 +471,7 @@ class HomeTab(QWidget):
         tl.addWidget(self._pillar_head("Train",
                                        action_label="Options",
                                        on_action=self._open_train_modal))
-        marker2 = QLabel("Anima-tuned settings, already dialed in. Just pull the lever.")
+        marker2 = QLabel("Tuned for each model, already dialed in. Just pull the lever.")
         marker2.setObjectName("af_marker")
         marker2.setWordWrap(True)
         tl.addWidget(marker2)
@@ -859,7 +859,7 @@ class HomeTab(QWidget):
 
     # ---- Save / Load Project ----
     def _save_project(self):
-        name = (self._name_edit.text() or "animaforge").strip() or "animaforge"
+        name = (self._name_edit.text() or "loraforge").strip() or "loraforge"
         path, _ = QFileDialog.getSaveFileName(
             self, "Save Project", f"{name}.forge.json",
             "Lora Forge Project (*.forge.json *.json)")

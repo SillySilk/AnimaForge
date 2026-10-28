@@ -1,6 +1,6 @@
 {
   "name": "Lora Forge",
-  "tagline": "Train Anima LoRAs",
+  "tagline": "Train LoRAs for Anima, Krea 2 & MOSS-Image",
   "launch": "launch.bat",
   "image": "tile.png",
   "repos": [

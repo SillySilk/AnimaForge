@@ -48,7 +48,7 @@ from core.trainer import libuv_status
 
 def test_status_says_animaforge_set_it():
     s = libuv_status(existing={}, windows=True)
-    assert "USE_LIBUV=0" in s and "AnimaForge" in s
+    assert "USE_LIBUV=0" in s and "Lora Forge" in s
 
 
 def test_status_calls_out_an_inherited_value_that_defeats_the_fix():
@@ -119,7 +119,7 @@ def test_status_reports_a_forced_override():
 
 def test_status_with_force_but_nothing_to_override_reads_normally():
     s = libuv_status(existing={}, windows=True, force=True)
-    assert "USE_LIBUV=0" in s and "AnimaForge" in s
+    assert "USE_LIBUV=0" in s and "Lora Forge" in s
 
 
 def test_status_on_non_windows_still_reports_an_inherited_value():
