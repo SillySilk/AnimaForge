@@ -258,6 +258,8 @@ class TrainTab(QWidget):
         self._caption_style = models.get(self._model).caption_style
         self._onetrainer_root = ""
         self._continue_epoch = 0          # Train further: the OneTrainer backup's epoch
+        self._added_folders = []          # the set's added sub-folders (core/added_sets.py)
+        self._add_runner = None           # captions added pictures before training further
         # Advanced settings: {dotted.path: value} over the engine's generated config.
         # Per model — a Kohya path means nothing to OneTrainer — so a model change clears it.
         self._config_overrides = {}
@@ -279,7 +281,8 @@ class TrainTab(QWidget):
         self._gpu_busy_check = fn
 
     def is_training(self) -> bool:
-        return self._trainer.is_running() or (
+        # Captioning added pictures is the first half of a Train further.
+        return self._trainer.is_running() or self._add_runner is not None or (
             self._session is not None and self._session.is_running())
 
     # ------------------------------------------------------------------
@@ -287,6 +290,8 @@ class TrainTab(QWidget):
     # ------------------------------------------------------------------
 
     def set_dataset(self, folder_path: str, image_count: int):
+        if folder_path != self._dataset_path:
+            self._added_folders = []      # another set's additions are not this one's
         self._dataset_path = folder_path
         self._image_count = image_count
         self._dataset_path_edit.setText(folder_path)
@@ -503,7 +508,8 @@ class TrainTab(QWidget):
             from core.engines.onetrainer import steps
             if not self._image_count:
                 return 0
-            return steps.plan(self._image_count, self._lora_type_for_subject() or "character",
+            return steps.plan(self._weighted_image_count(),
+                              self._lora_type_for_subject() or "character",
                               self.get_target_steps())["total_steps"]
         return self.get_target_steps()
 
@@ -1467,6 +1473,7 @@ class TrainTab(QWidget):
             caption_style=self._caption_style,
             config_overrides=dict(self._config_overrides),
             debug_profiles=bool(AppSettings().get("debug_profiles")),
+            added_folders=list(self._added_folders),
         )
         return rd, ""
 
@@ -1497,6 +1504,7 @@ class TrainTab(QWidget):
         self._subject_combo.setCurrentIndex(idx)
         # Internal dataset/trigger state used by config generation
         self._dataset_path = rd.dataset_folder
+        self._added_folders = list(getattr(rd, "added_folders", None) or [])
         self._image_count = rd.image_count
         self._trigger_word = rd.trigger_word
         self.set_quality_prefix(getattr(rd, "quality_prefix", "") or "")
@@ -1687,6 +1695,14 @@ class TrainTab(QWidget):
             f"Continue from {Path(run.resume_from).name} and train more steps.")
         further.clicked.connect(lambda _=False, r=run: self._train_further(r))
         h.addWidget(further)
+        add = QPushButton("Add character / element")
+        add.setEnabled(run.can_continue and not busy)
+        add.setToolTip(
+            f"Can't add to it: {run.problem}." if run.problem else
+            "Pick new pictures, name them, and train them in further — shown "
+            f"{self._emphasis():g}x as often as the set's own pictures.")
+        add.clicked.connect(lambda _=False, r=run: self._add_to_run(r))
+        h.addWidget(add)
         delete = QPushButton("✕")
         delete.setObjectName("af_icon_btn")
         delete.setFixedSize(28, 28)
@@ -1704,7 +1720,8 @@ class TrainTab(QWidget):
             return target - run.steps_done
         return max(250, round(run.steps_done / 4 / 50) * 50)
 
-    def _train_further(self, run):
+    def _train_further(self, run, more: int = 0):
+        """Continue `run` for `more` steps (asked for when 0)."""
         from PySide6.QtWidgets import QInputDialog
         if self.is_training():
             self.status_message.emit("Finish or stop the current run first.")
@@ -1713,12 +1730,13 @@ class TrainTab(QWidget):
             QMessageBox.warning(self, "Train Further", f"Can't train '{run.name}' further: "
                                 f"{run.problem}.")
             return
-        more, ok = QInputDialog.getInt(
-            self, "Train Further",
-            f"'{run.name}' has {run.steps_done:,} steps behind it.\nHow many more steps?",
-            self._further_default(run), 50, 40000, 50)
-        if not ok:
-            return
+        if not more:
+            more, ok = QInputDialog.getInt(
+                self, "Train Further",
+                f"'{run.name}' has {run.steps_done:,} steps behind it.\nHow many more steps?",
+                self._further_default(run), 50, 40000, 50)
+            if not ok:
+                return
         rd = run.rd
         rd.output_dir = self._output_dir
         original_target = rd.target_steps
@@ -1750,6 +1768,116 @@ class TrainTab(QWidget):
             self._start_training(confirm=True)
         finally:
             self._continue_epoch = 0
+
+    # ---- Add character / element ----
+
+    def _emphasis(self) -> float:
+        from core import added_sets
+        return added_sets.emphasis(self._app_settings)
+
+    def _weighted_image_count(self) -> int:
+        from core import added_sets
+        if not self._added_folders:
+            return self._image_count
+        return added_sets.weighted_count(self._image_count, self._dataset_path,
+                                         self._added_folders, self._emphasis())
+
+    def _added_subsets(self, base_repeats: int) -> list:
+        from core import added_sets
+        n = added_sets.kohya_repeats(base_repeats, self._emphasis())
+        return [(path, n) for path, _count in
+                added_sets.folders(self._dataset_path, self._added_folders)]
+
+    def _add_to_run(self, run):
+        """Copy new pictures into a named sub-folder of the run's dataset, caption the
+        ones that came without captions, then train the run further on everything
+        with the new pictures weighted up."""
+        from PySide6.QtWidgets import QInputDialog
+        from core import added_sets
+        from core.dataset_manager import SUPPORTED_EXTENSIONS
+        if self.is_training() or self._add_runner is not None:
+            self.status_message.emit("Finish or stop the current run first.")
+            return
+        if not run.can_continue:
+            QMessageBox.warning(self, "Add Character / Element",
+                                f"Can't add to '{run.name}': {run.problem}.")
+            return
+        patterns = " ".join(f"*{ext}" for ext in sorted(SUPPORTED_EXTENSIONS))
+        files, _ = QFileDialog.getOpenFileNames(
+            self, f"Pictures to add to '{run.name}'", run.rd.dataset_folder,
+            f"Images ({patterns})")
+        if not files:
+            return
+        name, ok = QInputDialog.getText(
+            self, "Add Character / Element",
+            f"Name for these {len(files)} picture(s) — it becomes their trigger word:")
+        if not ok or not name.strip():
+            return
+        more, ok = QInputDialog.getInt(
+            self, "Add Character / Element",
+            f"'{run.name}' has {run.steps_done:,} steps behind it.\n"
+            f"How many more steps? The new pictures are shown {self._emphasis():g}x "
+            "as often as the rest.", 3000, 50, 40000, 50)
+        if not ok:
+            return
+        try:
+            sub, copied = added_sets.add_pictures(run.rd.dataset_folder, name, files)
+        except (OSError, ValueError) as e:
+            QMessageBox.warning(self, "Add Character / Element", str(e))
+            return
+        if not copied:
+            QMessageBox.warning(self, "Add Character / Element", "None of those files "
+                                "are pictures the trainer can read.")
+            return
+        if sub not in run.rd.added_folders:
+            run.rd.added_folders = list(run.rd.added_folders) + [sub]
+        folder = str(Path(run.rd.dataset_folder) / sub)
+        self.status_message.emit(f"Added {copied} picture(s) to {folder}.")
+        if added_sets.uncaptioned(folder):
+            self._caption_added(run, folder, name.strip(), more)
+        else:
+            self._train_further(run, more)
+
+    def _caption_added(self, run, folder: str, trigger: str, more: int):
+        from core import caption_policy
+        from core.caption_runner import CaptionRunner
+        reason = self._gpu_busy_check()
+        if reason:
+            QMessageBox.warning(self, "Add Character / Element",
+                                f"Cannot caption the new pictures — {reason}.")
+            return
+        rd = run.rd
+        job = rd.to_caption_job(self._setup_path, "", caption_policy.KEEP)
+        job.dataset_folder = folder
+        job.trigger = trigger
+        # The set's own trigger and prefix still lead, so the new pictures are
+        # learned in the set's style.
+        job.prefix = ", ".join(b for b in (rd.trigger_word.strip(),
+                                           (rd.quality_prefix or "").strip()) if b)
+        runner = CaptionRunner(self)
+        runner.log_line.connect(self._on_log_line)
+        runner.finished.connect(
+            lambda ok, r=run, m=more: self._on_added_captioned(ok, r, m))
+        self._add_runner = runner
+        self._log_edit.clear()
+        self._on_log_line(f"[Lora Forge] Captioning the new pictures in {folder}…")
+        self._rp(kind="phase", label="Captioning new pictures…")
+        if not runner.start(job):
+            self._add_runner = None
+            QMessageBox.warning(self, "Add Character / Element",
+                                "Captioning could not start — check the sd-scripts path "
+                                "in Setup.")
+
+    def _on_added_captioned(self, ok: bool, run, more: int):
+        runner, self._add_runner = self._add_runner, None
+        if runner is not None:
+            runner.deleteLater()
+        if not ok:
+            self._rp(kind="error", label="Captioning stopped")
+            self.status_message.emit("Captioning the new pictures stopped; nothing was "
+                                     "trained. The pictures are kept in the set.")
+            return
+        self._train_further(run, more)
 
     def _delete_past_run(self, run):
         from core import past_runs
@@ -1950,7 +2078,7 @@ class TrainTab(QWidget):
             return
         if self._image_count > 0:
             target = self._target_steps_spin.value()
-            params = calculate_training_params(self._image_count, target_steps=target,
+            params = calculate_training_params(self._weighted_image_count(), target_steps=target,
                                               model=self._model)
             self._training_params = params
             text = format_calculation_string(params)
@@ -2012,6 +2140,7 @@ class TrainTab(QWidget):
             qwen3_path=self._qwen3_path,
             vae_path=self._vae_path,
             dataset_folder=self._dataset_path,
+            added_subsets=self._added_subsets(params["repeats"]),
             epochs=params["epochs"],
             repeats=params["repeats"],
             optimizer=self._current_optimizer(),

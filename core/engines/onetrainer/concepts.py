@@ -14,9 +14,17 @@ from pathlib import Path
 _CONCEPT_SEED = 743829201
 
 
-def build_concepts(dataset_dir: str) -> list:
+def build_concepts(dataset_dir: str, added=()) -> list:
+    """The set as one concept, plus one per added folder [(path, weight)] at that
+    weight (OneTrainer repeats a concept `balancing` times per epoch)."""
+    out = [_concept(dataset_dir, 1.0)]
+    out += [_concept(path, weight) for path, weight in added]
+    return out
+
+
+def _concept(dataset_dir: str, balancing: float) -> dict:
     folder = Path(dataset_dir)
-    return [{
+    return {
         "__version": 2,
         "image": {
             "__version": 0,
@@ -62,11 +70,11 @@ def build_concepts(dataset_dir: str) -> list:
         "include_subdirectories": False,
         "image_variations": 1,
         "text_variations": 1,
-        "balancing": 1.0,
+        "balancing": float(balancing),
         "balancing_strategy": "REPEATS",
         "loss_weight": 1.0,
         "concept_stats": {},
-    }]
+    }
 
 
 # Sample prompts are the run's real captions, not a written-in scene. A preview is

@@ -107,6 +107,9 @@ class RunDefinition:
     # With a source set, its folder is rebuilt from that set's solo images of the token
     # when the run starts; without one it trains on its own set like any run.
     character_source: str = ""
+    # Sub-folders of dataset_folder added after the first run (core/added_sets.py),
+    # trained with extra weight. [] = the folder as it was.
+    added_folders: list = field(default_factory=list)
     character_token: str = ""
     # Runtime
     status: str = QUEUED
@@ -422,7 +425,12 @@ class BatchRunner(QObject):
         if engine == models.ONETRAINER:
             return self._start_onetrainer(run)
         try:
-            params = calculate_training_params(run.image_count, target_steps=run.target_steps,
+            from core import added_sets
+            weight = added_sets.emphasis() if run.added_folders else 1.0
+            params = calculate_training_params(
+                added_sets.weighted_count(run.image_count, run.dataset_folder,
+                                          run.added_folders, weight),
+                target_steps=run.target_steps,
                                               model=run.model)
             self._trainer.set_total_steps(params["total_steps"])
             app = AppSettings()
@@ -480,6 +488,9 @@ class BatchRunner(QObject):
                 qwen3_path=run.qwen3_path,
                 vae_path=run.vae_path,
                 dataset_folder=run.dataset_folder,
+                added_subsets=[(path, added_sets.kohya_repeats(params["repeats"], weight))
+                               for path, _n in added_sets.folders(run.dataset_folder,
+                                                                  run.added_folders)],
                 epochs=params["epochs"],
                 repeats=params["repeats"],
                 optimizer=run.optimizer,

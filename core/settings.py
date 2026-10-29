@@ -111,6 +111,9 @@ DEFAULTS = {
     "save_every_n_steps": 250,
     # Pre-launch guard: warn if free VRAM is below this many MB before training (0 disables).
     "min_free_vram_mb": 12000,
+    # Pictures added to a trained set (Past runs → Add character / element) are shown
+    # this many times as often as the set's original pictures (core/added_sets.py).
+    "added_set_emphasis": 3.0,
     # Describe (JoyCaption etc.) runs 4-bit and needs ~6 GB, far less than training;
     # warn below this before a describe pass. 0 disables.
     "min_free_vram_describe_mb": 7000,

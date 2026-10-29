@@ -105,6 +105,7 @@ def generate_configs(
     save_last_n_epochs: int = None,
     resume_state_path: str = None,
     network_weights: str = None,
+    added_subsets: list = None,
     training_comment: str = None,
     extra_args: dict = None,
     micro_batch: int = None,
@@ -129,6 +130,7 @@ def generate_configs(
         resolution: base training resolution (square). None/0 → 1024. The bucket window
                     stays 512–1536 (Anima's supported span) regardless.
         save_every_n_epochs: LoRA epoch-save cadence. None/0 → auto (max(1, epochs//5)).
+        added_subsets:       [(folder, num_repeats)] for pictures added to the set later.
         save_last_n_epochs:  how many epoch saves to keep. None → 3 (legacy default);
                     0 → keep all (key omitted).
 
@@ -181,6 +183,10 @@ def generate_configs(
                         "image_dir": str(Path(dataset_folder).as_posix()),
                         "num_repeats": repeats,
                     }
+                ] + [
+                    # Pictures added to the set later, at their own (heavier) repeats.
+                    {"image_dir": str(Path(path).as_posix()), "num_repeats": int(n)}
+                    for path, n in (added_subsets or [])
                 ],
             }
         ],

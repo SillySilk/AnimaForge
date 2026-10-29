@@ -61,6 +61,11 @@ class RunParams:
     # The run picks up from that backup (continue_last_backup) and trains on to the
     # planned epoch count; 0 = a fresh run.
     continue_epoch: int = 0
+    # Pictures added to the set later: [(folder, weight)], each its own concept.
+    added_concepts: list = field(default_factory=list)
+    # The step plan's picture count when it differs from image_count (added
+    # pictures counted at their weight); 0 = image_count.
+    plan_image_count: int = 0
 
 
 def _write_json(path: Path, payload) -> None:
@@ -160,7 +165,8 @@ class TrainingSession(QObject):
         run_dir = Path(paths.run_output_dir(output_base, p.lora_name))
         run_dir.mkdir(parents=True, exist_ok=True)
         self._run_dir = run_dir
-        self._plan = steps.plan(p.image_count, p.concept, p.target_steps)
+        self._plan = steps.plan(p.plan_image_count or p.image_count, p.concept,
+                                p.target_steps)
         if p.continue_epoch and self._plan["epochs"] <= p.continue_epoch:
             self._fail(f"Training further needs more than the {p.continue_epoch} epochs "
                        f"already trained; this plan is {self._plan['epochs']}.")
@@ -176,7 +182,7 @@ class TrainingSession(QObject):
             return False
         self._output_path = cfg["output_model_destination"]
         try:
-            _write_json(run_dir / "concepts.json", concepts.build_concepts(p.dataset_dir))
+            _write_json(run_dir / "concepts.json", concepts.build_concepts(p.dataset_dir, p.added_concepts))
             samples = (concepts.samples_from_prompts(p.sample_prompts, p.trigger_word)
                        if p.sample_prompts else
                        concepts.build_samples(p.dataset_dir, p.trigger_word))
