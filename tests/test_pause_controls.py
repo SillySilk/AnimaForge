@@ -62,3 +62,15 @@ def test_home_pause_button_follows_run_state():
     assert not t._pause_train_btn.isEnabled()
     assert "Pause" in t._pause_train_btn.text()
 
+
+def test_home_caption_stop_follows_caption_state():
+    t = HomeTab()
+    stops = []
+    t.stop_caption_requested.connect(lambda: stops.append(1))
+    assert not t._stop_caption_btn.isEnabled()
+    t.set_captioning_active(True)
+    assert t._stop_caption_btn.isEnabled() and not t._run_caption_btn.isEnabled()
+    t._stop_caption_btn.click()
+    assert stops == [1]
+    t.set_captioning_active(False)
+    assert not t._stop_caption_btn.isEnabled() and t._run_caption_btn.isEnabled()

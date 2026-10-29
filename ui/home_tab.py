@@ -61,6 +61,7 @@ class HomeTab(QWidget):
     start_train_requested = Signal()  # pillar "Start Training" button
     stop_train_requested = Signal()   # pillar "Stop" button (enabled while a run is live)
     pause_train_requested = Signal()  # pillar "Pause"/"Resume" toggle (enabled while a run is live)
+    stop_caption_requested = Signal()  # Caption pillar "Stop" (enabled while captioning runs)
     presets_closed = Signal()         # an Options/Step Calculator modal closed → re-pull summary
     preset_pick_requested = Signal()  # PRESET button — MainWindow opens the picker (owns the data)
     model_changed = Signal(str)          # model preset id (Anima / Krea 2)
@@ -425,13 +426,26 @@ class HomeTab(QWidget):
         cl.addSpacing(8)
         cl.addLayout(self._describe_model_row())
         cl.addStretch()
-        # primary action; the mass of options lives in the Options modal
+        # primary action; the mass of options lives in the Options modal. Stop rides
+        # alongside, like Train's, and lights up only while captioning is live.
+        run_stop = QHBoxLayout()
+        run_stop.setSpacing(8)
         self._run_caption_btn = QPushButton("📝  Run Captioning")
         self._run_caption_btn.setObjectName("btn_start")
         self._run_caption_btn.setMinimumHeight(48)
         self._run_caption_btn.setCursor(Qt.PointingHandCursor)
         self._run_caption_btn.clicked.connect(self.run_caption_requested.emit)
-        cl.addWidget(self._run_caption_btn)
+        run_stop.addWidget(self._run_caption_btn, 1)
+        self._stop_caption_btn = QPushButton("■  Stop")
+        self._stop_caption_btn.setObjectName("btn_stop")
+        self._stop_caption_btn.setMinimumHeight(48)
+        self._stop_caption_btn.setCursor(Qt.PointingHandCursor)
+        self._stop_caption_btn.setEnabled(False)
+        self._stop_caption_btn.setToolTip(
+            "Stop captioning after the current image (finished captions are kept)")
+        self._stop_caption_btn.clicked.connect(self.stop_caption_requested.emit)
+        run_stop.addWidget(self._stop_caption_btn)
+        cl.addLayout(run_stop)
         g.addWidget(cap, 0, 0)
 
         # connector
@@ -1098,6 +1112,11 @@ class HomeTab(QWidget):
     def set_training_paused(self, paused: bool):
         """Flip the Pause button between Pause and Resume."""
         self._pause_train_btn.setText("▶  Resume" if paused else "⏸  Pause")
+
+    def set_captioning_active(self, active: bool):
+        """Mirror the caption run state onto the Caption pillar's Run/Stop pair."""
+        self._run_caption_btn.setEnabled(not active)
+        self._stop_caption_btn.setEnabled(bool(active))
 
     def set_advanced_count(self, n: int):
         """Show how many advanced settings this run changes (hidden when none)."""

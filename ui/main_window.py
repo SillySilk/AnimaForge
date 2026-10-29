@@ -518,6 +518,9 @@ class MainWindow(QMainWindow):
         self._home_tab.pause_train_requested.connect(self._train_tab._toggle_pause)
         self._train_tab.training_active.connect(self._home_tab.set_training_active)
         self._train_tab.training_paused.connect(self._home_tab.set_training_paused)
+        # Captioning gets the same Run/Stop pair on the Caption pillar.
+        self._home_tab.stop_caption_requested.connect(self._dataset_tab.stop_captioning)
+        self._dataset_tab.captioning_active.connect(self._home_tab.set_captioning_active)
         # The Step Calculator lives on Home now; its subject combo drives the Style @anchor
         # field's visibility (only meaningful for Style runs).
         self._train_tab.subject_type_changed.connect(self._sync_home_anchor_visibility)
@@ -1245,6 +1248,12 @@ class MainWindow(QMainWindow):
             return  # not a pipeline-driven caption run
         if not success:
             self._qr_phases = []
+            if self._dataset_tab.caption_stopped_by_user():
+                # A Stop click, not a failure: end the pipeline quietly.
+                self._home_tab.apply_run_progress({"kind": "reset"})
+                self._status_bar.showMessage(
+                    "Quick Run: captioning stopped. Captions finished so far are kept.")
+                return
             self._home_tab.apply_run_progress({"kind": "error", "label": "Caption failed"})
             QMessageBox.warning(
                 self, "Captioning failed",

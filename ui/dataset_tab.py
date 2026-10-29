@@ -343,6 +343,7 @@ class DatasetTab(QWidget):
     caption_stage_started = Signal(str)   # step key launching, before its first tick -> Home's chip
     auto_caption_finished = Signal(bool)  # headless Process chain ended (Home pipeline)
     caption_stage_done = Signal(str)   # "captioned" (passes done) / "processed" (combine done) -> project autosave
+    captioning_active = Signal(bool)   # a caption run started/ended -> Home's Run/Stop pair
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1019,6 +1020,7 @@ class DatasetTab(QWidget):
         self._active_caption_proc = proc
         self._caption_stopped = False
         self._stop_caption_btn.setEnabled(True)
+        self.captioning_active.emit(True)
         self._caption_timer.start()
         self._caption_bar.setRange(0, 1)
         self._caption_bar.setValue(0)
@@ -1032,6 +1034,7 @@ class DatasetTab(QWidget):
         self._caption_timer.stop()
         self._active_caption_proc = None
         self._stop_caption_btn.setEnabled(False)
+        self.captioning_active.emit(False)
         self._live_progress.setVisible(False)
         self._clear_processing_frame()
         written, _ = self._rebuild_txt_from_sidecars()
@@ -1222,6 +1225,14 @@ class DatasetTab(QWidget):
         """
         return self._start_cancelled
 
+    def stop_captioning(self):
+        """Public Stop for Home's Caption pillar — same path as this tab's Stop."""
+        self._stop_captioning()
+
+    def caption_stopped_by_user(self) -> bool:
+        """True when the last caption run ended on a user Stop rather than an error."""
+        return self._caption_stopped
+
     def _build_caption_job(self, policy: str) -> CaptionJob:
         """Snapshot the live per-run settings into a headless CaptionJob for the runner.
 
@@ -1264,6 +1275,7 @@ class DatasetTab(QWidget):
         clickable while the runner chain owns the folder."""
         self._caption_stopped = False
         self._stop_caption_btn.setEnabled(True)
+        self.captioning_active.emit(True)
         for b in (self._autotag_btn, self._describe_btn, self._combine_btn):
             b.setEnabled(False)
         self._caption_bar.setRange(0, 1)
@@ -1282,6 +1294,7 @@ class DatasetTab(QWidget):
         Stop all collapse into CaptionRunner.finished(bool) -> _on_caption_finished, which
         calls this unconditionally — so the Individual-Steps buttons re-enable here too."""
         self._stop_caption_btn.setEnabled(False)
+        self.captioning_active.emit(False)
         for b in (self._autotag_btn, self._describe_btn, self._combine_btn):
             b.setEnabled(True)
         self._live_progress.setVisible(False)
