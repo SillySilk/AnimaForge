@@ -1483,8 +1483,14 @@ class MainWindow(QMainWindow):
         threading.Thread(target=work, daemon=True).start()
 
     def _on_load_set_requested(self, dataset_folder: str, trigger: str, quality_prefix: str):
-        if dataset_folder:
-            self._dataset_tab.load_folder_path(dataset_folder)
+        # An auto-restore runs while that same folder is already loading: don't load it
+        # twice. And a set picked by hand must not be swapped for the folder's newest one.
+        if dataset_folder and not getattr(self, "_restoring_set", False):
+            self._restoring_set = True
+            try:
+                self._dataset_tab.load_folder_path(dataset_folder)
+            finally:
+                self._restoring_set = False
         if trigger:
             self._dataset_tab.set_trigger_word(trigger)
         # Unconditional (not `if quality_prefix:`): a loaded set with an empty prefix must
@@ -1503,6 +1509,28 @@ class MainWindow(QMainWindow):
         self._status_bar.showMessage(
             f"Dataset loaded: {image_count} images from {folder_path}"
         )
+        self._restore_saved_set(folder_path, image_count)
+
+    def _restore_saved_set(self, folder_path: str, image_count: int):
+        """A dataset with a saved set (autosave writes one per LoRA name) reopens with
+        that set's settings, newest first. Skipped mid-run and during a set load."""
+        if getattr(self, "_restoring_set", False) or self._train_tab.is_training():
+            return
+        from core import sets
+        found = sets.find_set_for_folder(folder_path)
+        if found is None:
+            return
+        name, rd = found
+        rd.image_count = image_count   # the folder as it is now, not when saved
+        self._restoring_set = True
+        try:
+            self._train_tab.apply_run_definition(rd)
+        finally:
+            self._restoring_set = False
+        self._train_tab.set_trigger_word(rd.trigger_word or "")
+        self._home_tab.note_saved_set_loaded(name)
+        self._home_tab.refresh(self._collect_home_context())
+        self._status_bar.showMessage(f"Loaded saved settings '{name}' for this dataset.", 8000)
 
     def _sync_environment_to_train(self):
         sd_path = self._setup_tab.get_sdscripts_path()

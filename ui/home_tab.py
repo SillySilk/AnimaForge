@@ -85,6 +85,7 @@ class HomeTab(QWidget):
         self._ready_labels = {}
         self._recent_label = None
         self._last_ctx = {}
+        self._loaded_set = ""
         self._build_ui()
 
     # ---- pure logic (unit-tested) ----
@@ -902,6 +903,15 @@ class HomeTab(QWidget):
         name = d.get("loraName") or ""
         trigger = d.get("triggerWord") or ""
         prefix = d.get("qualityPrefix") or ""
+        # Folder first: opening it may restore its saved set, and the project file's
+        # own name/trigger/prefix must win over that.
+        if folder:
+            self._folder_edit.setText(folder)
+            self._loaded_set = ""
+            # loading the folder re-derives subject type + steps downstream
+            self.folder_chosen.emit(folder)
+            if not self._loaded_set:
+                self._autoset_type(folder)
         if name:
             self._name_edit.setText(name)
             self.name_changed.emit(name)
@@ -911,11 +921,6 @@ class HomeTab(QWidget):
         if prefix:
             self._prefix_edit.setText(prefix)
             self.prefix_changed.emit(prefix)
-        if folder:
-            self._folder_edit.setText(folder)
-            # loading the folder re-derives subject type + steps downstream
-            self.folder_chosen.emit(folder)
-            self._autoset_type(folder)
 
     # ---- Ready checklist modal ----
     def _open_ready_modal(self):
@@ -951,7 +956,10 @@ class HomeTab(QWidget):
         if not folder:
             return
         self._folder_edit.setText(folder)
+        self._loaded_set = ""
         self.folder_chosen.emit(folder)
+        if self._loaded_set:
+            return   # its saved settings were restored; keep them
         self._autoset_type(folder)
         self._prompt_lora_name(folder)
 
@@ -1117,6 +1125,11 @@ class HomeTab(QWidget):
         """Mirror the caption run state onto the Caption pillar's Run/Stop pair."""
         self._run_caption_btn.setEnabled(not active)
         self._stop_caption_btn.setEnabled(bool(active))
+
+    def note_saved_set_loaded(self, name: str):
+        """MainWindow restored a saved set for the folder just picked — the browse
+        flow keeps that set's name and type instead of re-deriving them."""
+        self._loaded_set = name or ""
 
     def set_advanced_count(self, n: int):
         """Show how many advanced settings this run changes (hidden when none)."""

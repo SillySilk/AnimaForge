@@ -195,3 +195,28 @@ def test_autosave_project_saves_set_and_snapshot(tmp_path: Path):
     assert "Eve" in msg and "captioned" in msg
     assert sets.load_set("Eve", root) is not None
     assert sets.list_caption_snapshots("Eve", root) == {"captioned": 4}
+
+
+def test_find_set_for_folder_newest_wins(tmp_path: Path):
+    import os
+    root = str(tmp_path / "root")
+    ds = tmp_path / "ds"
+    ds.mkdir()
+    assert sets.find_set_for_folder(str(ds), root) is None
+    old = sets.save_set("Old", _rd("Old", folder=str(ds)), root)
+    new = sets.save_set("New", _rd("New", folder=str(ds)), root)
+    sets.save_set("Other", _rd("Other", folder=str(tmp_path / "elsewhere")), root)
+    os.utime(old, (1000, 1000))
+    os.utime(new, (2000, 2000))
+    name, rd = sets.find_set_for_folder(str(ds), root)
+    assert name == "New" and rd.lora_name == "New"
+    os.utime(old, (3000, 3000))
+    assert sets.find_set_for_folder(str(ds), root)[0] == "Old"
+
+
+def test_find_set_for_folder_ignores_bookkeeping(tmp_path: Path):
+    root = str(tmp_path / "root")
+    ds = tmp_path / "ds"
+    ds.mkdir()
+    sets.mark_run_active(_rd("Live", folder=str(ds)), root)
+    assert sets.find_set_for_folder(str(ds), root) is None

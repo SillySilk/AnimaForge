@@ -97,6 +97,30 @@ def load_set(name: str, root=None):
     return _read_rd(p) if p.is_file() else None
 
 
+def _same_folder(a: str, b: str) -> bool:
+    try:
+        return Path(a).resolve() == Path(b).resolve()
+    except OSError:
+        return False
+
+
+def find_set_for_folder(folder: str, root=None):
+    """The most recently saved set whose dataset is `folder`, as (name, rd), or None.
+    Autosave names a set after the LoRA, so one dataset can have several; the newest wins."""
+    if not folder:
+        return None
+    found = []
+    for name in list_sets(root):
+        p = sets_dir(root) / f"{name}.json"
+        rd = _read_rd(p)
+        if rd is not None and rd.dataset_folder and _same_folder(rd.dataset_folder, folder):
+            found.append((p.stat().st_mtime, name, rd))
+    if not found:
+        return None
+    _mtime, name, rd = max(found, key=lambda t: t[0])
+    return name, rd
+
+
 def delete_set(name: str, root=None) -> None:
     d = sets_dir(root)
     stem = _safe(name)
