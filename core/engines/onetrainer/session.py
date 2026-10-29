@@ -5,6 +5,7 @@ config, concepts, samples, trainer.log, workspace, cache, final .safetensors)
 and translates TrainerProcess events into UI-facing signals. One run at a time.
 """
 import json
+import os
 import shutil
 import time
 from dataclasses import dataclass, field
@@ -56,6 +57,10 @@ class RunParams:
     config_overrides: dict = field(default_factory=dict)
     # Explicit preview prompts (a caption-style comparison); empty = drawn from captions.
     sample_prompts: list = field(default_factory=list)
+    # Train further: the epoch count of the run folder's newest OneTrainer backup.
+    # The run picks up from that backup (continue_last_backup) and trains on to the
+    # planned epoch count; 0 = a fresh run.
+    continue_epoch: int = 0
 
 
 def _write_json(path: Path, payload) -> None:
@@ -156,9 +161,14 @@ class TrainingSession(QObject):
         run_dir.mkdir(parents=True, exist_ok=True)
         self._run_dir = run_dir
         self._plan = steps.plan(p.image_count, p.concept, p.target_steps)
+        if p.continue_epoch and self._plan["epochs"] <= p.continue_epoch:
+            self._fail(f"Training further needs more than the {p.continue_epoch} epochs "
+                       f"already trained; this plan is {self._plan['epochs']}.")
+            return False
         cfg = preset.build_run_config(template, str(run_dir), safe_name,
                                       self._plan["epochs"], self._plan["warmup_steps"],
                                       self._plan["prodigy_steps"])
+        cfg["continue_last_backup"] = bool(p.continue_epoch)
         try:
             cfg = config_overrides.apply(cfg, p.config_overrides)
         except ValueError as e:
@@ -172,6 +182,11 @@ class TrainingSession(QObject):
                        concepts.build_samples(p.dataset_dir, p.trigger_word))
             _write_json(run_dir / "samples.json", samples)
             _write_json(run_dir / "config.json", cfg)
+            if p.continue_epoch and (run_dir / "trainer.log").is_file():
+                # The loss checks read trainer.log as one run; the earlier stretch
+                # stays in the folder under its own name.
+                os.replace(run_dir / "trainer.log",
+                           run_dir / f"trainer.to-epoch-{p.continue_epoch}.log")
             self._log = open(run_dir / "trainer.log", "w", encoding="utf-8", errors="replace")
         except OSError as e:
             self._fail(f"Could not prepare the run folder: {e}")
@@ -369,7 +384,7 @@ class TrainingSession(QObject):
         if self._state == self.TRAINING and self._diverged is None:
             found = self._watch.feed(text)
             if found is not None:
-                self._stop_diverged(found)
+                self._stop_diverged(self._absolute(found))
 
     def _stop_diverged(self, found: dict):
         """The loss just blew up. Every epoch from here trains noise, and runs are
@@ -383,9 +398,30 @@ class TrainingSession(QObject):
         if self._proc is not None:
             self._proc.cancel()
 
+    def _continue_epoch(self) -> int:
+        return int(self._params.continue_epoch) if self._params else 0
+
+    def _absolute(self, found: dict) -> dict:
+        """A continued run's epoch bar counts from the backup it resumed (0/T, T =
+        the epochs still to go), but snapshots are named by the run's real epoch.
+        Shift the loss checks' epochs onto the real count."""
+        offset = self._continue_epoch()
+        if not offset:
+            return found
+        out = dict(found)
+        for key in ("last_good_epoch", "best_epoch", "final_epoch", "spike_epoch"):
+            if key in out:
+                out[key] = int(out[key]) + offset
+        out["total_epochs"] = int(out.get("total_epochs") or 0) + offset
+        return out
+
     def _on_progress(self, d: dict):
         target = self._epoch if d["name"] == "epoch" else self._step
         target["n"], target["total"] = d["n"], d["total"]
+        offset = self._continue_epoch()
+        if offset and d["name"] == "epoch":
+            # The bar counts from the backup; report the run's real epoch.
+            target["n"], target["total"] = d["n"] + offset, d["total"] + offset
         # The plan knows the run's real size before the trainer's first `step:` bar
         # arrives; without it the opening stretch reports a total of 0 and the band
         # sits at 0/0 for minutes.
@@ -450,6 +486,7 @@ class TrainingSession(QObject):
                     # run_H (2026-09-04) passed everything above and shipped the
                     # state from AFTER its loss had turned upward.
                     found = verify.trouble_from_log(str(self._run_dir / "trainer.log"))
+                    found = self._absolute(found) if found is not None else None
                     if found is not None and not self._ship_snapshot(found):
                         self._discard_snapshots()
                         self._fail(

@@ -143,15 +143,17 @@ def test_krea_run_without_trigger_uses_the_lora_name(tmp_path, monkeypatch):
     assert s.params.trigger_word == "Mr X"
 
 
-def test_finished_krea_run_writes_no_resume_manifest(tmp_path, monkeypatch):
+def test_finished_krea_run_records_itself_but_is_never_offered_as_a_resume(tmp_path, monkeypatch):
+    # Past runs reads run.json to train a Krea run further; the crash-recovery
+    # banner (find_resumable) needs a Kohya state, which a Krea run never has.
     from core import run_manifest
     t, s = _krea_tab(tmp_path, monkeypatch)
-    writes = []
-    monkeypatch.setattr(run_manifest, "write_start", lambda *a, **k: writes.append("start"))
-    monkeypatch.setattr(run_manifest, "mark", lambda *a, **k: writes.append("mark"))
     t._start_training(confirm=False)
+    run_manifest.mark(t._run_dir(), run_manifest.INTERRUPTED)
+    assert run_manifest.load(t._run_dir())["run"]["model"] == "krea2"
+    assert run_manifest.find_resumable(str(tmp_path / "out")) is None
     s.finish(str(tmp_path / "x.safetensors"))
-    assert writes == []
+    assert run_manifest.load(t._run_dir())["status"] == run_manifest.DONE
 
 
 def test_samples_are_read_from_the_sessions_folder(tmp_path, monkeypatch):

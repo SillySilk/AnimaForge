@@ -257,6 +257,7 @@ class TrainTab(QWidget):
         self._model = models.DEFAULT_MODEL
         self._caption_style = models.get(self._model).caption_style
         self._onetrainer_root = ""
+        self._continue_epoch = 0          # Train further: the OneTrainer backup's epoch
         # Advanced settings: {dotted.path: value} over the engine's generated config.
         # Per model — a Kohya path means nothing to OneTrainer — so a model change clears it.
         self._config_overrides = {}
@@ -303,6 +304,7 @@ class TrainTab(QWidget):
         self._model_paths = dict(model_paths or {})
         self._apply_model_paths()
         self._output_dir = output_dir
+        self.refresh_past_runs()
 
     def _apply_model_paths(self):
         legacy = getattr(self, "_legacy_paths", ("", "", ""))
@@ -579,6 +581,8 @@ class TrainTab(QWidget):
                 self._sample_prompts_edit.setPlainText(current)
                 self._sample_prompts_edit.blockSignals(False)
         self._refresh_readiness_summary()
+        if not self.is_training():
+            self.refresh_past_runs()
 
     # ------------------------------------------------------------------
     # UI Construction
@@ -617,6 +621,36 @@ class TrainTab(QWidget):
         self._recovery_banner.setVisible(False)
         self._recovery_dismiss.clicked.connect(self._dismiss_recovery)
         left_layout.addWidget(self._recovery_banner)
+
+        # Past runs: every run in the output folder, with Train further and delete.
+        # Like the recovery banner above, an allowed exception to "controls live on Home".
+        self._past_runs = []
+        self._past_box = QFrame()
+        self._past_box.setObjectName("af_past_runs")
+        self._past_box.setStyleSheet(
+            "QFrame#af_past_runs{background:#15130e;border:1px solid #3a3a1f;border-radius:6px;}")
+        pv = QVBoxLayout(self._past_box)
+        pv.setContentsMargins(10, 8, 10, 8)
+        pv.setSpacing(6)
+        past_title = QLabel("Past runs")
+        past_title.setStyleSheet("font-size: 13px; font-weight: 700; color: #d4af37;")
+        past_title.setToolTip("Train a finished run further from its last saved state, or "
+                              "delete its training files once the LoRA is made.")
+        pv.addWidget(past_title)
+        past_holder = QWidget()
+        past_holder.setStyleSheet("background: transparent;")
+        self._past_rows = QVBoxLayout(past_holder)
+        self._past_rows.setContentsMargins(0, 0, 0, 0)
+        self._past_rows.setSpacing(4)
+        past_scroll = QScrollArea()
+        past_scroll.setWidgetResizable(True)
+        past_scroll.setFrameShape(QFrame.NoFrame)
+        past_scroll.setStyleSheet("QScrollArea{background: transparent;}")
+        past_scroll.setMaximumHeight(220)
+        past_scroll.setWidget(past_holder)
+        pv.addWidget(past_scroll)
+        self._past_box.setVisible(False)
+        left_layout.addWidget(self._past_box)
 
         title = QLabel("Training Status")
         title.setStyleSheet("font-size: 16px; font-weight: 700; color: #d4af37;")
@@ -1586,6 +1620,9 @@ class TrainTab(QWidget):
         self.status_message.emit(f"Deleted set '{name}'.")
 
     def show_recovery_banner(self, rd):
+        self.refresh_past_runs()
+        if any(r.name == rd.lora_name and r.can_continue for r in self._past_runs):
+            return          # its Past runs row already offers Train further
         from core.state_utils import find_saved_state
         from pathlib import Path as _P
         state = find_saved_state(rd.output_dir, rd.lora_name)
@@ -1608,6 +1645,148 @@ class TrainTab(QWidget):
         self._recovery_banner.setVisible(False)
         self.status_message.emit(
             f"Restored '{rd.lora_name}'. Review and Start to resume.")
+
+    # ---- Past runs ----
+
+    def refresh_past_runs(self):
+        from core import past_runs
+        while self._past_rows.count():
+            w = self._past_rows.takeAt(0).widget()
+            if w is not None:
+                w.deleteLater()
+        try:
+            runs = past_runs.list_runs(self._output_dir, self._onetrainer_root)
+        except OSError as e:
+            self.status_message.emit(f"Could not read past runs: {e}")
+            runs = []
+        busy = self.is_training()
+        for run in runs:
+            self._past_rows.addWidget(self._past_run_row(run, busy))
+        self._past_runs = runs
+        self._past_box.setVisible(bool(runs))
+
+    def _past_run_row(self, run, busy: bool) -> QWidget:
+        from core import run_manifest
+        row = QWidget()
+        h = QHBoxLayout(row)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(6)
+        detail = f"{models.get(run.rd.model).name} · {run.steps_done:,} steps trained"
+        if run.problem:
+            detail += f" · {run.problem}"
+        elif run.status in (run_manifest.RUNNING, run_manifest.INTERRUPTED):
+            detail += " · stopped early"
+        label = QLabel(f"<b>{run.name}</b><br><span style='color:#8a8a93;'>{detail}</span>")
+        label.setWordWrap(True)
+        label.setToolTip(run.run_dir)
+        h.addWidget(label, 1)
+        further = QPushButton("Train further")
+        further.setEnabled(run.can_continue and not busy)
+        further.setToolTip(
+            f"Can't train further: {run.problem}." if run.problem else
+            f"Continue from {Path(run.resume_from).name} and train more steps.")
+        further.clicked.connect(lambda _=False, r=run: self._train_further(r))
+        h.addWidget(further)
+        delete = QPushButton("✕")
+        delete.setObjectName("af_icon_btn")
+        delete.setFixedSize(28, 28)
+        delete.setEnabled(not busy)
+        delete.setToolTip("Delete this run's training files (keeps the finished LoRA)")
+        delete.clicked.connect(lambda _=False, r=run: self._delete_past_run(r))
+        h.addWidget(delete)
+        return row
+
+    def _further_default(self, run) -> int:
+        """More steps to offer: the rest of a run that stopped early, else a quarter
+        of what it has trained so far."""
+        target = int(getattr(run.rd, "target_steps", 0) or 0)
+        if target > run.steps_done:
+            return target - run.steps_done
+        return max(250, round(run.steps_done / 4 / 50) * 50)
+
+    def _train_further(self, run):
+        from PySide6.QtWidgets import QInputDialog
+        if self.is_training():
+            self.status_message.emit("Finish or stop the current run first.")
+            return
+        if not run.can_continue:
+            QMessageBox.warning(self, "Train Further", f"Can't train '{run.name}' further: "
+                                f"{run.problem}.")
+            return
+        more, ok = QInputDialog.getInt(
+            self, "Train Further",
+            f"'{run.name}' has {run.steps_done:,} steps behind it.\nHow many more steps?",
+            self._further_default(run), 50, 40000, 50)
+        if not ok:
+            return
+        rd = run.rd
+        rd.output_dir = self._output_dir
+        original_target = rd.target_steps
+        self.apply_run_definition(rd)
+        try:
+            if run.engine == models.ONETRAINER:
+                self._target_steps_spin.setValue(run.steps_done + more)
+                self._continue_epoch = run.epochs_done
+            else:
+                # Loading the dataset re-suggests a step target; put the run's own
+                # back so its epochs keep the repeats they trained with.
+                self._target_steps_spin.setValue(original_target)
+                params = dict(self._training_params)
+                per_epoch = int(params.get("steps_per_epoch") or 0)
+                if not per_epoch:
+                    QMessageBox.warning(self, "Train Further",
+                                        "The dataset has no images to train on.")
+                    return
+                # sd-scripts resumes at the start of the epoch the state is in.
+                epochs = run.steps_done // per_epoch + max(1, -(-more // per_epoch))
+                params.update(epochs=epochs, total_steps=epochs * per_epoch,
+                              exposures_per_image=params.get("repeats", 0) * epochs)
+                self._training_params = params
+                self._resume_state_path = run.resume_from
+                self._resume_check.setText(
+                    f"Resume from last saved state ({Path(run.resume_from).name})")
+                self._resume_check.setVisible(True)
+                self._resume_check.setChecked(True)
+            self._start_training(confirm=True)
+        finally:
+            self._continue_epoch = 0
+
+    def _delete_past_run(self, run):
+        from core import past_runs
+        if self.is_training():
+            self.status_message.emit("Finish or stop the current run first.")
+            return
+        kept = (f"{run.name}.safetensors (the finished LoRA)" if run.has_lora
+                else "nothing — this run never finished a LoRA")
+        reply = QMessageBox.question(
+            self, "Delete Training Files",
+            f"Delete the training files for '{run.name}'?\n\n"
+            "This removes its epoch and step saves, saved states, backups, caches, "
+            f"previews, logs and configs from:\n{run.run_dir}\n\n"
+            f"Kept: {kept}. Your dataset images and caption files are not touched.\n\n"
+            "This can't be undone, and the run can't be trained further afterwards.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply != QMessageBox.Yes:
+            return
+        try:
+            removed = past_runs.delete_training_files(run, self._output_dir)
+        except (OSError, ValueError) as e:
+            QMessageBox.warning(self, "Delete Training Files",
+                                f"Could not delete everything for '{run.name}': {e}")
+            self.refresh_past_runs()
+            return
+        self.status_message.emit(f"Deleted {removed} training item(s) for '{run.name}'.")
+        self.refresh_past_runs()
+
+    def _resume_step_offset(self) -> int:
+        """Steps already behind a Kohya resume: sd-scripts restarts at the start of
+        the epoch its state is in, so whole epochs only."""
+        if not (self._resume_check.isChecked() and self._resume_state_path):
+            return 0
+        from core.past_runs import kohya_progress
+        steps, _epochs = kohya_progress(self._resume_state_path)
+        per_epoch = int((self._training_params or {}).get("steps_per_epoch") or 0)
+        return (steps // per_epoch) * per_epoch if per_epoch else 0
 
     def _add_to_batch(self):
         rd, msg = self.build_run_definition()
@@ -1995,6 +2174,7 @@ class TrainTab(QWidget):
                                  self._keep_epochs_spin.value(),
                                  resume=bool(self._resume_check.isChecked()
                                              and self._resume_state_path))
+        self._trainer.set_step_offset(self._resume_step_offset())
         self._trainer.start(self._config_path, self._setup_path, model=self._model)
 
     def _check_empty_captions(self, interactive: bool = True) -> bool:
@@ -2520,6 +2700,7 @@ class TrainTab(QWidget):
         self._run_log = RunLog()
         self._run_log.open(f"Lora Forge v{__version__} — training run started")
         self.status_message.emit("Training started…")
+        self.refresh_past_runs()
         self._last_preview = []
         self._preview_timer.start()
 
@@ -2535,10 +2716,10 @@ class TrainTab(QWidget):
         kohya = (self._run_engine or self.engine()) == models.KOHYA
         # A user Stop must read as "interrupted" (resumable), never "failed" --
         # find_resumable() only ever looks for running/interrupted status. A OneTrainer
-        # run has no Kohya state to resume, so it never writes this manifest.
-        if kohya:
-            run_manifest.mark(
-                self._run_dir(), run_manifest.DONE if success else run_manifest.INTERRUPTED)
+        # run has no Kohya state, so find_resumable() never offers one; its manifest
+        # is what Past runs reads to train it further.
+        run_manifest.mark(
+            self._run_dir(), run_manifest.DONE if success else run_manifest.INTERRUPTED)
         if success:
             from core import sets
             if kohya:
@@ -2595,6 +2776,7 @@ class TrainTab(QWidget):
         run_log = getattr(self, "_run_log", None)
         if run_log is not None:
             run_log.close("Run ended: " + ("success" if success else "stopped or failed"))
+        self.refresh_past_runs()
 
     @Slot(str)
     def _on_log_line(self, line: str):
@@ -2751,6 +2933,7 @@ class TrainTab(QWidget):
             factory = self._onetrainer_factory or self._default_onetrainer_session
             session = factory(self)
             params = to_onetrainer_params(rd)
+            params.continue_epoch = int(self._continue_epoch or 0)
         except Exception as e:
             QMessageBox.warning(self, "Cannot Start Training", str(e))
             return
@@ -2760,6 +2943,8 @@ class TrainTab(QWidget):
         session.failed.connect(self._on_ot_failed)
         session.canceled.connect(self._on_ot_canceled)
         self._session = session
+        from core import run_manifest
+        run_manifest.write_start(self._run_dir(), rd)
         self._on_training_started()
         for line in notes:
             self._on_log_line(line)

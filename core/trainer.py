@@ -231,6 +231,10 @@ class TrainingProcess(QObject):
         self._process = None
         self._total_steps = 3000
         self._current_step = 0
+        # Steps already behind a resumed run. sd-scripts resumes at an epoch boundary
+        # and counts its bar from 0 up to the run's whole max_train_steps, so the bar
+        # alone would end a resumed run well short of its total.
+        self._step_offset = 0
         # Run safety (core/engines/kohya/safety.py), armed per run by set_safety().
         self._safety = None
         self._watch = None
@@ -272,6 +276,11 @@ class TrainingProcess(QObject):
 
     def set_total_steps(self, total_steps: int):
         self._total_steps = max(1, total_steps)
+
+    def set_step_offset(self, steps: int):
+        """Steps already trained before the next start (a resume); cleared when the
+        run ends."""
+        self._step_offset = max(0, int(steps or 0))
 
     def build_command(self, config_path: str, sdscripts_path: str, model: str = "anima") -> tuple:
         """
@@ -434,6 +443,7 @@ class TrainingProcess(QObject):
             self.log_line.emit(hint)
         step = self._parse_progress(line)
         if step is not None:
+            step = min(step + self._step_offset, self._total_steps)
             self._current_step = step
             self.progress_updated.emit(step)
         if self._watch is not None and self._safety_found is None:
@@ -448,6 +458,7 @@ class TrainingProcess(QObject):
 
     def _on_finished(self, exit_code: int, exit_status):
         self._flush_partial()
+        self._step_offset = 0
         safety, self._safety = self._safety, None
         if safety is not None and not self._user_stopped:
             self._finish_with_safety(safety, exit_code)

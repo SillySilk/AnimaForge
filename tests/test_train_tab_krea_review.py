@@ -97,14 +97,17 @@ def test_the_model_cannot_change_while_a_run_is_live(tmp_path, monkeypatch):
 
 
 def test_the_run_ends_on_the_engine_it_started_with(tmp_path, monkeypatch):
-    from core import run_manifest
+    from core import run_manifest, sets
     t, s = _krea_tab(tmp_path, monkeypatch)
     writes = []
-    monkeypatch.setattr(run_manifest, "mark", lambda *a, **k: writes.append("mark"))
+    monkeypatch.setattr(run_manifest, "mark", lambda d, status: writes.append(status))
+    monkeypatch.setattr(sets, "clear_active_run", lambda *a, **k: writes.append("kohya marker"))
     t._start_training(confirm=False)
     t._model = "anima"            # however it changed, the finish must follow the run
     s.finish(str(tmp_path / "x.safetensors"))
-    assert writes == []
+    # Both engines record the outcome in run.json (Past runs reads it); only a
+    # Kohya run clears the crash-recovery marker it set at start.
+    assert writes == [run_manifest.DONE]
 
 
 def test_home_locks_model_and_style_while_training():
