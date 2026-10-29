@@ -198,6 +198,13 @@ class TrainingSession(QObject):
         if self._proc is not None:
             self._proc.cancel()
 
+    def set_paused(self, paused: bool) -> bool:
+        """Suspend or resume the live trainer process. Only the training stage
+        pauses; preflight and the final render are short and run to the end."""
+        if self._state != self.TRAINING or self._proc is None:
+            return False
+        return bool(self._proc.set_paused(paused))
+
     # ---- internal ----
 
     def _set_state(self, state: str):

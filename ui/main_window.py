@@ -515,7 +515,9 @@ class MainWindow(QMainWindow):
             lambda: self._train_tab._start_training(confirm=True))
         # Stop rides next to Start on the front; Train's engine owns the confirm dialog.
         self._home_tab.stop_train_requested.connect(self._train_tab._stop_training)
+        self._home_tab.pause_train_requested.connect(self._train_tab._toggle_pause)
         self._train_tab.training_active.connect(self._home_tab.set_training_active)
+        self._train_tab.training_paused.connect(self._home_tab.set_training_paused)
         # The Step Calculator lives on Home now; its subject combo drives the Style @anchor
         # field's visibility (only meaningful for Style runs).
         self._train_tab.subject_type_changed.connect(self._sync_home_anchor_visibility)

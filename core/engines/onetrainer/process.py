@@ -105,8 +105,16 @@ class TrainerProcess(QObject):
             return
         pid = int(self._proc.processId())
         if pid:
+            self.set_paused(False)   # a suspended tree can't be torn down cleanly
             subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
                            creationflags=_CREATE_NO_WINDOW, capture_output=True)
+
+    def set_paused(self, paused: bool) -> bool:
+        """Suspend or resume the whole train.py tree. Returns whether it took."""
+        if not self.is_running():
+            return False
+        from core.proc_pause import set_tree_suspended
+        return set_tree_suspended(int(self._proc.processId()), paused)
 
     def wait(self, msec: int) -> bool:
         """Test-only pump: block until the process exits, then drain the buffer."""

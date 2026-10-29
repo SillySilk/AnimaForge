@@ -60,6 +60,7 @@ class HomeTab(QWidget):
     run_caption_requested = Signal()  # pillar "Run Captioning" button
     start_train_requested = Signal()  # pillar "Start Training" button
     stop_train_requested = Signal()   # pillar "Stop" button (enabled while a run is live)
+    pause_train_requested = Signal()  # pillar "Pause"/"Resume" toggle (enabled while a run is live)
     presets_closed = Signal()         # an Options/Step Calculator modal closed → re-pull summary
     preset_pick_requested = Signal()  # PRESET button — MainWindow opens the picker (owns the data)
     model_changed = Signal(str)          # model preset id (Anima / Krea 2)
@@ -493,6 +494,15 @@ class HomeTab(QWidget):
         self._start_train_btn.setCursor(Qt.PointingHandCursor)
         self._start_train_btn.clicked.connect(self._on_start_clicked)
         start_stop.addWidget(self._start_train_btn, 1)
+        self._pause_train_btn = QPushButton("⏸  Pause")
+        self._pause_train_btn.setObjectName("af_btn_ghost")
+        self._pause_train_btn.setMinimumHeight(48)
+        self._pause_train_btn.setCursor(Qt.PointingHandCursor)
+        self._pause_train_btn.setEnabled(False)
+        self._pause_train_btn.setToolTip(
+            "Pause the run in place — it keeps its GPU memory and picks up on the same step")
+        self._pause_train_btn.clicked.connect(self.pause_train_requested.emit)
+        start_stop.addWidget(self._pause_train_btn)
         self._stop_train_btn = QPushButton("■  Stop")
         self._stop_train_btn.setObjectName("btn_stop")
         self._stop_train_btn.setMinimumHeight(48)
@@ -1074,6 +1084,9 @@ class HomeTab(QWidget):
         """Mirror the run state onto the front-page Start/Stop pair."""
         self._start_train_btn.setEnabled(not active)
         self._stop_train_btn.setEnabled(bool(active))
+        self._pause_train_btn.setEnabled(bool(active))
+        if not active:
+            self.set_training_paused(False)
         # A run's model and caption style are fixed once it has started.
         self._model_combo.setEnabled(not active)
         self._style_combo.setEnabled(not active)
@@ -1081,6 +1094,10 @@ class HomeTab(QWidget):
         self._free_memory_action.setEnabled(not active)
         self._compare_action.setEnabled(not active)
         self._cast_check.setEnabled(not active)
+
+    def set_training_paused(self, paused: bool):
+        """Flip the Pause button between Pause and Resume."""
+        self._pause_train_btn.setText("▶  Resume" if paused else "⏸  Pause")
 
     def set_advanced_count(self, n: int):
         """Show how many advanced settings this run changes (hidden when none)."""

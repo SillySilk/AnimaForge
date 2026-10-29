@@ -236,6 +236,7 @@ class TrainingProcess(QObject):
         self._watch = None
         self._safety_found = None
         self._user_stopped = False
+        self._paused = False
         self._since = None
         self._partial = ""
         # What run safety did to the last run ("" when nothing): read by the Train
@@ -332,6 +333,7 @@ class TrainingProcess(QObject):
         self._process.setProcessEnvironment(env)
 
         self._current_step = 0
+        self._paused = False
         self._arm_safety()
         self._process.start(program, args)
         self.training_started.emit()
@@ -343,10 +345,36 @@ class TrainingProcess(QObject):
         self._user_stopped = True
         self._stop_process()
 
+    def pause(self) -> bool:
+        """Suspend the training process tree in place. Returns whether it paused."""
+        if self._paused or not self.is_running():
+            return False
+        from core.proc_pause import set_tree_suspended
+        self._paused = set_tree_suspended(self._pid(), True)
+        return self._paused
+
+    def resume(self) -> bool:
+        """Continue a paused run from the step it stopped on."""
+        if not self._paused:
+            return False
+        from core.proc_pause import set_tree_suspended
+        set_tree_suspended(self._pid(), False)
+        self._paused = False
+        return True
+
+    def is_paused(self) -> bool:
+        return self._paused
+
+    def _pid(self) -> int:
+        proc = self._process
+        return int(proc.processId() or 0) if proc is not None else 0
+
     def _stop_process(self):
         proc = self._process
         if proc is not None:
             if proc.state() != QProcess.NotRunning:
+                # A suspended tree can't wind down on terminate(): wake it first.
+                self.resume()
                 # accelerate launches the trainer as a child: end the whole tree, or
                 # the child keeps writing while run safety moves its files.
                 pid = int(proc.processId() or 0) if hasattr(proc, "processId") else 0

@@ -210,6 +210,7 @@ class TrainTab(QWidget):
     run_progress = Signal(object)            # RunProgress payload mirrored onto Home
     optimizer_changed = Signal(str)          # preset label for the Home OPTIMIZER tile
     training_active = Signal(bool)           # run started/ended -> Home Start/Stop state
+    training_paused = Signal(bool)           # run paused/resumed -> Home Pause button
     model_changed = Signal(str)              # model preset id (Home mirrors it)
     caption_style_changed = Signal(str)      # caption style (Home + Dataset mirror it)
     config_overrides_changed = Signal(int)   # number of advanced-setting changes
@@ -260,6 +261,7 @@ class TrainTab(QWidget):
         # Per model — a Kohya path means nothing to OneTrainer — so a model change clears it.
         self._config_overrides = {}
         self._session = None            # live OneTrainer session for a Krea 2 run
+        self._paused = False            # the live run is suspended in place
         self._ot_output = ""            # the file that session reported finishing
         self._onetrainer_factory = None  # tests inject a fake session here
         # The engine the current/last run started on; its end follows this, not
@@ -2177,6 +2179,29 @@ class TrainTab(QWidget):
             self._on_log_line("[Lora Forge] Training stopped by user.")
             self._on_training_finished(False)
 
+    def _toggle_pause(self):
+        """Pause the live run in place (VRAM stays held), or resume it."""
+        if not self.is_training():
+            return
+        want = not self._paused
+        if self._session is not None:
+            ok = self._session.set_paused(want)
+        else:
+            ok = self._trainer.pause() if want else self._trainer.resume()
+        if not ok:
+            if want:
+                self.status_message.emit("Couldn't pause — the run isn't in its training stage.")
+            return
+        self._set_paused(want)
+        self._on_log_line("[Lora Forge] Training paused." if want
+                          else "[Lora Forge] Training resumed.")
+        self.status_message.emit("Training paused — GPU memory stays reserved."
+                                 if want else "Training resumed.")
+
+    def _set_paused(self, paused: bool):
+        self._paused = bool(paused)
+        self.training_paused.emit(self._paused)
+
     # ------------------------------------------------------------------
     # Live sample preview
     # ------------------------------------------------------------------
@@ -2484,6 +2509,7 @@ class TrainTab(QWidget):
     def _on_training_started(self):
         self._start_btn.setEnabled(False)
         self._stop_btn.setEnabled(True)
+        self._set_paused(False)
         self.training_active.emit(True)
         self._rp(kind="phase", label="Preparing…")
         self._stepping = False
@@ -2501,6 +2527,7 @@ class TrainTab(QWidget):
     def _on_training_finished(self, success: bool):
         self._start_btn.setEnabled(True)
         self._stop_btn.setEnabled(False)
+        self._set_paused(False)
         self.training_active.emit(False)
         self._preview_timer.stop()
         self._poll_sample_dir()  # catch the final sample set
