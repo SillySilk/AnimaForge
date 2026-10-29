@@ -259,6 +259,7 @@ class TrainTab(QWidget):
         self._onetrainer_root = ""
         self._continue_epoch = 0          # Train further: the OneTrainer backup's epoch
         self._added_folders = []          # the set's added sub-folders (core/added_sets.py)
+        self._boosted = []                # characters trained with extra weight
         self._add_runner = None           # captions added pictures before training further
         # Advanced settings: {dotted.path: value} over the engine's generated config.
         # Per model — a Kohya path means nothing to OneTrainer — so a model change clears it.
@@ -292,6 +293,7 @@ class TrainTab(QWidget):
     def set_dataset(self, folder_path: str, image_count: int):
         if folder_path != self._dataset_path:
             self._added_folders = []      # another set's additions are not this one's
+            self._boosted = []
         self._dataset_path = folder_path
         self._image_count = image_count
         self._dataset_path_edit.setText(folder_path)
@@ -1474,6 +1476,7 @@ class TrainTab(QWidget):
             config_overrides=dict(self._config_overrides),
             debug_profiles=bool(AppSettings().get("debug_profiles")),
             added_folders=list(self._added_folders),
+            boosted=list(self._boosted),
         )
         return rd, ""
 
@@ -1505,6 +1508,7 @@ class TrainTab(QWidget):
         # Internal dataset/trigger state used by config generation
         self._dataset_path = rd.dataset_folder
         self._added_folders = list(getattr(rd, "added_folders", None) or [])
+        self._boosted = list(getattr(rd, "boosted", None) or [])
         self._image_count = rd.image_count
         self._trigger_word = rd.trigger_word
         self.set_quality_prefix(getattr(rd, "quality_prefix", "") or "")
@@ -1676,9 +1680,15 @@ class TrainTab(QWidget):
     def _past_run_row(self, run, busy: bool) -> QWidget:
         from core import run_manifest
         row = QWidget()
-        h = QHBoxLayout(row)
-        h.setContentsMargins(0, 0, 0, 0)
+        rv = QVBoxLayout(row)
+        rv.setContentsMargins(0, 0, 0, 4)
+        rv.setSpacing(4)
+        top = QHBoxLayout()
+        top.setSpacing(6)
+        h = QHBoxLayout()           # the three actions, under the name
         h.setSpacing(6)
+        rv.addLayout(top)
+        rv.addLayout(h)
         detail = f"{models.get(run.rd.model).name} · {run.steps_done:,} steps trained"
         if run.problem:
             detail += f" · {run.problem}"
@@ -1687,7 +1697,7 @@ class TrainTab(QWidget):
         label = QLabel(f"<b>{run.name}</b><br><span style='color:#8a8a93;'>{detail}</span>")
         label.setWordWrap(True)
         label.setToolTip(run.run_dir)
-        h.addWidget(label, 1)
+        top.addWidget(label, 1)
         further = QPushButton("Train further")
         further.setEnabled(run.can_continue and not busy)
         further.setToolTip(
@@ -1695,21 +1705,33 @@ class TrainTab(QWidget):
             f"Continue from {Path(run.resume_from).name} and train more steps.")
         further.clicked.connect(lambda _=False, r=run: self._train_further(r))
         h.addWidget(further)
-        add = QPushButton("Add character / element")
+        add = QPushButton("Add character")
         add.setEnabled(run.can_continue and not busy)
         add.setToolTip(
             f"Can't add to it: {run.problem}." if run.problem else
-            "Pick new pictures, name them, and train them in further — shown "
+            "Add a character or element: pick new pictures, name them, and train "
+            "them in further — shown "
             f"{self._emphasis():g}x as often as the set's own pictures.")
         add.clicked.connect(lambda _=False, r=run: self._add_to_run(r))
         h.addWidget(add)
+        boost = QPushButton("Boost")
+        boost.setEnabled(run.can_continue and not busy)
+        boosted = list(getattr(run.rd, "boosted", None) or [])
+        boost.setToolTip(
+            f"Can't boost: {run.problem}." if run.problem else
+            "Pick characters already in the set to show "
+            f"{self._emphasis():g}x as often, and train further."
+            + (f" Boosted now: {', '.join(boosted)}." if boosted else ""))
+        boost.clicked.connect(lambda _=False, r=run: self._boost_run(r))
+        h.addWidget(boost)
         delete = QPushButton("✕")
         delete.setObjectName("af_icon_btn")
         delete.setFixedSize(28, 28)
         delete.setEnabled(not busy)
         delete.setToolTip("Delete this run's training files (keeps the finished LoRA)")
         delete.clicked.connect(lambda _=False, r=run: self._delete_past_run(r))
-        h.addWidget(delete)
+        top.addWidget(delete, 0, Qt.AlignTop)
+        h.addStretch()
         return row
 
     def _further_default(self, run) -> int:
@@ -1777,16 +1799,19 @@ class TrainTab(QWidget):
 
     def _weighted_image_count(self) -> int:
         from core import added_sets
-        if not self._added_folders:
+        if not (self._added_folders or self._boosted):
             return self._image_count
         return added_sets.weighted_count(self._image_count, self._dataset_path,
-                                         self._added_folders, self._emphasis())
+                                         self._added_folders, self._emphasis(),
+                                         self._boosted)
 
     def _added_subsets(self, base_repeats: int) -> list:
         from core import added_sets
-        n = added_sets.kohya_repeats(base_repeats, self._emphasis())
-        return [(path, n) for path, _count in
-                added_sets.folders(self._dataset_path, self._added_folders)]
+        if not (self._added_folders or self._boosted):
+            return []
+        return [(path, added_sets.kohya_repeats(base_repeats, w)) for path, _n, w in
+                added_sets.training_folders(self._dataset_path, self._added_folders,
+                                            self._boosted, self._emphasis())]
 
     def _add_to_run(self, run):
         """Copy new pictures into a named sub-folder of the run's dataset, caption the
@@ -1837,6 +1862,56 @@ class TrainTab(QWidget):
             self._caption_added(run, folder, name.strip(), more)
         else:
             self._train_further(run, more)
+
+    def _boost_run(self, run):
+        """Choose which of the set's characters train at the emphasis weight, then
+        train further."""
+        from PySide6.QtWidgets import QDialog, QDialogButtonBox, QInputDialog, QListWidget
+        from PySide6.QtWidgets import QListWidgetItem
+        from core import added_sets
+        if self.is_training():
+            self.status_message.emit("Finish or stop the current run first.")
+            return
+        if not run.can_continue:
+            QMessageBox.warning(self, "Boost Characters",
+                                f"Can't boost '{run.name}': {run.problem}.")
+            return
+        found = added_sets.subjects(run.rd.dataset_folder)
+        if not found:
+            QMessageBox.warning(self, "Boost Characters", "No character names were found "
+                                "in this set's file names (NAME_SERIAL_CATEGORY).")
+            return
+        current = {b.lower() for b in (getattr(run.rd, "boosted", None) or [])}
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Boost Characters")
+        v = QVBoxLayout(dlg)
+        v.addWidget(QLabel(
+            f"Checked characters are shown {self._emphasis():g}x as often in the next "
+            "Train further. Group shots count for everyone in them."))
+        picks = QListWidget()
+        for subject, count in found:
+            item = QListWidgetItem(f"{subject}  —  {count} picture(s)")
+            item.setData(Qt.UserRole, subject)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Checked if subject.lower() in current else Qt.Unchecked)
+            picks.addItem(item)
+        v.addWidget(picks)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        v.addWidget(buttons)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        chosen = [picks.item(i).data(Qt.UserRole) for i in range(picks.count())
+                  if picks.item(i).checkState() == Qt.Checked]
+        more, ok = QInputDialog.getInt(
+            self, "Boost Characters",
+            f"'{run.name}' has {run.steps_done:,} steps behind it.\nHow many more steps?",
+            self._further_default(run), 50, 40000, 50)
+        if not ok:
+            return
+        run.rd.boosted = chosen
+        self._train_further(run, more)
 
     def _caption_added(self, run, folder: str, trigger: str, more: int):
         from core import caption_policy
@@ -2243,6 +2318,15 @@ class TrainTab(QWidget):
             return
 
         if confirm and not self._confirm_preflight():
+            return
+
+        # Boosted characters train from copies rebuilt from the set as it is now.
+        from core import added_sets
+        try:
+            added_sets.prepare_boosts(self._dataset_path, self._boosted)
+        except OSError as e:
+            QMessageBox.warning(self, "Cannot Start Training",
+                                f"Could not prepare the boosted characters: {e}")
             return
 
         # Always (re)generate the config at launch so the current UI state is

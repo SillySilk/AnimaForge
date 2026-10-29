@@ -1329,15 +1329,15 @@ class SetupTab(QWidget):
         vr.addStretch()
         v.addLayout(vr)
         er = QHBoxLayout()
-        er.addWidget(QLabel("New character emphasis:"))
+        er.addWidget(QLabel("Added / boosted character emphasis:"))
         self._added_emphasis_spin = QDoubleSpinBox()
         self._added_emphasis_spin.setRange(1.0, 10.0)
         self._added_emphasis_spin.setSingleStep(0.5)
         self._added_emphasis_spin.setDecimals(1)
         self._added_emphasis_spin.setSuffix("x")
         self._added_emphasis_spin.setToolTip(
-            "Pictures added to a trained set (Train tab → Past runs → Add character / "
-            "element) are shown this many times as often as the set's own pictures.")
+            "Added and boosted characters (Train tab → Past runs → Add character / Boost) "
+            "are shown this many times as often as the set's other pictures.")
         er.addWidget(self._added_emphasis_spin)
         er.addStretch()
         v.addLayout(er)
