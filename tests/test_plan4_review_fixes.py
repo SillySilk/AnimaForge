@@ -171,8 +171,11 @@ def test_stopping_never_drops_a_process_started_meanwhile():
 
 
 # I2: a safety ship reads as what it was, not as a plain success.
-def test_the_train_tab_shows_the_safety_note_instead_of_plain_success():
+def test_the_train_tab_shows_the_safety_note_instead_of_plain_success(monkeypatch):
+    from core import sets
     from ui.train_tab import TrainTab
+    # A Kohya success clears the crash-recovery marker; never the real one.
+    monkeypatch.setattr(sets, "clear_active_run", lambda *a, **k: None)
     tab = TrainTab()
     msgs = []
     tab.status_message.connect(msgs.append)
