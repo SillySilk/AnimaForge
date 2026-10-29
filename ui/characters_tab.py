@@ -14,7 +14,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtGui import QIcon, QImage, QPixmap, QPainter, QPainterPath, QPen, QColor
 from PySide6.QtWidgets import (
-    QFrame, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QListView, QListWidget,
+    QCheckBox, QFrame, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QListView, QListWidget,
     QListWidgetItem, QMessageBox, QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
@@ -69,10 +69,13 @@ class CharactersTab(QWidget):
     characters_changed = Signal()
     status_message = Signal(str)
     names_validated = Signal()        # Fix-names finished → Dataset tab re-combines the .txt
+    dataset_renamed = Signal(str)     # Consolidate renamed files → reload this folder
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._folder_path = ""
+        self._picked = {}                 # bundle name -> its Consolidate checkbox
+        self._busy_check = lambda: None
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -111,6 +114,10 @@ class CharactersTab(QWidget):
             self._set_anchor_text(characters_mod.load(self._folder_path).style_anchor)
         self._render()
 
+    def set_busy_check(self, fn):
+        """fn() -> a reason string while a run or captioning is using the set."""
+        self._busy_check = fn
+
     def set_style_anchor(self, text: str):
         """Set the @-style anchor from elsewhere (e.g. the Home cockpit); persists it."""
         text = (text or "").strip()
@@ -138,9 +145,21 @@ class CharactersTab(QWidget):
         root.setContentsMargins(16, 16, 16, 12)
         root.setSpacing(10)
 
+        head = QHBoxLayout()
         title = QLabel("The Roster")
         title.setObjectName("af_screen_title")
-        root.addWidget(title)
+        head.addWidget(title)
+        head.addStretch()
+        # One of the few controls off Home (allowed exception): a data repair, not a
+        # run control -- merge two names for one character.
+        self._consolidate_btn = QPushButton("Consolidate")
+        self._consolidate_btn.setToolTip(
+            "Merge the checked characters into one name, in file names and in every "
+            "caption.")
+        self._consolidate_btn.setEnabled(False)
+        self._consolidate_btn.clicked.connect(self._consolidate)
+        head.addWidget(self._consolidate_btn)
+        root.addLayout(head)
 
         # The cast bundles fill the screen (read-only, derived from filenames).
         self._scroll = QScrollArea()
@@ -215,6 +234,13 @@ class CharactersTab(QWidget):
 
         head = QHBoxLayout()
         head.setSpacing(10)
+        if category == "Character" and not warn:
+            pick = QCheckBox()
+            pick.setToolTip("Check two or more names for the same character, then "
+                            "Consolidate.")
+            pick.toggled.connect(self._update_consolidate_btn)
+            self._picked[name] = pick
+            head.addWidget(pick, 0, Qt.AlignTop)
         if not warn and image_paths:
             avatar = QLabel()
             avatar.setPixmap(_circular_avatar(image_paths[0], 56))
@@ -260,6 +286,8 @@ class CharactersTab(QWidget):
 
     def _render(self):
         self._clear_bundles()
+        self._picked = {}
+        self._update_consolidate_btn()
         if not self._folder_path:
             self._bundles_layout.addWidget(
                 QLabel("Load a dataset folder on the Dataset tab first."))
@@ -285,6 +313,74 @@ class CharactersTab(QWidget):
                 warn=True, show_fix=True))
         if not (b["needs_naming"] or b["solo"] or b["combined"]):
             self._bundles_layout.addWidget(QLabel("No images in this folder yet."))
+
+    # ------------------------------------------------------------------
+    # Consolidate: merge several names for one character
+    # ------------------------------------------------------------------
+    def _checked_names(self) -> list:
+        return [n for n, box in self._picked.items() if box.isChecked()]
+
+    def _update_consolidate_btn(self, *_):
+        self._consolidate_btn.setEnabled(len(self._checked_names()) >= 1)
+
+    def _consolidate(self):
+        from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QLineEdit,
+                                       QListWidget, QListWidgetItem)
+        from core import added_sets, consolidate
+        if not self._folder_path:
+            return
+        reason = self._busy_check()
+        if reason:
+            QMessageBox.warning(self, "Consolidate", f"Not while {reason} — it reads "
+                                "these files. Try again when it has finished.")
+            return
+        checked = {n.lower() for n in self._checked_names()}
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Consolidate Characters")
+        v = QVBoxLayout(dlg)
+        v.addWidget(QLabel("These names become one. Also check any name that only "
+                           "appears in group shots (e.g. \"Burns\" in \"Marge-Burns\")."))
+        picks = QListWidget()
+        for subject, count in added_sets.subjects(self._folder_path):
+            item = QListWidgetItem(f"{subject}  —  {count} picture(s)")
+            item.setData(Qt.UserRole, subject)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Checked if subject.lower() in checked else Qt.Unchecked)
+            picks.addItem(item)
+        v.addWidget(picks)
+        v.addWidget(QLabel("New name for all of them:"))
+        name_edit = QLineEdit(max(self._checked_names(), key=len, default=""))
+        v.addWidget(name_edit)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        v.addWidget(buttons)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        old = [picks.item(i).data(Qt.UserRole) for i in range(picks.count())
+               if picks.item(i).checkState() == Qt.Checked]
+        new_name = name_edit.text().strip()
+        if not old or not new_name:
+            return
+        if QMessageBox.question(
+                self, "Consolidate Characters",
+                f"Rename {', '.join(old)} → \"{new_name}\" in file names and in every "
+                "caption of this set?\n\nThis can't be undone.",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+            return
+        try:
+            done = consolidate.consolidate(self._folder_path, old, new_name)
+        except (OSError, ValueError) as e:
+            QMessageBox.warning(self, "Consolidate Characters", str(e))
+            return
+        folder = self._folder_path
+        self.set_dataset(folder)
+        self._render()
+        self.status_message.emit(
+            f"Consolidated into \"{new_name}\": {done['renamed']} file(s) renamed, "
+            f"{done['rewritten']} caption file(s) updated.")
+        self.dataset_renamed.emit(folder)
+        self.characters_changed.emit()
 
     # ------------------------------------------------------------------
     # Fix names → re-open the validator

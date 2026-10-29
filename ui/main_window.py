@@ -385,6 +385,8 @@ class MainWindow(QMainWindow):
 
         for tab in (self._dataset_tab, self._train_tab, self._batch_tab):
             tab.set_gpu_busy_check(_busy_except(tab))
+        # Consolidate renames the set's files: refused while anything is reading them.
+        self._characters_tab.set_busy_check(_busy_except(self._characters_tab))
 
         # ---- Status bar ----
         self._status_bar = QStatusBar()
@@ -464,6 +466,7 @@ class MainWindow(QMainWindow):
         self._characters_tab.status_message.connect(self._status_bar.showMessage)
         # Fix-names on the Characters tab re-combines the .txt so names land in the prompt
         self._characters_tab.names_validated.connect(self._dataset_tab.rebuild_captions_after_naming)
+        self._characters_tab.dataset_renamed.connect(self._on_dataset_renamed)
         # "Name your characters?" prompt after tagging jumps to the Characters tab
         self._dataset_tab.open_characters_requested.connect(lambda: self._switch_tab(3))
 
@@ -1481,6 +1484,17 @@ class MainWindow(QMainWindow):
                 self._startup_update_applied.emit(False, str(e))
 
         threading.Thread(target=work, daemon=True).start()
+
+    def _on_dataset_renamed(self, folder: str):
+        """Consolidate renamed files: reload the folder so every tab shows the new
+        names, without re-applying a saved set over the current settings."""
+        if getattr(self, "_restoring_set", False):
+            return
+        self._restoring_set = True
+        try:
+            self._dataset_tab.load_folder_path(folder)
+        finally:
+            self._restoring_set = False
 
     def _on_load_set_requested(self, dataset_folder: str, trigger: str, quality_prefix: str):
         # An auto-restore runs while that same folder is already loading: don't load it
